@@ -1,6 +1,6 @@
 name: POKE64
 options:
-  bundleIdPrefix: it.biosfera
+  bundleIdPrefix: it.alexain
   deploymentTarget:
     iOS: "17.0"
 settings:
@@ -22,7 +22,7 @@ targets:
           - App/Info.plist
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: it.biosfera.poke64
+        PRODUCT_BUNDLE_IDENTIFIER: it.alexain.poke64
         PRODUCT_NAME: POKE64
         INFOPLIST_FILE: POKE64/App/Info.plist
         SWIFT_OBJC_BRIDGING_HEADER: POKE64/App/POKE64-Bridging-Header.h

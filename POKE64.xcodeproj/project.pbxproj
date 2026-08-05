@@ -269,7 +269,7 @@
 					"$(inherited)",
 					"-ldl",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = it.biosfera.poke64;
+				PRODUCT_BUNDLE_IDENTIFIER = it.alexain.poke64;
 				PRODUCT_NAME = POKE64;
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
@@ -293,7 +293,7 @@
 					"$(inherited)",
 					"-ldl",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = it.biosfera.poke64;
+				PRODUCT_BUNDLE_IDENTIFIER = it.alexain.poke64;
 				PRODUCT_NAME = POKE64;
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
