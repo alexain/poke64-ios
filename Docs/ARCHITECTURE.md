@@ -2,13 +2,28 @@
 
 ## Objective
 
-POKE64 is a C64-only iOS frontend. It does not embed RetroArch. It dynamically loads a locally built `vice_x64sc_libretro` core and implements the required libretro environment, video, audio, input, and lifecycle callbacks.
+POKE64 is a C64-only native iOS emulator application. It does not embed RetroArch. It dynamically loads a locally built `vice_x64sc_libretro` core and implements the required libretro environment, video, audio, input, and lifecycle callbacks.
 
 ## SwiftUI application layer
 
-`ContentView` owns the main layout, toolbar, file importer, Settings presentation, C64 keyboard, and optional touch controls. `EmulatorModel` exposes session state, blocks startup until the required firmware set is valid, and coordinates reset or cartridge ejection actions.
+`ContentView` owns the main layout, toolbar, media importer, Library and Settings presentation, C64 keyboard, and optional touch controls. `EmulatorModel` exposes session state, blocks emulation startup until the required firmware set is valid, and coordinates media loading, reset and cartridge ejection actions.
 
 `FirmwareStore` copies user-selected ROM images into Application Support, validates exact sizes, calculates SHA-256 values for diagnostics, and generates `system/vice/vicerc` with absolute sandbox paths.
+
+## Media library
+
+`LibraryStore` owns the persistent media catalog and stores imported files under Application Support in `POKE64/Library/Media`. Metadata is encoded atomically as JSON and includes the title, original filename, format, size, import date, favorite state and last-opened date.
+
+```text
+Document picker
+  → validate D64 / PRG / CRT / TAP / T64
+  → copy to the application library using a stable UUID filename
+  → update library.json atomically
+  → select later from LibraryView
+  → resolve the stored URL and load it through EmulatorModel
+```
+
+`LibraryView` provides All Media, Favorites and Recent filters, search, title editing and deletion. A running item is tracked by UUID and cannot be deleted until it is ejected or replaced.
 
 ## External firmware flow
 

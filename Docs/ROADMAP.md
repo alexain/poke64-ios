@@ -28,12 +28,12 @@ Complete the existing settings sections with persistent options and live applica
 
 ## 3. Library
 
-Create a persistent media library for D64, D71, D81, G64, TAP, T64, PRG, CRT and related supported formats.
+Expand the persistent D64, PRG, CRT, TAP and T64 library:
 
-- Import media once and reopen it from Drive, Tape or Cartridge views.
-- Store title, format, size, import date, favorites and recent usage.
-- Support deletion and file replacement from inside the app.
+- Add D71, D81, G64 and other formats after their drive requirements are handled reliably.
+- Add file replacement, duplicate detection and import-conflict handling.
 - Add screenshots, notes and optional cover artwork.
+- Add an optional cover/grid view while retaining the detailed list.
 - Display disk directories, free blocks and contained files.
 - Preview BASIC listings where practical.
 - Associate hardware profiles, joyports, firmware, save states and multidisk sets with library entries.
@@ -50,7 +50,7 @@ Create a persistent media library for D64, D71, D81, G64, TAP, T64, PRG, CRT and
 
 ## 5. Media and expansion devices
 
-- Add dedicated Library, Drives, Tape and Cartridge/REU controls.
+- Add a unified Devices control for Drive, Tape, Cartridge/REU and Printer functions without expanding the main toolbar.
 - Support drive units 8–11 and selectable drive models.
 - Add disk control, mount/eject operations and multidisk sets.
 - Add side-mounted drive activity LEDs beside the 4:3 display.
@@ -120,9 +120,10 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 ## Development order
 
 ```text
-controller and mouse validation
-→ Library MVP
+Commodore mouse validation
 → bottom C64 keyboard
+→ library duplicate detection, metadata and media inspection
+→ unified Devices control
 → drive, tape, cartridge and REU management
 → complete settings panels
 → CRT graphics and advanced audio

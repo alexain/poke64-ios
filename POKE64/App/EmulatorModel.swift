@@ -14,6 +14,12 @@ struct PhysicalControllerInfo: Identifiable, Equatable {
     let name: String
 }
 
+struct TemporaryMediaInfo: Equatable {
+    let title: String
+    let originalFilename: String
+    let mediaType: LibraryMediaType
+}
+
 @MainActor
 final class EmulatorModel: ObservableObject {
     @Published private(set) var status = "Core not started"
@@ -25,8 +31,12 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var joyport1Assignment: JoyportAssignment = .none
     @Published private(set) var joyport2Assignment: JoyportAssignment = .none
     @Published private(set) var physicalControllers: [PhysicalControllerInfo] = []
+    @Published private(set) var loadedLibraryItemID: UUID?
+    @Published private(set) var loadedTemporaryMedia: TemporaryMediaInfo?
+    @Published private(set) var loadedTemporaryMediaLibraryItemID: UUID?
 
     let session = LibretroSession()
+    let library = LibraryStore()
 
     private var didAttemptAutomaticStart = false
     private var virtualJoypadMask: UInt32 = 0
@@ -36,8 +46,10 @@ final class EmulatorModel: ObservableObject {
     private var configuredMouseIDs: Set<ObjectIdentifier> = []
     private var notificationTokens: [NSObjectProtocol] = []
     private var configuredMousePort = 0
+    private var loadedTemporaryMediaURL: URL?
 
     init() {
+        Self.cleanTemporaryMediaDirectory()
         observeInputDevices()
         refreshPhysicalControllers()
         refreshPhysicalMice()
@@ -88,6 +100,10 @@ final class EmulatorModel: ObservableObject {
 
         if session.startWithoutContent() {
             loadedContent = nil
+            loadedLibraryItemID = nil
+            loadedTemporaryMediaURL = nil
+            loadedTemporaryMedia = nil
+            loadedTemporaryMediaLibraryItemID = nil
             isRunning = true
             syncInputConfiguration()
             status = "C64 started"
@@ -99,36 +115,118 @@ final class EmulatorModel: ObservableObject {
         }
     }
 
-    func importAndLoad(url: URL) {
+    func openTemporaryMedia(url: URL) {
+        do {
+            presentedError = nil
+            refreshFirmwareState()
+            guard firmwareReady else {
+                throw EmulatorModelError.firmwareRequired
+            }
+
+            let copiedMedia = try copyToTemporaryMediaDirectory(sourceURL: url)
+            guard session.loadContent(at: copiedMedia.url) else {
+                try? FileManager.default.removeItem(at: copiedMedia.url)
+                isRunning = false
+                loadedContent = nil
+                loadedLibraryItemID = nil
+                loadedTemporaryMediaURL = nil
+                loadedTemporaryMedia = nil
+                loadedTemporaryMediaLibraryItemID = nil
+                Self.cleanTemporaryMediaDirectory()
+                let message = session.lastErrorMessage ?? "Unable to load content"
+                throw EmulatorModelError.coreFailure(message)
+            }
+
+            let title = Self.displayTitle(for: url)
+            loadedContent = url.lastPathComponent
+            loadedLibraryItemID = nil
+            loadedTemporaryMediaURL = copiedMedia.url
+            loadedTemporaryMedia = TemporaryMediaInfo(
+                title: title,
+                originalFilename: url.lastPathComponent,
+                mediaType: copiedMedia.mediaType
+            )
+            loadedTemporaryMediaLibraryItemID = nil
+            isRunning = true
+            syncInputConfiguration()
+            Self.cleanTemporaryMediaDirectory(preserving: copiedMedia.url)
+            status = "Running temporarily: \(title)"
+        } catch {
+            present(error)
+        }
+    }
+
+    @discardableResult
+    func addCurrentTemporaryMediaToLibrary() throws -> LibraryItem {
+        guard let sourceURL = loadedTemporaryMediaURL,
+              let temporaryMedia = loadedTemporaryMedia else {
+            throw EmulatorModelError.noTemporaryMedia
+        }
+
+        if let itemID = loadedTemporaryMediaLibraryItemID,
+           let existingItem = library.item(withID: itemID) {
+            return existingItem
+        }
+
+        let item = try library.importMedia(
+            from: sourceURL,
+            originalFilename: temporaryMedia.originalFilename
+        )
+        loadedTemporaryMediaLibraryItemID = item.id
+        status = "Added to Library: \(item.title)"
+        return item
+    }
+
+    @discardableResult
+    func importIntoLibrary(url: URL) throws -> LibraryItem {
+        let item = try library.importMedia(from: url)
+        status = "Imported: \(item.title)"
+        return item
+    }
+
+    func loadLibraryItem(_ item: LibraryItem) throws {
         presentedError = nil
         refreshFirmwareState()
         guard firmwareReady else {
-            status = "Configure firmware before loading content"
-            return
-        }
-
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer {
-            if accessing { url.stopAccessingSecurityScopedResource() }
+            throw EmulatorModelError.firmwareRequired
         }
 
         do {
-            let imported = try Self.copyIntoSandbox(url: url)
-            if session.loadContent(at: imported) {
-                loadedContent = imported.lastPathComponent
-                isRunning = true
-                syncInputConfiguration()
-                status = "Running: \(imported.lastPathComponent)"
-            } else {
+            let mediaURL = try library.mediaURL(for: item)
+            guard session.loadContent(at: mediaURL) else {
                 isRunning = false
+                loadedContent = nil
+                loadedLibraryItemID = nil
+                loadedTemporaryMediaURL = nil
+                loadedTemporaryMedia = nil
+                loadedTemporaryMediaLibraryItemID = nil
+                Self.cleanTemporaryMediaDirectory()
                 let message = session.lastErrorMessage ?? "Unable to load content"
                 status = Self.errorSummary(message)
-                presentedError = message
+                throw EmulatorModelError.coreFailure(message)
             }
+
+            loadedContent = item.originalFilename
+            loadedLibraryItemID = item.id
+            loadedTemporaryMediaURL = nil
+            loadedTemporaryMedia = nil
+            loadedTemporaryMediaLibraryItemID = nil
+            isRunning = true
+            syncInputConfiguration()
+            Self.cleanTemporaryMediaDirectory()
+            do {
+                try library.markOpened(item)
+            } catch {
+                print("Unable to update library recents: \(error)")
+            }
+            status = "Running: \(item.title)"
         } catch {
-            let message = error.localizedDescription
-            status = Self.errorSummary(message)
-            presentedError = message
+            if !isRunning {
+                loadedContent = nil
+                loadedLibraryItemID = nil
+            }
+            status = Self.errorSummary(error.localizedDescription)
+            throw error
         }
     }
 
@@ -144,6 +242,11 @@ final class EmulatorModel: ObservableObject {
             session.stop()
             isRunning = false
             loadedContent = nil
+            loadedLibraryItemID = nil
+            loadedTemporaryMediaURL = nil
+            loadedTemporaryMedia = nil
+            loadedTemporaryMediaLibraryItemID = nil
+            Self.cleanTemporaryMediaDirectory()
         }
 
         if firmwareReady {
@@ -157,6 +260,12 @@ final class EmulatorModel: ObservableObject {
     func stop() {
         session.stop()
         isRunning = false
+        loadedContent = nil
+        loadedLibraryItemID = nil
+        loadedTemporaryMediaURL = nil
+        loadedTemporaryMedia = nil
+        loadedTemporaryMediaLibraryItemID = nil
+        Self.cleanTemporaryMediaDirectory()
         status = firmwareReady ? "Core stopped" : "Firmware required"
     }
 
@@ -166,10 +275,25 @@ final class EmulatorModel: ObservableObject {
         status = "Soft reset requested"
     }
 
-    func hardReset() {
+    func hardReset() async {
         guard isRunning else { return }
-        session.hardReset()
-        status = "Hard reset requested"
+
+        guard loadedTemporaryMediaURL != nil else {
+            session.hardReset()
+            status = "Hard reset requested"
+            return
+        }
+
+        session.stop()
+        isRunning = false
+        loadedContent = nil
+        loadedLibraryItemID = nil
+        loadedTemporaryMediaURL = nil
+        loadedTemporaryMedia = nil
+        loadedTemporaryMediaLibraryItemID = nil
+        status = "Hard resetting…"
+        Self.cleanTemporaryMediaDirectory()
+        await startEmpty()
     }
 
     var hasLoadedCartridge: Bool {
@@ -184,6 +308,11 @@ final class EmulatorModel: ObservableObject {
         session.stop()
         isRunning = false
         loadedContent = nil
+        loadedLibraryItemID = nil
+        loadedTemporaryMediaURL = nil
+        loadedTemporaryMedia = nil
+        loadedTemporaryMediaLibraryItemID = nil
+        Self.cleanTemporaryMediaDirectory()
         status = "Ejecting cartridge…"
         await startEmpty()
     }
@@ -206,6 +335,18 @@ final class EmulatorModel: ObservableObject {
 
     func joyportAssignmentTitle(for port: Int) -> String {
         assignmentTitle(joyportAssignment(for: port))
+    }
+
+    func joyportCompactAssignmentTitle(for port: Int) -> String {
+        compactAssignmentTitle(joyportAssignment(for: port))
+    }
+
+    func swapJoyportAssignments() {
+        let previousPort1 = joyport1Assignment
+        joyport1Assignment = joyport2Assignment
+        joyport2Assignment = previousPort1
+        syncInputConfiguration()
+        status = "Joystick ports swapped"
     }
 
     func controllerAssignedPort(_ controllerID: UUID) -> Int? {
@@ -308,6 +449,20 @@ final class EmulatorModel: ObservableObject {
         case .physicalController(let controllerID):
             return physicalControllers.first(where: { $0.id == controllerID })?.name
                 ?? "Disconnected Controller"
+        }
+    }
+
+    private func compactAssignmentTitle(_ assignment: JoyportAssignment) -> String {
+        switch assignment {
+        case .none:
+            return "None"
+        case .virtualJoystick:
+            return "Virtual"
+        case .commodoreMouse:
+            return "Mouse"
+        case .physicalController(let controllerID):
+            return physicalControllers.first(where: { $0.id == controllerID })?.name
+                ?? "Disconnected"
         }
     }
 
@@ -515,6 +670,78 @@ final class EmulatorModel: ObservableObject {
         }
     }
 
+
+    private func copyToTemporaryMediaDirectory(sourceURL: URL) throws -> (url: URL, mediaType: LibraryMediaType) {
+        let accessing = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if accessing {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let values = try sourceURL.resourceValues(forKeys: [.isRegularFileKey])
+        guard values.isRegularFile == true else {
+            throw LibraryStoreError.sourceIsNotAFile
+        }
+
+        let fileExtension = sourceURL.pathExtension.lowercased()
+        guard let mediaType = LibraryMediaType(fileExtension: fileExtension) else {
+            throw LibraryStoreError.unsupportedFormat(fileExtension)
+        }
+
+        let directoryURL = Self.temporaryMediaDirectoryURL
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+
+        let destinationURL = directoryURL.appendingPathComponent(
+            UUID().uuidString.lowercased() + "." + mediaType.rawValue,
+            isDirectory: false
+        )
+        try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+        return (destinationURL, mediaType)
+    }
+
+    private static var temporaryMediaDirectoryURL: URL {
+        let cachesURL = FileManager.default.urls(
+            for: .cachesDirectory,
+            in: .userDomainMask
+        ).first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+
+        return cachesURL
+            .appendingPathComponent("POKE64", isDirectory: true)
+            .appendingPathComponent("TemporaryMedia", isDirectory: true)
+    }
+
+    private static func cleanTemporaryMediaDirectory(preserving preservedURL: URL? = nil) {
+        let fileManager = FileManager.default
+        let directoryURL = temporaryMediaDirectoryURL
+
+        do {
+            guard fileManager.fileExists(atPath: directoryURL.path) else { return }
+            let entries = try fileManager.contentsOfDirectory(
+                at: directoryURL,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+            let preservedPath = preservedURL?.standardizedFileURL.path
+
+            for entry in entries where entry.standardizedFileURL.path != preservedPath {
+                try fileManager.removeItem(at: entry)
+            }
+        } catch {
+            print("Unable to clean temporary media: \(error)")
+        }
+    }
+
+    private static func displayTitle(for url: URL) -> String {
+        let title = url.deletingPathExtension().lastPathComponent
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? url.lastPathComponent : title
+    }
+
     private func refreshFirmwareState() {
         firmwareReady = FirmwareStore.isBootReady
     }
@@ -530,29 +757,26 @@ final class EmulatorModel: ObservableObject {
         return String(normalized.prefix(93)) + "…"
     }
 
-    private static func copyIntoSandbox(url: URL) throws -> URL {
-        let fileManager = FileManager.default
-        let documents = try fileManager.url(
-            for: .documentDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let imports = documents.appendingPathComponent("Imported", isDirectory: true)
-        try fileManager.createDirectory(at: imports, withIntermediateDirectories: true)
+    private func present(_ error: Error) {
+        let message = error.localizedDescription
+        status = Self.errorSummary(message)
+        presentedError = message
+    }
+}
 
-        var destination = imports.appendingPathComponent(url.lastPathComponent)
-        if fileManager.fileExists(atPath: destination.path) {
-            let base = url.deletingPathExtension().lastPathComponent
-            let ext = url.pathExtension
-            let suffix = ISO8601DateFormatter().string(from: Date())
-                .replacingOccurrences(of: ":", with: "-")
-            destination = imports
-                .appendingPathComponent("\(base)-\(suffix)")
-                .appendingPathExtension(ext)
+private enum EmulatorModelError: LocalizedError {
+    case firmwareRequired
+    case noTemporaryMedia
+    case coreFailure(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .firmwareRequired:
+            return "Configure BASIC, KERNAL and character ROMs before opening or running media."
+        case .noTemporaryMedia:
+            return "There is no temporary media to add to the Library."
+        case .coreFailure(let message):
+            return message
         }
-
-        try fileManager.copyItem(at: url, to: destination)
-        return destination
     }
 }

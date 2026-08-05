@@ -1,6 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-08-05
+
+- Added a persistent media library for D64, PRG, CRT, TAP and T64 files.
+- Added library search, favorites, recent usage, editable titles and deletion.
+- Added direct media launch from the library and automatic tracking of the currently running item.
+- Changed the main Open action to launch media from a temporary session directory instead of importing it automatically.
+- Added automatic cleanup of temporary media when the application starts.
+- Kept temporary media mounted across Soft Reset; Hard Reset now ejects temporary content, clears its cache and restarts the C64 empty.
+- Added Add to Library for the currently running temporary file, while retaining direct persistent import from the Library.
+- Added a full-screen Library with an always-visible header containing Import and Done actions.
+- Added media-specific Library artwork for disks, programs, cartridges and tapes.
+- Replaced the separate Port 1 and Port 2 toolbar controls with a unified Ports popover and a Swap Port 1 and Port 2 command.
+- Redesigned the main toolbar as a centered, fixed-height, horizontally scrollable command bar so input changes do not resize the emulator canvas.
+- Removed automatic migration of files from the legacy Documents/Imported directory.
+
+## 0.4.2
 
 - Changed both C64 joyports to default to `None` at application startup.
 - Added multiple physical-controller discovery and per-port assignment using Game Controller.
