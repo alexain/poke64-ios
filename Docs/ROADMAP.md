@@ -28,11 +28,12 @@ Complete the existing settings sections with persistent options and live applica
 
 ## 3. Library
 
-Expand the initial persistent D64, PRG, CRT, TAP and T64 library:
+Expand the persistent D64, PRG, CRT, TAP and T64 library:
 
 - Add D71, D81, G64 and other formats after their drive requirements are handled reliably.
-- Add file replacement and duplicate detection.
+- Add file replacement, duplicate detection and import-conflict handling.
 - Add screenshots, notes and optional cover artwork.
+- Add an optional cover/grid view while retaining the detailed list.
 - Display disk directories, free blocks and contained files.
 - Preview BASIC listings where practical.
 - Associate hardware profiles, joyports, firmware, save states and multidisk sets with library entries.
@@ -49,7 +50,7 @@ Expand the initial persistent D64, PRG, CRT, TAP and T64 library:
 
 ## 5. Media and expansion devices
 
-- Add dedicated Drives, Tape and Cartridge/REU controls.
+- Add a unified Devices control for Drive, Tape, Cartridge/REU and Printer functions without expanding the main toolbar.
 - Support drive units 8–11 and selectable drive models.
 - Add disk control, mount/eject operations and multidisk sets.
 - Add side-mounted drive activity LEDs beside the 4:3 display.
@@ -121,7 +122,8 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 ```text
 Commodore mouse validation
 → bottom C64 keyboard
-→ library metadata and media inspection
+→ library duplicate detection, metadata and media inspection
+→ unified Devices control
 → drive, tape, cartridge and REU management
 → complete settings panels
 → CRT graphics and advanced audio

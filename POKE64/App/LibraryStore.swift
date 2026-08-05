@@ -76,7 +76,6 @@ final class LibraryStore: ObservableObject {
     private let rootURL: URL
     private let mediaDirectoryURL: URL
     private let indexURL: URL
-    private let legacyMigrationMarkerURL: URL
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -93,12 +92,10 @@ final class LibraryStore: ObservableObject {
             .appendingPathComponent("Library", isDirectory: true)
         mediaDirectoryURL = rootURL.appendingPathComponent("Media", isDirectory: true)
         indexURL = rootURL.appendingPathComponent("library.json", isDirectory: false)
-        legacyMigrationMarkerURL = rootURL.appendingPathComponent("legacy-imports-v1.completed", isDirectory: false)
 
         do {
             try prepareStorage()
             try loadIndex()
-            migrateLegacyImportsIfNeeded()
         } catch {
             items = []
             print("Library initialization failed: \(error)")
@@ -122,7 +119,10 @@ final class LibraryStore: ObservableObject {
     }
 
     @discardableResult
-    func importMedia(from sourceURL: URL) throws -> LibraryItem {
+    func importMedia(
+        from sourceURL: URL,
+        originalFilename: String? = nil
+    ) throws -> LibraryItem {
         let accessing = sourceURL.startAccessingSecurityScopedResource()
         defer {
             if accessing {
@@ -133,6 +133,15 @@ final class LibraryStore: ObservableObject {
         let values = try sourceURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
         guard values.isRegularFile == true else {
             throw LibraryStoreError.sourceIsNotAFile
+        }
+
+        let requestedFilename = originalFilename?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedOriginalFilename: String
+        if let requestedFilename, !requestedFilename.isEmpty {
+            resolvedOriginalFilename = URL(fileURLWithPath: requestedFilename).lastPathComponent
+        } else {
+            resolvedOriginalFilename = sourceURL.lastPathComponent
         }
 
         let fileExtension = sourceURL.pathExtension.lowercased()
@@ -147,11 +156,11 @@ final class LibraryStore: ObservableObject {
         let destinationURL = mediaDirectoryURL.appendingPathComponent(storedFilename, isDirectory: false)
         try fileManager.copyItem(at: sourceURL, to: destinationURL)
 
-        let title = Self.defaultTitle(for: sourceURL)
+        let title = Self.defaultTitle(forFilename: resolvedOriginalFilename)
         let item = LibraryItem(
             id: id,
             title: title,
-            originalFilename: sourceURL.lastPathComponent,
+            originalFilename: resolvedOriginalFilename,
             storedFilename: storedFilename,
             mediaType: mediaType,
             fileSize: Int64(values.fileSize ?? 0),
@@ -232,66 +241,6 @@ final class LibraryStore: ObservableObject {
         try persist()
     }
 
-    private func migrateLegacyImportsIfNeeded() {
-        guard !fileManager.fileExists(atPath: legacyMigrationMarkerURL.path) else {
-            return
-        }
-
-        defer {
-            fileManager.createFile(
-                atPath: legacyMigrationMarkerURL.path,
-                contents: Data(),
-                attributes: nil
-            )
-        }
-
-        do {
-            let documentsURL = try fileManager.url(
-                for: .documentDirectory,
-                in: .userDomainMask,
-                appropriateFor: nil,
-                create: true
-            )
-            let legacyDirectory = documentsURL.appendingPathComponent("Imported", isDirectory: true)
-            guard fileManager.fileExists(atPath: legacyDirectory.path) else {
-                return
-            }
-
-            let urls = try fileManager.contentsOfDirectory(
-                at: legacyDirectory,
-                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
-                options: [.skipsHiddenFiles]
-            )
-
-            for url in urls {
-                guard LibraryMediaType(fileExtension: url.pathExtension) != nil else {
-                    continue
-                }
-
-                let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-                guard values.isRegularFile == true else {
-                    continue
-                }
-
-                let size = Int64(values.fileSize ?? 0)
-                let alreadyImported = items.contains {
-                    $0.originalFilename == url.lastPathComponent && $0.fileSize == size
-                }
-                guard !alreadyImported else {
-                    continue
-                }
-
-                do {
-                    try importMedia(from: url)
-                } catch {
-                    print("Unable to migrate legacy import \(url.lastPathComponent): \(error)")
-                }
-            }
-        } catch {
-            print("Legacy media migration failed: \(error)")
-        }
-    }
-
     private func prepareStorage() throws {
         try fileManager.createDirectory(
             at: mediaDirectoryURL,
@@ -330,7 +279,8 @@ final class LibraryStore: ObservableObject {
         try data.write(to: indexURL, options: .atomic)
     }
 
-    private static func defaultTitle(for url: URL) -> String {
+    private static func defaultTitle(forFilename filename: String) -> String {
+        let url = URL(fileURLWithPath: filename)
         let title = url.deletingPathExtension().lastPathComponent
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return title.isEmpty ? url.lastPathComponent : title

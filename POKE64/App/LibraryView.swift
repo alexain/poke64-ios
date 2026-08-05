@@ -34,7 +34,10 @@ private enum LibraryFilter: String, CaseIterable, Identifiable {
 struct LibraryView: View {
     @ObservedObject var library: LibraryStore
     let loadedItemID: UUID?
+    let temporaryMedia: TemporaryMediaInfo?
+    let temporaryMediaAddedItemID: UUID?
     let onImport: (URL) throws -> LibraryItem
+    let onAddTemporaryMedia: () throws -> LibraryItem
     let onRun: (LibraryItem) throws -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -44,30 +47,22 @@ struct LibraryView: View {
     @State private var showImporter = false
     @State private var errorMessage: String?
     @State private var deletionCandidate: LibraryItem?
+    @State private var newlyAddedTemporaryMediaItemID: UUID?
 
     var body: some View {
-        NavigationSplitView {
-            sidebar
-        } content: {
-            itemList
-        } detail: {
-            detail
-        }
-        .navigationSplitViewStyle(.balanced)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("Done") {
-                    dismiss()
-                }
-            }
+        VStack(spacing: 0) {
+            libraryHeader
 
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showImporter = true
-                } label: {
-                    Label("Import", systemImage: "square.and.arrow.down")
-                }
+            Divider()
+
+            NavigationSplitView {
+                sidebar
+            } content: {
+                itemList
+            } detail: {
+                detail
             }
+            .navigationSplitViewStyle(.balanced)
         }
         .fileImporter(
             isPresented: $showImporter,
@@ -113,8 +108,71 @@ struct LibraryView: View {
         }
     }
 
+    private var libraryHeader: some View {
+        HStack(spacing: 14) {
+            Text("Library")
+                .font(.headline)
+
+            Spacer()
+
+            Button {
+                showImporter = true
+            } label: {
+                Label("Import", systemImage: "square.and.arrow.down")
+            }
+
+            Button("Done") {
+                dismiss()
+            }
+            .fontWeight(.semibold)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.bar)
+    }
+
     private var sidebar: some View {
         List {
+            if let temporaryMedia {
+                Section("Current Media") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 12) {
+                            LibraryMediaIcon(mediaType: temporaryMedia.mediaType, size: 42)
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(temporaryMedia.title)
+                                    .font(.body.weight(.semibold))
+                                    .lineLimit(1)
+
+                                Text(temporaryMedia.originalFilename)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+
+                                Text("Temporary \(temporaryMedia.mediaType.displayName) media")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+
+                        Button {
+                            addTemporaryMedia()
+                        } label: {
+                            Label(
+                                temporaryMediaIsAdded ? "Added to Library" : "Add to Library",
+                                systemImage: temporaryMediaIsAdded
+                                    ? "checkmark.circle.fill"
+                                    : "plus.circle.fill"
+                            )
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(temporaryMediaIsAdded)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+
             Section("Library") {
                 ForEach(LibraryFilter.allCases) { candidate in
                     Button {
@@ -276,6 +334,12 @@ struct LibraryView: View {
         return library.item(withID: selectedItemID)
     }
 
+    private var temporaryMediaIsAdded: Bool {
+        let itemID = newlyAddedTemporaryMediaItemID ?? temporaryMediaAddedItemID
+        guard let itemID else { return false }
+        return library.item(withID: itemID) != nil
+    }
+
     private var emptyTitle: String {
         switch filter {
         case .all:
@@ -321,6 +385,17 @@ struct LibraryView: View {
             return library.favoriteItems.count
         case .recent:
             return library.recentItems.count
+        }
+    }
+
+    private func addTemporaryMedia() {
+        do {
+            let item = try onAddTemporaryMedia()
+            newlyAddedTemporaryMediaItemID = item.id
+            filter = .all
+            selectedItemID = item.id
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -405,10 +480,7 @@ private struct LibraryRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: item.mediaType.systemImage)
-                .font(.title3)
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 30)
+            LibraryMediaIcon(mediaType: item.mediaType, size: 34)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
@@ -467,6 +539,157 @@ private struct LibraryRow: View {
     }()
 }
 
+private struct LibraryMediaIcon: View {
+    let mediaType: LibraryMediaType
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.2, style: .continuous)
+                .fill(.quaternary)
+
+            mediaArtwork
+                .frame(width: size * 0.72, height: size * 0.72)
+        }
+        .frame(width: size, height: size)
+        .accessibilityLabel("\(mediaType.displayName) media")
+    }
+
+    @ViewBuilder
+    private var mediaArtwork: some View {
+        switch mediaType {
+        case .d64:
+            floppyArtwork
+        case .crt:
+            cartridgeArtwork
+        case .tap, .t64:
+            tapeArtwork
+        case .prg:
+            programArtwork
+        }
+    }
+
+    private var floppyArtwork: some View {
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: side * 0.08, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.82))
+
+                RoundedRectangle(cornerRadius: side * 0.025)
+                    .fill(Color.primary.opacity(0.9))
+                    .frame(width: side * 0.48, height: side * 0.22)
+                    .offset(y: -side * 0.23)
+
+                Circle()
+                    .fill(Color.primary.opacity(0.92))
+                    .frame(width: side * 0.34, height: side * 0.34)
+                    .offset(y: side * 0.14)
+
+                Circle()
+                    .fill(Color.accentColor.opacity(0.75))
+                    .frame(width: side * 0.12, height: side * 0.12)
+                    .offset(y: side * 0.14)
+
+                Rectangle()
+                    .fill(Color.primary.opacity(0.92))
+                    .frame(width: side * 0.14, height: side * 0.08)
+                    .offset(x: side * 0.27, y: -side * 0.33)
+            }
+        }
+    }
+
+    private var cartridgeArtwork: some View {
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: side * 0.1, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.82))
+                    .frame(width: side * 0.82, height: side * 0.66)
+                    .offset(y: -side * 0.05)
+
+                RoundedRectangle(cornerRadius: side * 0.04)
+                    .fill(.secondary)
+                    .frame(width: side * 0.58, height: side * 0.16)
+
+                HStack(spacing: side * 0.055) {
+                    ForEach(0..<5, id: \.self) { _ in
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.9))
+                            .frame(width: side * 0.055, height: side * 0.1)
+                    }
+                }
+                .offset(y: -side * 0.03)
+
+                RoundedRectangle(cornerRadius: side * 0.03)
+                    .stroke(Color.primary.opacity(0.85), lineWidth: max(1, side * 0.04))
+                    .frame(width: side * 0.42, height: side * 0.2)
+                    .offset(y: -side * 0.29)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var tapeArtwork: some View {
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: side * 0.1, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.82))
+                    .frame(width: side * 0.9, height: side * 0.62)
+
+                RoundedRectangle(cornerRadius: side * 0.04)
+                    .fill(Color.primary.opacity(0.88))
+                    .frame(width: side * 0.66, height: side * 0.28)
+
+                HStack(spacing: side * 0.18) {
+                    tapeReel(side: side)
+                    tapeReel(side: side)
+                }
+
+                Capsule()
+                    .fill(.secondary.opacity(0.8))
+                    .frame(width: side * 0.46, height: side * 0.08)
+                    .offset(y: side * 0.22)
+            }
+        }
+    }
+
+    private func tapeReel(side: CGFloat) -> some View {
+        ZStack {
+            Circle()
+                .fill(.secondary)
+                .frame(width: side * 0.2, height: side * 0.2)
+            Circle()
+                .fill(Color.primary)
+                .frame(width: side * 0.07, height: side * 0.07)
+        }
+    }
+
+    private var programArtwork: some View {
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: side * 0.08, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.82))
+
+                RoundedRectangle(cornerRadius: side * 0.035)
+                    .fill(Color.primary.opacity(0.9))
+                    .frame(width: side * 0.72, height: side * 0.56)
+
+                Text(">_")
+                    .font(.system(size: side * 0.27, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.accentColor)
+                    .offset(x: -side * 0.06)
+            }
+        }
+    }
+}
+
 private struct LibraryDetailView: View {
     let item: LibraryItem
     let isRunning: Bool
@@ -498,11 +721,7 @@ private struct LibraryDetailView: View {
         Form {
             Section {
                 HStack(spacing: 16) {
-                    Image(systemName: item.mediaType.systemImage)
-                        .font(.system(size: 42))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 64, height: 64)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
+                    LibraryMediaIcon(mediaType: item.mediaType, size: 64)
 
                     VStack(alignment: .leading, spacing: 5) {
                         Text(item.title)
