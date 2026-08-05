@@ -1,6 +1,13 @@
 import Foundation
 import SwiftUI
 
+enum JoyportAssignment: String, CaseIterable, Identifiable {
+    case none = "None"
+    case virtualJoystick = "Virtual Joystick"
+
+    var id: String { rawValue }
+}
+
 @MainActor
 final class EmulatorModel: ObservableObject {
     @Published private(set) var status = "Core not started"
@@ -9,11 +16,14 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var firmwareReady = false
     @Published private(set) var isStarting = false
     @Published var presentedError: String?
+    @Published private(set) var joyport1Assignment: JoyportAssignment = .none
+    @Published private(set) var joyport2Assignment: JoyportAssignment = .virtualJoystick
 
     let session = LibretroSession()
     private var didAttemptAutomaticStart = false
 
     init() {
+        session.setVirtualJoystickPort(2)
         FirmwareStore.prepareDirectoriesAndConfiguration()
         refreshFirmwareState()
         if !firmwareReady {
@@ -157,7 +167,41 @@ final class EmulatorModel: ObservableObject {
         await startEmpty()
     }
 
+    var virtualJoystickPort: Int? {
+        if joyport1Assignment == .virtualJoystick { return 1 }
+        if joyport2Assignment == .virtualJoystick { return 2 }
+        return nil
+    }
+
+    func joyportAssignment(for port: Int) -> JoyportAssignment {
+        port == 1 ? joyport1Assignment : joyport2Assignment
+    }
+
+    func setJoyportAssignment(_ assignment: JoyportAssignment, for port: Int) {
+        guard port == 1 || port == 2 else { return }
+
+        switch assignment {
+        case .none:
+            if port == 1 {
+                joyport1Assignment = .none
+            } else {
+                joyport2Assignment = .none
+            }
+
+        case .virtualJoystick:
+            joyport1Assignment = port == 1 ? .virtualJoystick : .none
+            joyport2Assignment = port == 2 ? .virtualJoystick : .none
+        }
+
+        let selectedPort = virtualJoystickPort ?? 0
+        session.setVirtualJoystickPort(selectedPort)
+        status = selectedPort == 0
+            ? "Virtual joystick disconnected"
+            : "Virtual joystick assigned to port \(selectedPort)"
+    }
+
     func setJoypad(_ button: C64JoypadButton, pressed: Bool) {
+        guard virtualJoystickPort != nil else { return }
         session.setJoypadButton(button, pressed: pressed)
     }
 

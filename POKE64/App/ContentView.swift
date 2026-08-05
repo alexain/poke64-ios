@@ -5,7 +5,6 @@ struct ContentView: View {
     @EnvironmentObject private var emulator: EmulatorModel
     @State private var showImporter = false
     @State private var showKeyboard = false
-    @State private var showGameControls = false
     @State private var showSettings = false
     @State private var settingsInitialPanel: SettingsPanel = .system
     @State private var settingsFirmwareFingerprint = FirmwareStore.configurationFingerprint
@@ -33,7 +32,7 @@ struct ContentView: View {
                         firmwareRequiredOverlay
                     }
 
-                    if showGameControls {
+                    if emulator.virtualJoystickPort != nil {
                         gameControlsOverlay
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
@@ -114,7 +113,7 @@ struct ContentView: View {
             Button {
                 showImporter = true
             } label: {
-                Label("Open File", systemImage: "folder")
+                Label("Open", systemImage: "folder")
             }
             .buttonStyle(.borderedProminent)
             .disabled(!emulator.firmwareReady)
@@ -134,18 +133,8 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .disabled(!emulator.isRunning)
 
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    showGameControls.toggle()
-                }
-            } label: {
-                Label(
-                    showGameControls ? "Hide Controls" : "Controls",
-                    systemImage: showGameControls ? "gamecontroller.fill" : "gamecontroller"
-                )
-            }
-            .buttonStyle(.bordered)
-            .disabled(!emulator.isRunning)
+            joyportMenu(port: 1)
+            joyportMenu(port: 2)
 
             Menu {
                 Button("Soft Reset", systemImage: "arrow.counterclockwise") {
@@ -168,23 +157,47 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .disabled(!emulator.isRunning)
-
-            Button(emulator.isRunning ? "Stop" : "Start") {
-                if emulator.isRunning {
-                    emulator.stop()
-                    showGameControls = false
-                } else {
-                    Task {
-                        await emulator.startEmpty()
-                    }
-                }
-            }
-            .buttonStyle(.bordered)
-            .disabled(!emulator.isRunning && !emulator.firmwareReady)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.black)
+    }
+
+    private func joyportMenu(port: Int) -> some View {
+        let assignment = emulator.joyportAssignment(for: port)
+
+        return Menu {
+            Button {
+                emulator.setJoyportAssignment(.none, for: port)
+            } label: {
+                Label(
+                    "None",
+                    systemImage: assignment == .none ? "checkmark.circle.fill" : "circle"
+                )
+            }
+
+            Button {
+                emulator.setJoyportAssignment(.virtualJoystick, for: port)
+            } label: {
+                Label(
+                    "Virtual Joystick",
+                    systemImage: assignment == .virtualJoystick
+                        ? "checkmark.circle.fill"
+                        : "gamecontroller"
+                )
+            }
+
+            Section("Planned") {
+                Button("Physical Controller", systemImage: "gamecontroller.fill") {}
+                    .disabled(true)
+                Button("Commodore Mouse", systemImage: "computermouse") {}
+                    .disabled(true)
+            }
+        } label: {
+            JoyportMenuLabel(port: port, assignment: assignment)
+        }
+        .buttonStyle(.bordered)
+        .disabled(!emulator.isRunning)
     }
 
     private func openSettings(_ panel: SettingsPanel) {
@@ -264,6 +277,36 @@ struct ContentView: View {
         .contentShape(Rectangle())
         .disabled(!emulator.isRunning)
         .opacity(emulator.isRunning ? 1 : 0.45)
+    }
+}
+
+private struct JoyportMenuLabel: View {
+    let port: Int
+    let assignment: JoyportAssignment
+
+    private let fixedWidth: CGFloat = 154
+    private let fixedHeight: CGFloat = 34
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "\(port).circle.fill")
+                .font(.body.weight(.semibold))
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Port \(port)")
+                    .lineLimit(1)
+
+                Text(assignment.rawValue)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(width: fixedWidth, height: fixedHeight, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 

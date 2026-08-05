@@ -29,11 +29,18 @@ The navigation shell and placeholder panels are introduced in v0.3.0 and will be
 
 ## 3. Toolbar and expansion devices
 
-- Remove Start and Stop from the toolbar.
-- Add Soft and Hard Reset.
-- Add independent Joyport 1 and Joyport 2 assignment menus.
-- Support None, one Virtual Joystick, physical controllers and Commodore mouse.
-- Add Cartridge/REU, Drives, Tape, Library and Settings controls.
+Implemented in the first toolbar redesign:
+
+- Start and Stop removed from the main toolbar.
+- Soft Reset, Hard Reset and cartridge ejection available from the Reset menu.
+- Independent Port 1 and Port 2 menus.
+- One virtual joystick can be assigned to either C64 joyport or disconnected.
+
+Remaining work:
+
+- Add physical-controller discovery and assignment.
+- Add Commodore mouse assignment.
+- Add dedicated Cartridge/REU, Drives, Tape and Library controls.
 
 ## 4. Library
 

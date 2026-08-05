@@ -249,7 +249,7 @@ private struct AboutSettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("POKE64")
                             .font(.title2.weight(.semibold))
-                        Text("Native C64 emulator frontend for iPad")
+                        Text("Native Commodore 64 emulator for iPad")
                             .foregroundStyle(.secondary)
                         Text("Version \(version) (\(build))")
                             .font(.caption.monospacedDigit())
@@ -268,7 +268,7 @@ private struct AboutSettingsView: View {
 
             Section("Created by") {
                 Text("Created by Alessandro Capano in 2026.")
-                Link("www.alexain.it", destination: URL(string: "https://www.alexain.it")!)
+                Link("www.alexain.it/poke64", destination: URL(string: "https://www.alexain.it/poke64")!)
             }
 
             Section("Credits and licenses") {

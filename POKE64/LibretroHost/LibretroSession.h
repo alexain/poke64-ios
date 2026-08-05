@@ -37,6 +37,7 @@ typedef NS_ENUM(NSInteger, C64KeyCode) {
 - (void)stop;
 - (void)softReset;
 - (void)hardReset;
+- (void)setVirtualJoystickPort:(NSInteger)port;
 - (void)setJoypadButton:(C64JoypadButton)button pressed:(BOOL)pressed;
 - (void)setKey:(C64KeyCode)key pressed:(BOOL)pressed;
 - (void)setRawKeyCode:(NSUInteger)keyCode pressed:(BOOL)pressed;

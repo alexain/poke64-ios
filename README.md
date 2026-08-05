@@ -2,7 +2,7 @@
 
 ![POKE64 banner](Docs/Branding/poke64-banner.png)
 
-POKE64 is an experimental, native Commodore 64 emulator frontend designed primarily for **iPad**. It uses SwiftUI, UIKit, Metal, AVFoundation, the libretro API and the VICE `x64sc` core.
+POKE64 is an experimental, native **Commodore 64 emulator for iPad**. It uses SwiftUI, UIKit, Metal, AVFoundation, the libretro API and the VICE `x64sc` core.
 
 POKE64 is an independent open-source project. It is not affiliated with Commodore, VICE, RetroArch or libretro.
 
@@ -11,11 +11,12 @@ POKE64 is an independent open-source project. It is not affiliated with Commodor
 - Native iPadOS interface with automatic C64 startup.
 - Locally built and signed VICE `x64sc` libretro core.
 - Metal video rendering and AVAudioEngine audio output.
-- Hardware-keyboard input, an on-screen C64 keyboard and touch joystick controls.
+- Hardware-keyboard input, an on-screen C64 keyboard and a virtual joystick assignable to C64 port 1 or 2.
 - Import and launch of supported C64 media through the iOS document picker.
 - Settings panels for System, Graphics, Audio, Tape, Disk Drives, Printer, Firmware / ROMs, Networking and About.
 - External BASIC, KERNAL and character ROM management, plus an optional 1541-II ROM slot.
 - Compatible custom firmware support, including JiffyDOS-style replacements.
+- Compact iPad toolbar with independent Port 1 and Port 2 assignment menus.
 - Soft Reset, Hard Reset and **Eject Cartridge and Reset**.
 
 Most Settings panels currently provide the interface structure only. Firmware / ROMs is the first fully implemented panel.
@@ -51,9 +52,13 @@ A cartridge remains inserted across Soft and Hard Reset, matching physical C64 b
 - [External-firmware testing](Docs/TESTING_EXTERNAL_FIRMWARE.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
+## Credits
+
+Created by [Alessandro Capano](https://www.alexain.it/poke64) in 2026.
+
 ## Licensing
 
-The original POKE64 frontend code is distributed under [LICENSE](LICENSE).
+The original POKE64 application code is distributed under [LICENSE](LICENSE).
 
 VICE and `vice-libretro` are separate GPL-licensed components. Distributors are responsible for the applicable source, notice and license obligations.
 

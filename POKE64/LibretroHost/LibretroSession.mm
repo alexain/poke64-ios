@@ -114,6 +114,7 @@ struct SessionImpl {
     std::atomic<bool> shutdownRequested{false};
     std::thread coreThread;
     std::atomic<uint32_t> joypadMask{0};
+    std::atomic<unsigned> virtualJoystickPort{2};
     std::mutex keyMutex;
     std::vector<KeyEvent> keyEvents;
     retro_keyboard_event_t keyboardCallback = nullptr;
@@ -459,7 +460,18 @@ static bool environmentCallback(unsigned command, void *data) {
 
         case RETRO_ENVIRONMENT_GET_VARIABLE: {
             retro_variable *variable = static_cast<retro_variable *>(data);
-            auto found = session->variables.find(variable->key ?: "");
+            const char *key = variable->key ?: "";
+
+            // The virtual joystick always enters libretro through frontend port 0.
+            // VICE's joyport option routes that RetroPad to C64 port 1 or 2.
+            if (std::strcmp(key, "vice_joyport") == 0) {
+                variable->value = session->virtualJoystickPort.load(std::memory_order_acquire) == 1
+                    ? "1"
+                    : "2";
+                return true;
+            }
+
+            auto found = session->variables.find(key);
             variable->value = found == session->variables.end() ? nullptr : found->second.c_str();
             return true;
         }
@@ -576,7 +588,10 @@ static void inputPollCallback(void) {}
 static int16_t inputStateCallback(unsigned port, unsigned device, unsigned index, unsigned id) {
     (void)index;
     SessionImpl *session = gSession;
-    if (!session || port != 0 || (device & RETRO_DEVICE_MASK) != RETRO_DEVICE_JOYPAD) return 0;
+    if (!session ||
+        session->virtualJoystickPort.load(std::memory_order_acquire) == 0 ||
+        port != 0 ||
+        (device & RETRO_DEVICE_MASK) != RETRO_DEVICE_JOYPAD) return 0;
     const uint32_t mask = session->joypadMask.load(std::memory_order_acquire);
     if (id == RETRO_DEVICE_ID_JOYPAD_MASK) return static_cast<int16_t>(mask & 0xffff);
     if (id > 31) return 0;
@@ -794,6 +809,14 @@ bool SessionImpl::start(const char *path, std::string &error) {
 
 - (void)hardReset {
     _impl->resetModeRequested.store(2, std::memory_order_release);
+}
+
+- (void)setVirtualJoystickPort:(NSInteger)port {
+    if (port < 0 || port > 2) return;
+
+    _impl->virtualJoystickPort.store(static_cast<unsigned>(port), std::memory_order_release);
+    _impl->joypadMask.store(0, std::memory_order_release);
+    _impl->variablesUpdated.store(true, std::memory_order_release);
 }
 
 - (void)setJoypadButton:(C64JoypadButton)button pressed:(BOOL)pressed {

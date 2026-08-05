@@ -24,7 +24,7 @@ for file in "${required[@]}"; do
 done
 
 grep -q 'func setRawKey' "${ROOT}/POKE64/App/EmulatorModel.swift"
-grep -q 'firmwareConfigurationChanged' "${ROOT}/POKE64/App/EmulatorModel.swift"
+grep -q 'settingsDidClose' "${ROOT}/POKE64/App/EmulatorModel.swift"
 grep -q 'SettingsView' "${ROOT}/POKE64/App/ContentView.swift"
 grep -q 'NavigationSplitView' "${ROOT}/POKE64/App/SettingsView.swift"
 grep -q 'FirmwareSettingsView' "${ROOT}/POKE64/App/SettingsView.swift"

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.1
+
+- Prevented the native iPadOS software keyboard from appearing when interacting with the Port 1 and Port 2 menus.
+- Fixed the joyport menu labels to a stable width and a non-morphing port icon.
+- Removed the virtual-joystick port caption from the emulation area.
+- Updated README, About and GitHub repository wording to describe POKE64 as a native Commodore 64 emulator.
+- Refreshed the README banner without the word “frontend”.
+
+## 0.4.0
+
+- Redesigned the iPad toolbar and removed the manual Start/Stop and generic Controls buttons.
+- Added independent Port 1 and Port 2 assignment menus.
+- Added exclusive virtual-joystick routing: the on-screen joystick can be assigned to either C64 port, but never both.
+- Added visible placeholders for future physical-controller and Commodore-mouse assignments.
+- Added project credits and the official POKE64 website link to the README and About panel.
+
 ## 0.3.3
 
 - Forced VICE Virtual Device Traps for reliable D64 loading while the dedicated drive configuration layer is still under development.

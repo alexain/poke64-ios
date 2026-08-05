@@ -43,6 +43,8 @@ The source patch fails closed when the expected upstream structure or required f
 
 `HardwareKeyboardCapture` is an invisible first-responder `UIView` that receives `UIPress` events. HID codes are translated to libretro keyboard values and sent as key-down and key-up events.
 
+The virtual joystick enters libretro through frontend controller port 0. POKE64 updates the VICE `vice_joyport` core option to route that controller to C64 port 1 or port 2. Selecting the virtual joystick on one toolbar port automatically disconnects it from the other; selecting None disables the input callback and hides the overlay.
+
 ## Libretro host
 
 `LibretroSession.mm` loads the dylib through `dlopen`, resolves `retro_*` symbols, provides system/save/assets directories, registers callbacks, and runs `retro_run()` on a dedicated thread. It also captures VICE messages and treats startup shutdown requests as explicit errors instead of leaving a silent black screen.

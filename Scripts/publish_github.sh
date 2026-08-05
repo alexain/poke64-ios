@@ -61,10 +61,14 @@ if ! git remote get-url origin >/dev/null 2>&1; then
     --source=. \
     --remote=origin \
     --push \
-    --description="POKE64: native iOS Commodore 64 frontend using SwiftUI, Metal and vice-libretro"
+    --description="POKE64: native Commodore 64 emulator for iPad, powered by VICE x64sc and libretro"
 else
   git push -u origin main
 fi
+
+gh repo edit \
+  --description="POKE64: native Commodore 64 emulator for iPad, powered by VICE x64sc and libretro" \
+  --homepage="https://www.alexain.it/poke64"
 
 TAG="v${VERSION}"
 if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then

@@ -16,7 +16,6 @@ struct HardwareKeyboardCapture: UIViewRepresentable {
     func updateUIView(_ uiView: KeyboardResponderView, context: Context) {
         uiView.onKey = onKey
         uiView.captureEnabled = isEnabled
-        uiView.requestFocus()
     }
 }
 
@@ -25,6 +24,8 @@ final class KeyboardResponderView: UIView {
 
     var captureEnabled = false {
         didSet {
+            guard captureEnabled != oldValue else { return }
+
             if captureEnabled {
                 requestFocus()
             } else {
@@ -33,6 +34,13 @@ final class KeyboardResponderView: UIView {
             }
         }
     }
+
+    private lazy var hiddenInputView: UIView = {
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = false
+        return view
+    }()
 
     private var pressedUsages: [Int: UInt] = [:]
 
@@ -72,6 +80,10 @@ final class KeyboardResponderView: UIView {
     }
 
     override var canBecomeFirstResponder: Bool { true }
+
+    /// Keep physical-keyboard capture active without asking iPadOS to show
+    /// its software keyboard when SwiftUI menus update the responder chain.
+    override var inputView: UIView? { hiddenInputView }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
