@@ -1,0 +1,452 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		02D735014547E54BA8C0B28F /* C64KeyboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7F58AFDD31BC4F048A4B03B /* C64KeyboardView.swift */; };
+		1A11076DF99128E649E8EF6C /* LibretroSession.mm in Sources */ = {isa = PBXBuildFile; fileRef = 7725FE7F892841556F15BC3E /* LibretroSession.mm */; };
+		36B65395C555CF90241B04F7 /* EmulatorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E05DEE9B3F9F2DDD233038 /* EmulatorModel.swift */; };
+		51E44C46A1C49917E8A5AA43 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A9C94FB248449DE144B8E521 /* AudioToolbox.framework */; };
+		571AAAAE7876AB23D4A22A51 /* FirmwareStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B9E8A020E592A88D7AB9194 /* FirmwareStore.swift */; };
+		66C247BC53BA5720225153A7 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4D4991D381190429755583D /* MetalKit.framework */; };
+		75AB048B9A3F820BC3EAEF4B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E4BACE62D631B6765D0E3B6 /* ContentView.swift */; };
+		7998F522E76A742788F5AE40 /* HardwareKeyboardCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD4721181C78231CB5D16BDB /* HardwareKeyboardCapture.swift */; };
+		8FA3804304433C32B07BD7BB /* POKE64App.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A7820C6E392E65D7B9F2F1 /* POKE64App.swift */; };
+		C469C7BC9C78F50CAE96AEB7 /* FirmwareSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64CD239BF939255B799F19C0 /* FirmwareSettingsView.swift */; };
+		CD4C301C1535EBE53E483172 /* C64MetalView.mm in Sources */ = {isa = PBXBuildFile; fileRef = C3ADE8835878CBE3A1F54492 /* C64MetalView.mm */; };
+		D34583E3E5139A853354474B /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 814D62254F1D37CDE3B0D024 /* AVFoundation.framework */; };
+		DEC81CF48A00FB0B67D71208 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 03A8AFEB9042C3C96638CBFB /* Metal.framework */; };
+		FB9ACFE0427D95B7B90E795B /* C64Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = E8ED7C2D830B4B2B639A3CEF /* C64Shaders.metal */; };
+		FE76FAF17EA32FC0CF00145B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0A4D40EE166996984F128885 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		03A8AFEB9042C3C96638CBFB /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		0A4D40EE166996984F128885 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		4AA91E3CFCCE98FA078C40FE /* LibretroSession.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LibretroSession.h; sourceTree = "<group>"; };
+		4E4BACE62D631B6765D0E3B6 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		64CD239BF939255B799F19C0 /* FirmwareSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirmwareSettingsView.swift; sourceTree = "<group>"; };
+		652D411DA724DCA54E11D189 /* C64MetalView.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = C64MetalView.h; sourceTree = "<group>"; };
+		705328D2DF5D31506F01A7C0 /* LibretroMinimal.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LibretroMinimal.h; sourceTree = "<group>"; };
+		767C59A1CE2422039F2D20BB /* POKE64.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = POKE64.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7725FE7F892841556F15BC3E /* LibretroSession.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = LibretroSession.mm; sourceTree = "<group>"; };
+		814D62254F1D37CDE3B0D024 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		87B773761B2C079BD76E63C7 /* POKE64-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "POKE64-Bridging-Header.h"; sourceTree = "<group>"; };
+		9B9E8A020E592A88D7AB9194 /* FirmwareStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirmwareStore.swift; sourceTree = "<group>"; };
+		A7F58AFDD31BC4F048A4B03B /* C64KeyboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = C64KeyboardView.swift; sourceTree = "<group>"; };
+		A9C94FB248449DE144B8E521 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
+		BD4721181C78231CB5D16BDB /* HardwareKeyboardCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareKeyboardCapture.swift; sourceTree = "<group>"; };
+		C3ADE8835878CBE3A1F54492 /* C64MetalView.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = C64MetalView.mm; sourceTree = "<group>"; };
+		D4D4991D381190429755583D /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		E3A7820C6E392E65D7B9F2F1 /* POKE64App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = POKE64App.swift; sourceTree = "<group>"; };
+		E8ED7C2D830B4B2B639A3CEF /* C64Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = C64Shaders.metal; sourceTree = "<group>"; };
+		F2E05DEE9B3F9F2DDD233038 /* EmulatorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorModel.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		85234FB7CD2CF1D08264DA75 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D34583E3E5139A853354474B /* AVFoundation.framework in Frameworks */,
+				51E44C46A1C49917E8A5AA43 /* AudioToolbox.framework in Frameworks */,
+				DEC81CF48A00FB0B67D71208 /* Metal.framework in Frameworks */,
+				66C247BC53BA5720225153A7 /* MetalKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		5046AC739A1101CCB6B9F1DF /* Shaders */ = {
+			isa = PBXGroup;
+			children = (
+				E8ED7C2D830B4B2B639A3CEF /* C64Shaders.metal */,
+			);
+			path = Shaders;
+			sourceTree = "<group>";
+		};
+		6B8FD3A2015FB2E00E82F6E9 = {
+			isa = PBXGroup;
+			children = (
+				8BBF5AD22E2320616C9B058D /* POKE64 */,
+				E624E9338A3BB3250DA3EC06 /* Frameworks */,
+				7BF242D79C8303F392D309D2 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		7BF242D79C8303F392D309D2 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				767C59A1CE2422039F2D20BB /* POKE64.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		858A34017D961EC1C540B576 /* Rendering */ = {
+			isa = PBXGroup;
+			children = (
+				652D411DA724DCA54E11D189 /* C64MetalView.h */,
+				C3ADE8835878CBE3A1F54492 /* C64MetalView.mm */,
+			);
+			path = Rendering;
+			sourceTree = "<group>";
+		};
+		873D1C1C8EC8CB4035A88419 /* LibretroHost */ = {
+			isa = PBXGroup;
+			children = (
+				705328D2DF5D31506F01A7C0 /* LibretroMinimal.h */,
+				4AA91E3CFCCE98FA078C40FE /* LibretroSession.h */,
+				7725FE7F892841556F15BC3E /* LibretroSession.mm */,
+			);
+			path = LibretroHost;
+			sourceTree = "<group>";
+		};
+		8BBF5AD22E2320616C9B058D /* POKE64 */ = {
+			isa = PBXGroup;
+			children = (
+				0A4D40EE166996984F128885 /* Assets.xcassets */,
+				C0568DD6D27A2213E1B066F3 /* App */,
+				873D1C1C8EC8CB4035A88419 /* LibretroHost */,
+				858A34017D961EC1C540B576 /* Rendering */,
+				5046AC739A1101CCB6B9F1DF /* Shaders */,
+			);
+			path = POKE64;
+			sourceTree = "<group>";
+		};
+		C0568DD6D27A2213E1B066F3 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				A7F58AFDD31BC4F048A4B03B /* C64KeyboardView.swift */,
+				4E4BACE62D631B6765D0E3B6 /* ContentView.swift */,
+				F2E05DEE9B3F9F2DDD233038 /* EmulatorModel.swift */,
+				64CD239BF939255B799F19C0 /* FirmwareSettingsView.swift */,
+				9B9E8A020E592A88D7AB9194 /* FirmwareStore.swift */,
+				BD4721181C78231CB5D16BDB /* HardwareKeyboardCapture.swift */,
+				87B773761B2C079BD76E63C7 /* POKE64-Bridging-Header.h */,
+				E3A7820C6E392E65D7B9F2F1 /* POKE64App.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		E624E9338A3BB3250DA3EC06 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				A9C94FB248449DE144B8E521 /* AudioToolbox.framework */,
+				814D62254F1D37CDE3B0D024 /* AVFoundation.framework */,
+				03A8AFEB9042C3C96638CBFB /* Metal.framework */,
+				D4D4991D381190429755583D /* MetalKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F9E97BB3725F82524638B64E /* POKE64 */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A53F739C2FB1A97D426A3426 /* Build configuration list for PBXNativeTarget "POKE64" */;
+			buildPhases = (
+				CE94139732E7400B79DE6A8E /* Embed and sign VICE libretro core */,
+				386C63C50168EE24600FD5B2 /* Sources */,
+				7EE64F0CC9264B7D584C5C88 /* Resources */,
+				85234FB7CD2CF1D08264DA75 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = POKE64;
+			packageProductDependencies = (
+			);
+			productName = POKE64;
+			productReference = 767C59A1CE2422039F2D20BB /* POKE64.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		E0ED141C7962D1A22610CB46 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					F9E97BB3725F82524638B64E = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 05D031A279ED5A152D4107B8 /* Build configuration list for PBXProject "POKE64" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 6B8FD3A2015FB2E00E82F6E9;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 7BF242D79C8303F392D309D2 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F9E97BB3725F82524638B64E /* POKE64 */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		7EE64F0CC9264B7D584C5C88 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FE76FAF17EA32FC0CF00145B /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		CE94139732E7400B79DE6A8E /* Embed and sign VICE libretro core */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed and sign VICE libretro core";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "#!/usr/bin/env bash\nset -euo pipefail\n\nCORE_NAME=\"vice_x64sc_libretro_ios.dylib\"\nSOURCE_CORE=\"${SRCROOT}/Vendor/Core/${CORE_NAME}\"\n\n# The supplied VICE build is for real iOS arm64 devices only.\nif [[ \"${PLATFORM_NAME:-}\" != \"iphoneos\" ]]; then\n  echo \"note: VICE core not embedded for ${PLATFORM_NAME:-unknown}; simulator runs UI only.\"\n  exit 0\nfi\n\nif [[ ! -f \"${SOURCE_CORE}\" ]]; then\n  echo \"warning: ${CORE_NAME} missing. Run Scripts/build_vice_core.sh first.\"\n  exit 0\nfi\n\nDESTINATION_DIR=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\nDESTINATION_CORE=\"${DESTINATION_DIR}/${CORE_NAME}\"\nmkdir -p \"${DESTINATION_DIR}\"\ncp -f \"${SOURCE_CORE}\" \"${DESTINATION_CORE}\"\n\nif [[ \"${CODE_SIGNING_ALLOWED:-NO}\" == \"YES\" && -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]]; then\n  /usr/bin/codesign \\\n    --force \\\n    --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" \\\n    --timestamp=none \\\n    \"${DESTINATION_CORE}\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		386C63C50168EE24600FD5B2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				02D735014547E54BA8C0B28F /* C64KeyboardView.swift in Sources */,
+				CD4C301C1535EBE53E483172 /* C64MetalView.mm in Sources */,
+				FB9ACFE0427D95B7B90E795B /* C64Shaders.metal in Sources */,
+				75AB048B9A3F820BC3EAEF4B /* ContentView.swift in Sources */,
+				36B65395C555CF90241B04F7 /* EmulatorModel.swift in Sources */,
+				C469C7BC9C78F50CAE96AEB7 /* FirmwareSettingsView.swift in Sources */,
+				571AAAAE7876AB23D4A22A51 /* FirmwareStore.swift in Sources */,
+				7998F522E76A742788F5AE40 /* HardwareKeyboardCapture.swift in Sources */,
+				1A11076DF99128E649E8EF6C /* LibretroSession.mm in Sources */,
+				8FA3804304433C32B07BD7BB /* POKE64App.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0E4DFC05A4F93AEA1DE6A375 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = POKE64/App/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ldl",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = it.biosfera.poke64;
+				PRODUCT_NAME = POKE64;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = "POKE64/App/POKE64-Bridging-Header.h";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		6F90286A8530B453F11F89CC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = POKE64/App/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ldl",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = it.biosfera.poke64;
+				PRODUCT_NAME = POKE64;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = "POKE64/App/POKE64-Bridging-Header.h";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		BE34B70021C2BFBC65EAAB70 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		D67EAEABC38F4B9E449050C5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		05D031A279ED5A152D4107B8 /* Build configuration list for PBXProject "POKE64" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D67EAEABC38F4B9E449050C5 /* Debug */,
+				BE34B70021C2BFBC65EAAB70 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A53F739C2FB1A97D426A3426 /* Build configuration list for PBXNativeTarget "POKE64" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0E4DFC05A4F93AEA1DE6A375 /* Debug */,
+				6F90286A8530B453F11F89CC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = E0ED141C7962D1A22610CB46 /* Project object */;
+}

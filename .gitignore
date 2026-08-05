@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Xcode generated/user data
+*.xcworkspace/
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+*.ipa
+*.dSYM/
+
+# SwiftPM/Xcode caches
+.build/
+.swiftpm/
+
+# Locally fetched and compiled VICE core
+Vendor/vice-libretro-src/
+Vendor/Core/*.dylib
+
+# Temporary files
+*.orig
+*.rej
+*.swp
+Vendor/Core/firmware-scrub-report.json
+
+# Python caches
+__pycache__/
+*.pyc
