@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-08-05
 
 - Added a persistent media library for D64, PRG, CRT, TAP and T64 files.
 - Added library search, favorites, recent usage, editable titles and deletion.
