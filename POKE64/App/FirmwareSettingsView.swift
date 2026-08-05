@@ -2,16 +2,13 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct FirmwareSettingsView: View {
-    @Environment(\.dismiss) private var dismiss
-
     @State private var statuses = FirmwareStore.statuses
     @State private var pendingSlot: FirmwareSlot?
     @State private var showImporter = false
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
-            Form {
+        Form {
                 Section {
                     Text("POKE64 does not provide Commodore firmware. Import legally obtained ROM images before starting the emulator.")
                         .font(.callout)
@@ -43,15 +40,6 @@ struct FirmwareSettingsView: View {
                     Text("Imported files are copied into the app sandbox. POKE64 records file size and SHA-256 only for validation and diagnostics.")
                         .font(.footnote)
                 }
-            }
-            .navigationTitle("Firmware")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
         }
         .fileImporter(
             isPresented: $showImporter,

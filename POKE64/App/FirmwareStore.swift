@@ -97,6 +97,18 @@ enum FirmwareStore {
         status(for: .drive1541II).isValid
     }
 
+    static var configurationFingerprint: String {
+        statuses.map { status in
+            [
+                status.slot.rawValue,
+                status.fileSize.map(String.init) ?? "missing",
+                status.sha256 ?? "no-hash",
+                status.validationError ?? "valid"
+            ].joined(separator: ":")
+        }
+        .joined(separator: "|")
+    }
+
     static func prepareDirectoriesAndConfiguration() {
         do {
             _ = try firmwareDirectory()
@@ -197,11 +209,16 @@ enum FirmwareStore {
         }
 
         let driveInstalled = FileManager.default.fileExists(atPath: drive.path)
-        lines.append("Drive8TrueEmulation=\(driveInstalled ? 1 : 0)")
+
+        // Temporary compatibility mode: use VICE virtual-device traps for
+        // reliable D64 autostart until the dedicated Disk Drives panel owns
+        // drive models, ROM selection and True Drive Emulation.
+        lines.append("Drive8TrueEmulation=0")
+        lines.append("Drive9TrueEmulation=0")
+        lines.append("TrapDevice8=1")
+        lines.append("TrapDevice9=1")
         if driveInstalled {
-            lines.append("Drive8Type=1542")
-        }
-        if driveInstalled {
+            // Retain the imported 1541-II ROM for the future drive backend.
             lines.append("DosName1541ii=\"\(escapedVicercPath(drive.path))\"")
         }
 

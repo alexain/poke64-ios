@@ -7,6 +7,7 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var loadedContent: String?
     @Published private(set) var isRunning = false
     @Published private(set) var firmwareReady = false
+    @Published private(set) var isStarting = false
     @Published var presentedError: String?
 
     let session = LibretroSession()
@@ -24,7 +25,7 @@ final class EmulatorModel: ObservableObject {
         session.videoView = videoView
     }
 
-    func startAutomatically() {
+    func startAutomatically() async {
         guard !didAttemptAutomaticStart else { return }
         didAttemptAutomaticStart = true
         refreshFirmwareState()
@@ -34,17 +35,27 @@ final class EmulatorModel: ObservableObject {
             return
         }
 
-        startEmpty()
+        await startEmpty()
     }
 
-    func startEmpty() {
+    func startEmpty() async {
         presentedError = nil
         refreshFirmwareState()
         guard firmwareReady else {
             isRunning = false
+            isStarting = false
             status = "Firmware required"
             return
         }
+
+        isStarting = true
+        status = "Starting C64…"
+        defer { isStarting = false }
+
+        // Give SwiftUI time to draw the loading screen before VICE performs
+        // synchronous startup work on the main actor.
+        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(120))
 
         if session.startWithoutContent() {
             loadedContent = nil
@@ -90,8 +101,13 @@ final class EmulatorModel: ObservableObject {
         }
     }
 
-    func firmwareConfigurationChanged() {
+    func settingsDidClose(previousFirmwareFingerprint: String) async {
         FirmwareStore.prepareDirectoriesAndConfiguration()
+        refreshFirmwareState()
+
+        guard FirmwareStore.configurationFingerprint != previousFirmwareFingerprint else {
+            return
+        }
 
         if isRunning {
             session.stop()
@@ -99,10 +115,10 @@ final class EmulatorModel: ObservableObject {
             loadedContent = nil
         }
 
-        refreshFirmwareState()
         if firmwareReady {
-            startEmpty()
+            await startEmpty()
         } else {
+            isStarting = false
             status = "Import BASIC, KERNAL and character ROMs"
         }
     }
@@ -113,10 +129,32 @@ final class EmulatorModel: ObservableObject {
         status = firmwareReady ? "Core stopped" : "Firmware required"
     }
 
-    func reset() {
+    func softReset() {
         guard isRunning else { return }
-        session.resetCore()
-        status = "Reset requested"
+        session.softReset()
+        status = "Soft reset requested"
+    }
+
+    func hardReset() {
+        guard isRunning else { return }
+        session.hardReset()
+        status = "Hard reset requested"
+    }
+
+    var hasLoadedCartridge: Bool {
+        guard let loadedContent else { return false }
+        return URL(fileURLWithPath: loadedContent)
+            .pathExtension
+            .caseInsensitiveCompare("crt") == .orderedSame
+    }
+
+    func ejectCartridgeAndReset() async {
+        guard hasLoadedCartridge else { return }
+        session.stop()
+        isRunning = false
+        loadedContent = nil
+        status = "Ejecting cartridge…"
+        await startEmpty()
     }
 
     func setJoypad(_ button: C64JoypadButton, pressed: Bool) {

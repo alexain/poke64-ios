@@ -7,6 +7,7 @@ required=(
   "POKE64/App/EmulatorModel.swift"
   "POKE64/App/FirmwareStore.swift"
   "POKE64/App/FirmwareSettingsView.swift"
+  "POKE64/App/SettingsView.swift"
   "POKE64/App/HardwareKeyboardCapture.swift"
   "POKE64/App/C64KeyboardView.swift"
   "POKE64/LibretroHost/LibretroSession.h"
@@ -24,7 +25,9 @@ done
 
 grep -q 'func setRawKey' "${ROOT}/POKE64/App/EmulatorModel.swift"
 grep -q 'firmwareConfigurationChanged' "${ROOT}/POKE64/App/EmulatorModel.swift"
-grep -q 'FirmwareSettingsView' "${ROOT}/POKE64/App/ContentView.swift"
+grep -q 'SettingsView' "${ROOT}/POKE64/App/ContentView.swift"
+grep -q 'NavigationSplitView' "${ROOT}/POKE64/App/SettingsView.swift"
+grep -q 'FirmwareSettingsView' "${ROOT}/POKE64/App/SettingsView.swift"
 grep -q 'setRawKeyCode' "${ROOT}/POKE64/LibretroHost/LibretroSession.h"
 grep -q 'prepare_external_firmware_core.py' "${ROOT}/Scripts/build_vice_core.sh"
 grep -q 'verify_external_firmware_core.py' "${ROOT}/Scripts/build_vice_core.sh"

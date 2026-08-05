@@ -97,6 +97,7 @@ struct CoreAPI {
     void (*retro_unload_game)(void) = nullptr;
     void (*retro_run)(void) = nullptr;
     void (*retro_reset)(void) = nullptr;
+    void (*emu_reset)(int) = nullptr;
 };
 
 struct KeyEvent {
@@ -109,7 +110,7 @@ struct SessionImpl {
     CoreAPI api;
     __weak C64MetalView *videoView = nil;
     std::atomic<bool> running{false};
-    std::atomic<bool> resetRequested{false};
+    std::atomic<int> resetModeRequested{-1};
     std::atomic<bool> shutdownRequested{false};
     std::thread coreThread;
     std::atomic<uint32_t> joypadMask{0};
@@ -256,6 +257,11 @@ struct SessionImpl {
         LOAD_CORE_SYMBOL(retro_run);
         LOAD_CORE_SYMBOL(retro_reset);
 #undef LOAD_CORE_SYMBOL
+
+        // VICE-libretro exposes emu_reset() from libretro-core.c. It allows
+        // POKE64 to request a real soft or hard machine reset without using
+        // retro_reset(), whose default action autostarts the current content.
+        api.emu_reset = reinterpret_cast<void (*)(int)>(dlsym(coreHandle, "emu_reset"));
 
         if (api.retro_api_version() != RETRO_API_VERSION) {
             error = "Incompatible libretro API version";
@@ -440,15 +446,14 @@ static bool environmentCallback(unsigned command, void *data) {
             }
 
             // POKE64 uses a generated system/vice/vicerc for user-imported
-            // firmware. Force the core to read it, then keep true drive
-            // emulation aligned with the optional 1541-II firmware slot.
+            // firmware. Keep drive behavior aligned with the temporary
+            // compatibility mode used by FirmwareStore: virtual-device traps
+            // enabled, True Drive Emulation disabled. This prevents the core's
+            // defaults from overriding vicerc and leaving device 8 unavailable.
             session->variables["vice_read_vicerc"] = "enabled";
-
-            NSString *systemPath = [NSString stringWithUTF8String:session->systemDirectory.c_str()];
-            NSString *driveROM = [systemPath stringByAppendingPathComponent:
-                @"vice/POKE64/Firmware/poke64-dos1541ii.bin"];
-            const bool hasDriveROM = [NSFileManager.defaultManager fileExistsAtPath:driveROM];
-            session->variables["vice_drive_true_emulation"] = hasDriveROM ? "enabled" : "disabled";
+            session->variables["vice_drive_true_emulation"] = "disabled";
+            session->variables["vice_virtual_device_traps"] = "enabled";
+            session->variables["vice_drive_sound_emulation"] = "disabled";
             return true;
         }
 
@@ -657,8 +662,15 @@ bool SessionImpl::start(const char *path, std::string &error) {
         bool firstIteration = true;
         while (running.load(std::memory_order_acquire) &&
                !shutdownRequested.load(std::memory_order_acquire)) {
-            if (resetRequested.exchange(false, std::memory_order_acq_rel)) {
-                api.retro_reset();
+            const int resetMode = resetModeRequested.exchange(-1, std::memory_order_acq_rel);
+            if (resetMode >= 0) {
+                if (api.emu_reset) {
+                    api.emu_reset(resetMode);
+                } else {
+                    // Compatibility fallback for a core build that does not
+                    // export the VICE reset helper.
+                    api.retro_reset();
+                }
             }
             drainKeyEvents();
             api.retro_run();
@@ -776,8 +788,12 @@ bool SessionImpl::start(const char *path, std::string &error) {
     if (gSession == _impl.get()) gSession = nullptr;
 }
 
-- (void)resetCore {
-    _impl->resetRequested.store(true, std::memory_order_release);
+- (void)softReset {
+    _impl->resetModeRequested.store(1, std::memory_order_release);
+}
+
+- (void)hardReset {
+    _impl->resetModeRequested.store(2, std::memory_order_release);
 }
 
 - (void)setJoypadButton:(C64JoypadButton)button pressed:(BOOL)pressed {

@@ -30,41 +30,51 @@ struct C64MetalState {
 
 @implementation C64MetalView
 
+- (void)configureMetalView {
+    id<MTLDevice> device = self.device ?: MTLCreateSystemDefaultDevice();
+    self.device = device;
+
+    _state = std::make_unique<C64MetalState>();
+    self.delegate = self;
+    self.paused = YES;
+    self.enableSetNeedsDisplay = YES;
+    self.framebufferOnly = YES;
+    self.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
+    self.clearColor = MTLClearColorMake(0.02, 0.02, 0.025, 1.0);
+    self.autoResizeDrawable = YES;
+
+    _state->commandQueue = [device newCommandQueue];
+
+    id<MTLLibrary> library = [device newDefaultLibrary];
+    id<MTLFunction> vertex = [library newFunctionWithName:@"c64Vertex"];
+    id<MTLFunction> fragment = [library newFunctionWithName:@"c64Fragment"];
+
+    MTLRenderPipelineDescriptor *descriptor = [[MTLRenderPipelineDescriptor alloc] init];
+    descriptor.vertexFunction = vertex;
+    descriptor.fragmentFunction = fragment;
+    descriptor.colorAttachments[0].pixelFormat = self.colorPixelFormat;
+
+    NSError *error = nil;
+    _state->pipeline = [device newRenderPipelineStateWithDescriptor:descriptor error:&error];
+    if (!_state->pipeline) {
+        NSLog(@"Metal pipeline error: %@", error);
+    }
+}
+
 - (instancetype)initWithFrame:(CGRect)frameRect {
-    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-    self = [super initWithFrame:frameRect device:device];
+    self = [super initWithFrame:frameRect device:MTLCreateSystemDefaultDevice()];
     if (self) {
-        _state = std::make_unique<C64MetalState>();
-        self.delegate = self;
-        self.paused = YES;
-        self.enableSetNeedsDisplay = YES;
-        self.framebufferOnly = YES;
-        self.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
-        self.clearColor = MTLClearColorMake(0.02, 0.02, 0.025, 1.0);
-        self.autoResizeDrawable = YES;
-
-        _state->commandQueue = [device newCommandQueue];
-
-        id<MTLLibrary> library = [device newDefaultLibrary];
-        id<MTLFunction> vertex = [library newFunctionWithName:@"c64Vertex"];
-        id<MTLFunction> fragment = [library newFunctionWithName:@"c64Fragment"];
-
-        MTLRenderPipelineDescriptor *descriptor = [[MTLRenderPipelineDescriptor alloc] init];
-        descriptor.vertexFunction = vertex;
-        descriptor.fragmentFunction = fragment;
-        descriptor.colorAttachments[0].pixelFormat = self.colorPixelFormat;
-
-        NSError *error = nil;
-        _state->pipeline = [device newRenderPipelineStateWithDescriptor:descriptor error:&error];
-        if (!_state->pipeline) {
-            NSLog(@"Metal pipeline error: %@", error);
-        }
+        [self configureMetalView];
     }
     return self;
 }
 
 - (instancetype)initWithCoder:(NSCoder *)coder {
-    return [self initWithFrame:CGRectZero];
+    self = [super initWithCoder:coder];
+    if (self) {
+        [self configureMetalView];
+    }
+    return self;
 }
 
 - (void)submitFrame:(const void *)data

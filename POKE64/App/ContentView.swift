@@ -6,7 +6,9 @@ struct ContentView: View {
     @State private var showImporter = false
     @State private var showKeyboard = false
     @State private var showGameControls = false
-    @State private var showFirmwareSettings = false
+    @State private var showSettings = false
+    @State private var settingsInitialPanel: SettingsPanel = .system
+    @State private var settingsFirmwareFingerprint = FirmwareStore.configurationFingerprint
 
     var body: some View {
         ZStack {
@@ -40,9 +42,16 @@ struct ContentView: View {
                 .clipped()
                 .ignoresSafeArea(edges: .bottom)
             }
+
+            if emulator.isStarting {
+                bootOverlay
+                    .transition(.opacity)
+                    .zIndex(100)
+            }
         }
+        .animation(.easeInOut(duration: 0.2), value: emulator.isStarting)
         .task {
-            emulator.startAutomatically()
+            await emulator.startAutomatically()
         }
         .sheet(isPresented: $showKeyboard) {
             C64KeyboardView()
@@ -50,10 +59,16 @@ struct ContentView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showFirmwareSettings, onDismiss: {
-            emulator.firmwareConfigurationChanged()
+        .sheet(isPresented: $showSettings, onDismiss: {
+            Task {
+                await emulator.settingsDidClose(
+                    previousFirmwareFingerprint: settingsFirmwareFingerprint
+                )
+            }
         }) {
-            FirmwareSettingsView()
+            SettingsView(initialPanel: settingsInitialPanel)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .fileImporter(
             isPresented: $showImporter,
@@ -105,9 +120,9 @@ struct ContentView: View {
             .disabled(!emulator.firmwareReady)
 
             Button {
-                showFirmwareSettings = true
+                openSettings(.system)
             } label: {
-                Label("Firmware", systemImage: "memorychip")
+                Label("Settings", systemImage: "gearshape")
             }
             .buttonStyle(.bordered)
 
@@ -132,8 +147,24 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .disabled(!emulator.isRunning)
 
-            Button("Reset") {
-                emulator.reset()
+            Menu {
+                Button("Soft Reset", systemImage: "arrow.counterclockwise") {
+                    emulator.softReset()
+                }
+                Button("Hard Reset", systemImage: "power") {
+                    emulator.hardReset()
+                }
+
+                if emulator.hasLoadedCartridge {
+                    Divider()
+                    Button("Eject Cartridge and Reset", systemImage: "eject") {
+                        Task {
+                            await emulator.ejectCartridgeAndReset()
+                        }
+                    }
+                }
+            } label: {
+                Label("Reset", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.bordered)
             .disabled(!emulator.isRunning)
@@ -143,7 +174,9 @@ struct ContentView: View {
                     emulator.stop()
                     showGameControls = false
                 } else {
-                    emulator.startEmpty()
+                    Task {
+                        await emulator.startEmpty()
+                    }
                 }
             }
             .buttonStyle(.bordered)
@@ -152,6 +185,42 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.black)
+    }
+
+    private func openSettings(_ panel: SettingsPanel) {
+        settingsInitialPanel = panel
+        settingsFirmwareFingerprint = FirmwareStore.configurationFingerprint
+        showSettings = true
+    }
+
+    private var bootOverlay: some View {
+        ZStack {
+            Color.black
+                .ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                Image("AppIconPreview")
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: 112, height: 112)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+
+                Text("POKE64 is loading…")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.white)
+
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.white)
+
+                Text("Starting VICE x64sc")
+                    .font(.callout.monospaced())
+                    .foregroundStyle(.white.opacity(0.65))
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("POKE64 is loading")
     }
 
     private var firmwareRequiredOverlay: some View {
@@ -169,7 +238,7 @@ struct ContentView: View {
                 .frame(maxWidth: 460)
 
             Button("Configure Firmware") {
-                showFirmwareSettings = true
+                openSettings(.firmware)
             }
             .buttonStyle(.borderedProminent)
         }

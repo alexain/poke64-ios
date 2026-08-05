@@ -35,7 +35,8 @@ typedef NS_ENUM(NSInteger, C64KeyCode) {
 - (BOOL)startWithoutContent;
 - (BOOL)loadContentAtURL:(NSURL *)url;
 - (void)stop;
-- (void)resetCore;
+- (void)softReset;
+- (void)hardReset;
 - (void)setJoypadButton:(C64JoypadButton)button pressed:(BOOL)pressed;
 - (void)setKey:(C64KeyCode)key pressed:(BOOL)pressed;
 - (void)setRawKeyCode:(NSUInteger)keyCode pressed:(BOOL)pressed;

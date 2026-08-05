@@ -12,6 +12,7 @@
 		36B65395C555CF90241B04F7 /* EmulatorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E05DEE9B3F9F2DDD233038 /* EmulatorModel.swift */; };
 		51E44C46A1C49917E8A5AA43 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A9C94FB248449DE144B8E521 /* AudioToolbox.framework */; };
 		571AAAAE7876AB23D4A22A51 /* FirmwareStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B9E8A020E592A88D7AB9194 /* FirmwareStore.swift */; };
+		61C2704A8480473247FB4687 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC6353F181131B78CB9E2301 /* SettingsView.swift */; };
 		66C247BC53BA5720225153A7 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4D4991D381190429755583D /* MetalKit.framework */; };
 		75AB048B9A3F820BC3EAEF4B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E4BACE62D631B6765D0E3B6 /* ContentView.swift */; };
 		7998F522E76A742788F5AE40 /* HardwareKeyboardCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD4721181C78231CB5D16BDB /* HardwareKeyboardCapture.swift */; };
@@ -20,6 +21,7 @@
 		CD4C301C1535EBE53E483172 /* C64MetalView.mm in Sources */ = {isa = PBXBuildFile; fileRef = C3ADE8835878CBE3A1F54492 /* C64MetalView.mm */; };
 		D34583E3E5139A853354474B /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 814D62254F1D37CDE3B0D024 /* AVFoundation.framework */; };
 		DEC81CF48A00FB0B67D71208 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 03A8AFEB9042C3C96638CBFB /* Metal.framework */; };
+		E8599DCA042E75FC3EF5B41B /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 1EE2221E50EDD7D2A0ED4DA8 /* LaunchScreen.storyboard */; };
 		FB9ACFE0427D95B7B90E795B /* C64Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = E8ED7C2D830B4B2B639A3CEF /* C64Shaders.metal */; };
 		FE76FAF17EA32FC0CF00145B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0A4D40EE166996984F128885 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
@@ -27,18 +29,20 @@
 /* Begin PBXFileReference section */
 		03A8AFEB9042C3C96638CBFB /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		0A4D40EE166996984F128885 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1EE2221E50EDD7D2A0ED4DA8 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		4AA91E3CFCCE98FA078C40FE /* LibretroSession.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LibretroSession.h; sourceTree = "<group>"; };
 		4E4BACE62D631B6765D0E3B6 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		64CD239BF939255B799F19C0 /* FirmwareSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirmwareSettingsView.swift; sourceTree = "<group>"; };
 		652D411DA724DCA54E11D189 /* C64MetalView.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = C64MetalView.h; sourceTree = "<group>"; };
 		705328D2DF5D31506F01A7C0 /* LibretroMinimal.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LibretroMinimal.h; sourceTree = "<group>"; };
-		767C59A1CE2422039F2D20BB /* POKE64.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = POKE64.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		767C59A1CE2422039F2D20BB /* POKE64.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = POKE64.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7725FE7F892841556F15BC3E /* LibretroSession.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = LibretroSession.mm; sourceTree = "<group>"; };
 		814D62254F1D37CDE3B0D024 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		87B773761B2C079BD76E63C7 /* POKE64-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "POKE64-Bridging-Header.h"; sourceTree = "<group>"; };
 		9B9E8A020E592A88D7AB9194 /* FirmwareStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirmwareStore.swift; sourceTree = "<group>"; };
 		A7F58AFDD31BC4F048A4B03B /* C64KeyboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = C64KeyboardView.swift; sourceTree = "<group>"; };
 		A9C94FB248449DE144B8E521 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
+		AC6353F181131B78CB9E2301 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		BD4721181C78231CB5D16BDB /* HardwareKeyboardCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareKeyboardCapture.swift; sourceTree = "<group>"; };
 		C3ADE8835878CBE3A1F54492 /* C64MetalView.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = C64MetalView.mm; sourceTree = "<group>"; };
 		D4D4991D381190429755583D /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
@@ -127,8 +131,10 @@
 				64CD239BF939255B799F19C0 /* FirmwareSettingsView.swift */,
 				9B9E8A020E592A88D7AB9194 /* FirmwareStore.swift */,
 				BD4721181C78231CB5D16BDB /* HardwareKeyboardCapture.swift */,
+				1EE2221E50EDD7D2A0ED4DA8 /* LaunchScreen.storyboard */,
 				87B773761B2C079BD76E63C7 /* POKE64-Bridging-Header.h */,
 				E3A7820C6E392E65D7B9F2F1 /* POKE64App.swift */,
+				AC6353F181131B78CB9E2301 /* SettingsView.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -206,6 +212,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FE76FAF17EA32FC0CF00145B /* Assets.xcassets in Resources */,
+				E8599DCA042E75FC3EF5B41B /* LaunchScreen.storyboard in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -248,6 +255,7 @@
 				7998F522E76A742788F5AE40 /* HardwareKeyboardCapture.swift in Sources */,
 				1A11076DF99128E649E8EF6C /* LibretroSession.mm in Sources */,
 				8FA3804304433C32B07BD7BB /* POKE64App.swift in Sources */,
+				61C2704A8480473247FB4687 /* SettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -259,6 +267,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 6QM7NE4FWS;
 				INFOPLIST_FILE = POKE64/App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -274,7 +283,7 @@
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_OBJC_BRIDGING_HEADER = "POKE64/App/POKE64-Bridging-Header.h";
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 2;
 			};
 			name = Debug;
 		};
@@ -283,6 +292,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 6QM7NE4FWS;
 				INFOPLIST_FILE = POKE64/App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -298,7 +308,7 @@
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_OBJC_BRIDGING_HEADER = "POKE64/App/POKE64-Bridging-Header.h";
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 2;
 			};
 			name = Release;
 		};

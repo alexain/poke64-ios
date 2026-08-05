@@ -6,7 +6,7 @@ POKE64 is a C64-only iOS frontend. It does not embed RetroArch. It dynamically l
 
 ## SwiftUI application layer
 
-`ContentView` owns the main layout, toolbar, file importer, firmware settings sheet, C64 keyboard, and optional touch controls. `EmulatorModel` exposes session state and blocks startup until the required firmware set is valid.
+`ContentView` owns the main layout, toolbar, file importer, Settings presentation, C64 keyboard, and optional touch controls. `EmulatorModel` exposes session state, blocks startup until the required firmware set is valid, and coordinates reset or cartridge ejection actions.
 
 `FirmwareStore` copies user-selected ROM images into Application Support, validates exact sizes, calculates SHA-256 values for diagnostics, and generates `system/vice/vicerc` with absolute sandbox paths.
 
@@ -21,7 +21,7 @@ User document picker
   → restart core when BASIC + KERNAL + character ROMs are valid
 ```
 
-The optional 1541-II slot controls whether True Drive Emulation is enabled in the generated configuration.
+The optional 1541-II slot is retained for the future Disk Drives implementation. The current development version forces Virtual Device Traps on and True Drive Emulation off because the libretro core applies drive options after reading `vicerc`; this compatibility mode prevents device 8 from becoming unavailable during D64 autostart.
 
 ## Core build flow
 
@@ -54,3 +54,13 @@ VICE supplies a framebuffer through the video callback. `C64MetalView` uploads i
 ## Audio
 
 Stereo 16-bit samples from the batch callback are written to a ring buffer consumed by `AVAudioEngine`.
+
+## Reset and cartridge lifecycle
+
+Soft Reset and Hard Reset operate on the current emulated hardware state. An attached CRT remains inserted across both operations, as it would on physical hardware.
+
+**Eject Cartridge and Reset** stops the current libretro session, clears the loaded cartridge reference, and starts an empty C64 session so that the machine returns to BASIC.
+
+## Documentation split
+
+Build prerequisites, commands, signing and repository hygiene are documented in [BUILDING.md](BUILDING.md). Planned features and development order are maintained in [ROADMAP.md](ROADMAP.md).
