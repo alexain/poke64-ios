@@ -69,6 +69,16 @@ struct ContentView: View {
                 print("File importer: \(error)")
             }
         }
+        .sheet(
+            isPresented: Binding(
+                get: { emulator.presentedError != nil },
+                set: { if !$0 { emulator.presentedError = nil } }
+            )
+        ) {
+            StartupErrorView(message: emulator.presentedError ?? "Unknown error") {
+                emulator.presentedError = nil
+            }
+        }
     }
 
     private var header: some View {
@@ -80,7 +90,8 @@ struct ContentView: View {
                 Text(emulator.status)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.65))
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 12)
@@ -278,5 +289,31 @@ private struct HoldButtonShape: Shape {
             return Circle().path(in: rect)
         }
         return RoundedRectangle(cornerRadius: 8).path(in: rect)
+    }
+}
+
+
+private struct StartupErrorView: View {
+    let message: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(message)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding()
+            }
+            .navigationTitle("Core startup error")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done", action: dismiss)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 }

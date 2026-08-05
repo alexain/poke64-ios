@@ -1,57 +1,78 @@
-# Roadmap
+# POKE64 roadmap
 
-## Firmware
+## 1. Core and firmware
 
-- named firmware profiles;
-- additional drive models and ROM slots;
-- known-ROM identification database without restricting custom firmware;
-- profile export/import without embedding firmware data;
-- clearer diagnostics when VICE rejects a firmware combination;
-- investigate an upstreamable compile-time option that disables embedded firmware before linking.
+- Validate the source-level external-firmware-only build on a pinned VICE revision.
+- Improve startup and firmware diagnostics.
+- Add standard, JiffyDOS, custom and open-firmware profiles.
+- Disable True Drive Emulation when no compatible drive ROM is available.
+- Add drive firmware slots and known-ROM identification.
 
-## On-screen keyboard
+## 2. Settings architecture
 
-- replace the sheet with a keyboard panel attached to the bottom edge;
-- support compact height and rotation without obscuring the video;
-- preserve held modifiers across virtual-key presses;
-- optional haptic feedback.
+Create a settings modal with separate panels for:
 
-## Input
+- System
+- Graphics
+- Audio
+- Tape
+- Disk Drives
+- Printer
+- Firmware / ROMs
+- Networking
+- About
 
-- `GCController` integration;
-- default joyport selection;
-- controller remapping;
-- paddle and mouse support;
-- customizable touch layout.
+Panels may initially be placeholders and will be completed incrementally.
 
-## Media
+## 3. Toolbar and expansion devices
 
-- Disk Control interface;
-- M3U multidisk selection and disk swapping;
-- tape and cartridge management;
-- local library with metadata and artwork.
+- Remove Start and Stop.
+- Add Soft/Hard Reset.
+- Add independent Joyport 1 and Joyport 2 assignment menus.
+- Support None, one Virtual Joystick, physical controllers and Commodore mouse.
+- Add Cartridge/REU, Drives and Tape panels.
 
-## Emulation
+## 4. Keyboard and input
 
-- VICE core options;
-- per-content configuration;
-- PAL/NTSC and C64 model selection;
-- SID settings;
-- save/load states and thumbnails;
-- cartridge freeze support.
+- Dock the complete C64 keyboard at the bottom.
+- Support adaptive layouts and held modifiers.
+- Display Shift and Commodore graphical legends dynamically.
+- Add `GCController`, paddles and mouse support.
 
-## Rendering and audio
+## 5. Drives and tape
 
-- integer scaling;
-- optional CRT shaders;
-- configurable overscan and crop;
-- adaptive audio/video synchronization;
-- audio interruption and route-change handling.
+- Support units 8–11, disk control and multidisk media.
+- Add side-mounted drive activity LEDs beside the 4:3 display.
+- Add synchronized 1541 mechanical sounds.
+- Add complete datasette transport controls and status.
 
-## Distribution
+## 6. Graphics and audio
 
-- pin a verified VICE commit for each POKE64 release;
-- automated frontend tests;
-- CI static checks;
-- privacy manifest and TestFlight/App Store preparation;
-- independent final license and firmware-distribution review.
+- Add Metal CRT shaders and presets.
+- Add VIC-II palette, crop and scaling options.
+- Add SID model, emulation engine, filters and dual-SID settings.
+
+## 7. Printer
+
+- Emulate MPS-801/802/803 output through VICE.
+- Produce realistic dot-matrix multipage PDFs.
+- Add continuous paper, ribbon, queue, preview, export and sound options.
+- Investigate Okimate 20 support later.
+
+## 8. Networking and BBS
+
+- Add Hayes modem emulation through RS-232/User Port.
+- Support Telnet and raw TCP.
+- Add BBS directory, baud rate, connection state and activity indicators.
+
+## Development order
+
+```text
+external-firmware core
+→ settings architecture
+→ toolbar and joyports
+→ bottom keyboard
+→ drive/tape/cartridge management
+→ CRT and audio controls
+→ printer and networking
+```

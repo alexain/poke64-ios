@@ -46,7 +46,7 @@ fi
 git add .
 
 # Refuse to publish local build outputs or user-imported firmware.
-if git diff --cached --name-only | grep -E '(^|/)(Vendor/vice-libretro-src|DerivedData|xcuserdata)(/|$)|\.dylib$|firmware-scrub-report\.json$|\.(bin|rom)$'; then
+if git diff --cached --name-only | grep -E '(^|/)(Vendor/vice-libretro-src|DerivedData|xcuserdata)(/|$)|\.dylib$|external-firmware-(source-patch|verification)-report\.json$|\.(bin|rom)$'; then
   echo "Refusing to publish local core, firmware, VICE source, or Xcode user/build data." >&2
   exit 1
 fi

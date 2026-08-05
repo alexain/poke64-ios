@@ -7,6 +7,7 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var loadedContent: String?
     @Published private(set) var isRunning = false
     @Published private(set) var firmwareReady = false
+    @Published var presentedError: String?
 
     let session = LibretroSession()
     private var didAttemptAutomaticStart = false
@@ -37,6 +38,7 @@ final class EmulatorModel: ObservableObject {
     }
 
     func startEmpty() {
+        presentedError = nil
         refreshFirmwareState()
         guard firmwareReady else {
             isRunning = false
@@ -50,11 +52,14 @@ final class EmulatorModel: ObservableObject {
             status = "C64 started"
         } else {
             isRunning = false
-            status = session.lastErrorMessage ?? "Unable to start the core"
+            let message = session.lastErrorMessage ?? "Unable to start the core"
+            status = Self.errorSummary(message)
+            presentedError = message
         }
     }
 
     func importAndLoad(url: URL) {
+        presentedError = nil
         refreshFirmwareState()
         guard firmwareReady else {
             status = "Configure firmware before loading content"
@@ -74,10 +79,14 @@ final class EmulatorModel: ObservableObject {
                 status = "Running: \(imported.lastPathComponent)"
             } else {
                 isRunning = false
-                status = session.lastErrorMessage ?? "Unable to load content"
+                let message = session.lastErrorMessage ?? "Unable to load content"
+                status = Self.errorSummary(message)
+                presentedError = message
             }
         } catch {
-            status = error.localizedDescription
+            let message = error.localizedDescription
+            status = Self.errorSummary(message)
+            presentedError = message
         }
     }
 
@@ -124,6 +133,17 @@ final class EmulatorModel: ObservableObject {
 
     private func refreshFirmwareState() {
         firmwareReady = FirmwareStore.isBootReady
+    }
+
+    private static func errorSummary(_ message: String) -> String {
+        let normalized = message
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+
+        guard normalized.count > 96 else { return normalized }
+        return String(normalized.prefix(93)) + "…"
     }
 
     private static func copyIntoSandbox(url: URL) throws -> URL {

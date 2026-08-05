@@ -28,14 +28,16 @@ The optional 1541-II slot controls whether True Drive Emulation is enabled in th
 ```text
 checkout vice-libretro
   → apply Apple Clang/zlib compatibility fix
-  → build x64sc iOS arm64 dylib
-  → scan exact firmware payloads from vice/data/C64 and vice/data/DRIVES
-  → zero matching payloads in the unsigned dylib
-  → verify expected categories and absence of exact payloads
+  → patch sysfile.c before compilation
+  → disable libretro embedded-firmware lookup branches
+  → preserve include/embedded for VIC-II palettes and generated resources
+  → neutralize only generated arrays that exactly match firmware payloads
+  → build x64sc iOS arm64 dylib normally
+  → verify the linked dylib without modifying it
   → embed and sign dylib during Xcode build
 ```
 
-The post-link scrubber preserves the Mach-O file length. It refuses to complete when upstream changes prevent the expected payloads from being identified.
+The source patch fails closed when the expected upstream structure or required firmware categories cannot be recognized. The generated-resource include path remains available because `c64embedded.c` also uses palette headers from that directory. The post-build verifier scans the completed dylib for exact firmware payloads and never modifies the Mach-O file.
 
 ## Hardware input
 
@@ -43,7 +45,7 @@ The post-link scrubber preserves the Mach-O file length. It refuses to complete 
 
 ## Libretro host
 
-`LibretroSession.mm` loads the dylib through `dlopen`, resolves `retro_*` symbols, provides system/save/assets directories, registers callbacks, and runs `retro_run()` on a dedicated thread.
+`LibretroSession.mm` loads the dylib through `dlopen`, resolves `retro_*` symbols, provides system/save/assets directories, registers callbacks, and runs `retro_run()` on a dedicated thread. It also captures VICE messages and treats startup shutdown requests as explicit errors instead of leaving a silent black screen.
 
 ## Video
 

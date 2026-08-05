@@ -6,16 +6,19 @@ Run:
 ./Scripts/build_vice_core.sh
 ```
 
-The script creates an unsigned, external-firmware-only local core:
+The script creates an unsigned local core compiled with the POKE64 source-level external-firmware patch:
 
 ```text
 vice_x64sc_libretro_ios.dylib
 ```
 
-It also creates a local verification report:
+It also creates two local reports:
 
 ```text
-firmware-scrub-report.json
+external-firmware-source-patch-report.json
+external-firmware-verification-report.json
 ```
 
-Both files are excluded from Git. The dylib is copied into the application and signed by `Scripts/embed_core.sh` during the Xcode build.
+The verifier does not modify the linked Mach-O file. It rejects the build if an exact upstream firmware payload is detected.
+
+The dylib and both reports are excluded from Git. `Scripts/embed_core.sh` copies and signs the dylib during the Xcode build.

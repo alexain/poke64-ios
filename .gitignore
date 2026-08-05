@@ -22,7 +22,8 @@ Vendor/Core/*.dylib
 *.orig
 *.rej
 *.swp
-Vendor/Core/firmware-scrub-report.json
+Vendor/Core/external-firmware-source-patch-report.json
+Vendor/Core/external-firmware-verification-report.json
 
 # Python caches
 __pycache__/

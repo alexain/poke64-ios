@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <climits>
 #include <cstdarg>
 #include <cstdio>
@@ -131,6 +132,45 @@ struct SessionImpl {
     AudioRingBuffer audioRing;
     AVAudioEngine *audioEngine = nil;
     AVAudioSourceNode *audioSource = nil;
+    std::mutex diagnosticMutex;
+    std::string lastCoreMessage;
+    std::string lastCoreError;
+    std::mutex startupMutex;
+    std::condition_variable startupCondition;
+    bool firstRunCompleted = false;
+
+    void clearCoreDiagnostics() {
+        std::lock_guard<std::mutex> lock(diagnosticMutex);
+        lastCoreMessage.clear();
+        lastCoreError.clear();
+    }
+
+    static bool isGenericStartupError(const std::string &value) {
+        return value == "Core startup failed with error:" ||
+               value == "Core startup without parameters failed with error:";
+    }
+
+    void recordCoreMessage(const char *message, bool isError) {
+        if (!message || !*message) return;
+        std::string value(message);
+        while (!value.empty() && (value.back() == '\n' || value.back() == '\r')) {
+            value.pop_back();
+        }
+        if (value.empty()) return;
+
+        std::lock_guard<std::mutex> lock(diagnosticMutex);
+        lastCoreMessage = value;
+        if (isError && (!isGenericStartupError(value) || lastCoreError.empty())) {
+            lastCoreError = value;
+        }
+    }
+
+    std::string startupFailureMessage(const char *fallback) {
+        std::lock_guard<std::mutex> lock(diagnosticMutex);
+        if (!lastCoreError.empty()) return lastCoreError;
+        if (!lastCoreMessage.empty()) return lastCoreMessage;
+        return fallback ? fallback : "VICE requested shutdown during startup";
+    }
 
     ~SessionImpl() {
         stop();
@@ -325,11 +365,16 @@ static void frontendLog(enum retro_log_level level, const char *format, ...) {
     else if (level == RETRO_LOG_WARN) prefix = "WARN";
     else if (level == RETRO_LOG_ERROR) prefix = "ERROR";
 
-    std::fprintf(stderr, "[VICE/%s] ", prefix);
+    char buffer[4096] = {};
     va_list arguments;
     va_start(arguments, format);
-    std::vfprintf(stderr, format, arguments);
+    std::vsnprintf(buffer, sizeof(buffer), format, arguments);
     va_end(arguments);
+
+    std::fprintf(stderr, "[VICE/%s] %s", prefix, buffer);
+    if (gSession) {
+        gSession->recordCoreMessage(buffer, level == RETRO_LOG_WARN || level == RETRO_LOG_ERROR);
+    }
 }
 
 static bool environmentCallback(unsigned command, void *data) {
@@ -436,11 +481,18 @@ static bool environmentCallback(unsigned command, void *data) {
 
         case RETRO_ENVIRONMENT_SET_MESSAGE: {
             const retro_message *message = static_cast<const retro_message *>(data);
-            if (message && message->msg) NSLog(@"VICE: %s", message->msg);
+            if (message && message->msg) {
+                NSLog(@"VICE: %s", message->msg);
+                session->recordCoreMessage(message->msg, true);
+            }
             return true;
         }
 
         case RETRO_ENVIRONMENT_SHUTDOWN:
+            session->recordCoreMessage(
+                "VICE requested shutdown. Check the imported firmware files and generated vicerc.",
+                false
+            );
             session->shutdownRequested.store(true, std::memory_order_release);
             return true;
 
@@ -536,7 +588,12 @@ bool SessionImpl::start(const char *path, std::string &error) {
 
     if (!loadCore(error)) return false;
     gSession = this;
+    clearCoreDiagnostics();
     shutdownRequested.store(false, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(startupMutex);
+        firstRunCompleted = false;
+    }
 
     api.retro_set_environment(environmentCallback);
     api.retro_set_video_refresh(videoCallback);
@@ -552,6 +609,13 @@ bool SessionImpl::start(const char *path, std::string &error) {
                 systemInfo.library_version ?: "");
 
     api.retro_init();
+    if (shutdownRequested.load(std::memory_order_acquire)) {
+        error = startupFailureMessage("VICE failed during core initialization");
+        api.retro_deinit();
+        unloadCore();
+        gSession = nullptr;
+        return false;
+    }
     api.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
 
     retro_game_info game{};
@@ -564,11 +628,17 @@ bool SessionImpl::start(const char *path, std::string &error) {
         contentPath.clear();
     }
 
-    if (!api.retro_load_game(gamePointer)) {
+    const bool gameLoaded = api.retro_load_game(gamePointer);
+    if (!gameLoaded || shutdownRequested.load(std::memory_order_acquire)) {
+        if (gameLoaded) api.retro_unload_game();
+        error = shutdownRequested.load(std::memory_order_acquire)
+            ? startupFailureMessage("VICE requested shutdown while loading firmware")
+            : startupFailureMessage(path
+                ? "The core rejected the selected content"
+                : "The core does not support starting without content");
         api.retro_deinit();
         unloadCore();
         gSession = nullptr;
-        error = path ? "The core rejected the selected content" : "The core does not support starting without content";
         return false;
     }
 
@@ -584,6 +654,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
         const std::chrono::duration<double> frameDuration(1.0 / fps);
         auto nextFrame = clock::now();
 
+        bool firstIteration = true;
         while (running.load(std::memory_order_acquire) &&
                !shutdownRequested.load(std::memory_order_acquire)) {
             if (resetRequested.exchange(false, std::memory_order_acq_rel)) {
@@ -591,6 +662,16 @@ bool SessionImpl::start(const char *path, std::string &error) {
             }
             drainKeyEvents();
             api.retro_run();
+
+            if (firstIteration) {
+                {
+                    std::lock_guard<std::mutex> lock(startupMutex);
+                    firstRunCompleted = true;
+                }
+                startupCondition.notify_all();
+                firstIteration = false;
+            }
+
             nextFrame += std::chrono::duration_cast<clock::duration>(frameDuration);
             std::this_thread::sleep_until(nextFrame);
 
@@ -599,8 +680,33 @@ bool SessionImpl::start(const char *path, std::string &error) {
                 nextFrame = now;
             }
         }
+
+        if (firstIteration) {
+            {
+                std::lock_guard<std::mutex> lock(startupMutex);
+                firstRunCompleted = true;
+            }
+            startupCondition.notify_all();
+        }
         running.store(false, std::memory_order_release);
     });
+
+    {
+        std::unique_lock<std::mutex> lock(startupMutex);
+        startupCondition.wait_for(lock, std::chrono::seconds(2), [this] {
+            return firstRunCompleted;
+        });
+    }
+
+    if (shutdownRequested.load(std::memory_order_acquire)) {
+        stop();
+        error = startupFailureMessage("VICE requested shutdown during the first emulated frame");
+        api.retro_unload_game();
+        api.retro_deinit();
+        unloadCore();
+        gSession = nullptr;
+        return false;
+    }
 
     return true;
 }

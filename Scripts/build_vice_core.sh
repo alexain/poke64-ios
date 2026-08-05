@@ -6,7 +6,8 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_DIR="${ROOT_DIR}/Vendor/vice-libretro-src"
 OUTPUT_DIR="${ROOT_DIR}/Vendor/Core"
 OUTPUT_CORE="${OUTPUT_DIR}/vice_x64sc_libretro_ios.dylib"
-SCRUB_REPORT="${OUTPUT_DIR}/firmware-scrub-report.json"
+SOURCE_PATCH_REPORT="${OUTPUT_DIR}/external-firmware-source-patch-report.json"
+VERIFICATION_REPORT="${OUTPUT_DIR}/external-firmware-verification-report.json"
 VICE_REF="${VICE_REF:-master}"
 DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET:-17.0}"
 JOBS="${JOBS:-$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4)}"
@@ -50,6 +51,12 @@ elif ! grep -Fqx "${ZUTIL_NEW}" "${ZUTIL_HEADER}"; then
   exit 1
 fi
 
+# Disable the libretro embedded-firmware path in the fetched source tree before
+# compilation. The patch script fails closed if upstream layout has changed.
+python3 "${SCRIPT_DIR}/prepare_external_firmware_core.py" \
+  --source "${SOURCE_DIR}" \
+  --report "${SOURCE_PATCH_REPORT}"
+
 make -C "${SOURCE_DIR}" clean EMUTYPE=x64sc || true
 make -C "${SOURCE_DIR}" \
   -j"${JOBS}" \
@@ -60,14 +67,15 @@ make -C "${SOURCE_DIR}" \
 mkdir -p "${OUTPUT_DIR}"
 cp -f "${SOURCE_DIR}/vice_x64sc_libretro_ios.dylib" "${OUTPUT_CORE}"
 
-# vice-libretro embeds the standard machine and drive firmware in its normal
-# build. POKE64 distributes no Commodore firmware, so remove exact embedded
-# payloads before the dylib is signed and require a successful verification.
-python3 "${SCRIPT_DIR}/scrub_embedded_firmware.py" \
+# Verify the linked dylib without modifying it. Any exact ROM payload found in
+# the final Mach-O is a hard build failure.
+python3 "${SCRIPT_DIR}/verify_external_firmware_core.py" \
   --core "${OUTPUT_CORE}" \
   --source "${SOURCE_DIR}" \
-  --report "${SCRUB_REPORT}"
+  --report "${VERIFICATION_REPORT}"
 
-printf '\nExternal-firmware-only core created at:\n  %s\n' "${OUTPUT_CORE}"
+printf '\nSource-level external-firmware-only core created at:\n  %s\n' "${OUTPUT_CORE}"
+printf 'Source patch report:\n  %s\n' "${SOURCE_PATCH_REPORT}"
+printf 'Firmware verification report:\n  %s\n' "${VERIFICATION_REPORT}"
 file "${OUTPUT_CORE}"
 printf 'VICE revision:\n  %s\n' "$(git -C "${SOURCE_DIR}" rev-parse HEAD)"

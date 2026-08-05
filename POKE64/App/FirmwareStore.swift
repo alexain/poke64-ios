@@ -185,7 +185,7 @@ enum FirmwareStore {
         let chargen = try fileURL(for: .chargen)
         let drive = try fileURL(for: .drive1541II)
 
-        var lines = ["[C64]"]
+        var lines = ["[C64SC]"]
         if FileManager.default.fileExists(atPath: basic.path) {
             lines.append("BasicName=\"\(escapedVicercPath(basic.path))\"")
         }
