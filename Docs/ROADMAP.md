@@ -1,110 +1,108 @@
 # POKE64 roadmap
 
-POKE64 is currently designed for **iPadOS first**, with landscape iPad use as the primary interface target. iPhone and macOS adaptations are planned only after the core iPad experience is stable.
+POKE64 is designed for **iPadOS first**, with landscape iPad use as the primary interface target. iPhone and macOS adaptations will be considered after the core iPad experience is stable.
+
+This document lists only work that is still pending.
 
 ## 1. Core and firmware
 
-- Validate the source-level external-firmware-only build on a pinned VICE revision.
-- Improve startup and firmware diagnostics.
-- Add standard, JiffyDOS, custom and open-firmware profiles.
-- Offer an installable open-firmware fallback when the user does not own compatible ROM images.
-- Disable True Drive Emulation when no compatible drive ROM is available.
-- Add drive firmware slots and known-ROM identification.
+- Pin the exact VICE/libretro revision used by release builds.
+- Make the external-firmware-only core build fully reproducible.
+- Improve startup, firmware and media-loading diagnostics.
+- Add firmware profiles for standard ROMs, JiffyDOS, custom ROMs and redistributable open firmware.
+- Offer an optional open-firmware fallback for users without compatible ROM images.
+- Add drive firmware slots, known-ROM identification and compatible drive-model selection.
 
-## 2. Settings architecture
+## 2. Settings panels
 
-Provide an iPad settings modal with separate panels for:
+Complete the existing settings sections with persistent options and live application where supported:
 
-- System
-- Graphics
-- Audio
-- Tape
-- Disk Drives
-- Printer
-- Firmware / ROMs
-- Networking
-- About
+- System and machine profiles.
+- Graphics and VIC-II options.
+- Audio, SID model and filter options.
+- Tape and datasette options.
+- Disk drive configuration.
+- Printer configuration.
+- Firmware profile management.
+- Networking and modem options.
 
-The navigation shell and placeholder panels are introduced in v0.3.0 and will be completed incrementally.
+## 3. Library
 
-## 3. Toolbar and expansion devices
+Create a persistent media library for D64, D71, D81, G64, TAP, T64, PRG, CRT and related supported formats.
 
-Implemented in the first toolbar redesign:
-
-- Start and Stop removed from the main toolbar.
-- Soft Reset, Hard Reset and cartridge ejection available from the Reset menu.
-- Independent Port 1 and Port 2 menus.
-- One virtual joystick can be assigned to either C64 joyport or disconnected.
-
-Remaining work:
-
-- Add physical-controller discovery and assignment.
-- Add Commodore mouse assignment.
-- Add dedicated Cartridge/REU, Drives, Tape and Library controls.
-
-## 4. Library
-
-Create a persistent content library for D64, D71, D81, G64, TAP, T64, PRG, CRT and supported related formats.
-
-- Import once and select media later from Drive, Tape or Cartridge panels.
+- Import media once and reopen it from Drive, Tape or Cartridge views.
 - Store title, format, size, import date, favorites and recent usage.
-- Add user screenshots, custom notes and optional cover artwork.
+- Support deletion and file replacement from inside the app.
+- Add screenshots, notes and optional cover artwork.
 - Display disk directories, free blocks and contained files.
 - Preview BASIC listings where practical.
-- Later associate hardware profiles, joyports, firmware, save states and multidisk sets with each entry.
+- Associate hardware profiles, joyports, firmware, save states and multidisk sets with library entries.
 
-## 5. Keyboard and input
+## 4. Keyboard and input
 
-- Dock the complete C64 keyboard at the bottom instead of presenting a sheet.
-- Support adaptive iPad layouts and held modifiers.
+- Dock the complete C64 keyboard at the bottom instead of presenting it as a sheet.
+- Add adaptive iPad layouts and reliable held modifiers.
 - Display Shift and Commodore graphical legends dynamically.
-- Improve Apple Magic Keyboard and other hardware-keyboard mapping.
-- Add `GCController`, paddles and Commodore mouse support.
+- Improve Apple Magic Keyboard and other hardware-keyboard mappings.
+- Add paddle support.
+- Validate Commodore 1351 mouse behavior with representative software and tune pointer sensitivity.
 - Investigate Apple Pencil as a Commodore mouse, light pen or graphics pointer.
 
-## 6. Drives and tape
+## 5. Media and expansion devices
 
-- Support units 8–11, disk control and multidisk media.
+- Add dedicated Library, Drives, Tape and Cartridge/REU controls.
+- Support drive units 8–11 and selectable drive models.
+- Add disk control, mount/eject operations and multidisk sets.
 - Add side-mounted drive activity LEDs beside the 4:3 display.
-- Add synchronized 1541 mechanical sounds.
+- Add synchronized 1541 mechanical sounds when true drive emulation is available.
 - Add complete datasette transport controls and status.
+- Add cartridge management beyond initial loading and ejection.
+- Add REU configuration and supported expansion options.
 
-## 7. Graphics and audio
+## 6. Graphics and audio
 
-- Add Metal CRT shaders and presets inspired by compatible open RetroArch shader projects.
-- Add scanlines, mask, curvature, bloom, vignette and phosphor persistence controls.
-- Add VIC-II palette, crop and scaling options.
-- Add SID model, emulation engine, filters and dual-SID settings.
+- Add Metal CRT shaders and presets based on compatible openly licensed shader projects.
+- Add scanlines, shadow mask, curvature, bloom, vignette and phosphor-persistence controls.
+- Add VIC-II palette, crop, aspect-ratio and scaling options.
+- Add SID model, emulation engine, filters, stereo and dual-SID settings.
 
-## 8. Printer
+## 7. Printer
 
 - Emulate MPS-801, MPS-802 and MPS-803 output through VICE.
 - Produce realistic dot-matrix multipage PDFs.
-- Add continuous paper, ribbon, queue, preview, export and sound options.
-- Investigate Okimate 20 protocol and color-print support later.
+- Add continuous paper, ribbon intensity, queue, preview, export and sound options.
+- Investigate Okimate 20 protocol and color-print support.
 
-## 9. Networking and BBS
+## 8. Networking and BBS
 
 - Add Hayes modem emulation through RS-232/User Port.
-- Support Telnet and raw TCP.
-- Add a BBS directory, baud rate, connection state and activity indicators.
+- Support Telnet and raw TCP connections.
+- Add a BBS directory, baud-rate selection, connection state and activity indicators.
 
-## 10. Hardware Link
+## 9. Hardware Link
 
 Investigate integration with Ultimate 64 Elite-II and compatible current Commodore hardware exposing network APIs.
 
 - Discover supported hardware on the LAN.
 - Transfer PRG, D64, CRT and library items.
-- Mount/eject media and remotely control reset or execution.
+- Mount or eject media and remotely control reset or execution.
 - Exchange memory and program data.
-- Investigate audio/video streaming when supported by the hardware API.
+- Investigate audio/video streaming where supported by the hardware API.
+
+## 10. Distribution and release engineering
+
+- Automate release builds and archive validation.
+- Document the exact source revision and patches corresponding to every distributed core binary.
+- Publish the required VICE/libretro source and license material for distributed builds.
+- Verify that release packages contain no proprietary Commodore firmware or commercial media.
+- Prepare App Store metadata, privacy declarations and review documentation.
 
 ## 11. Long-term and experimental work
 
 ### SuperCPU
 
 - Investigate technical and licensing feasibility for CMD SuperCPU emulation.
-- Evaluate 65C816, accelerated timing, SuperRAM and software compatibility requirements.
+- Evaluate 65C816 execution, accelerated timing, SuperRAM and software compatibility requirements.
 
 ### Integrated development environment
 
@@ -117,19 +115,18 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 ### Additional platforms
 
 - Adapt the interface for iPhone after the iPad workflow is stable.
-- Evaluate native macOS, Mac Catalyst or shared SwiftUI targets later.
+- Evaluate native macOS, Mac Catalyst or shared SwiftUI targets.
 
 ## Development order
 
 ```text
-external-firmware core
-→ settings architecture
-→ toolbar and joyports
+controller and mouse validation
 → Library MVP
-→ bottom keyboard
-→ drive/tape/cartridge management
-→ controllers, mouse and multidisk
-→ CRT and advanced audio
+→ bottom C64 keyboard
+→ drive, tape, cartridge and REU management
+→ complete settings panels
+→ CRT graphics and advanced audio
 → printer and networking
+→ release engineering and App Store preparation
 → hardware link and experimental features
 ```
