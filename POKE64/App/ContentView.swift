@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject private var emulator: EmulatorModel
     @State private var showImporter = false
     @State private var showKeyboard = false
+    @State private var showLibrary = false
     @State private var showSettings = false
     @State private var settingsInitialPanel: SettingsPanel = .system
     @State private var settingsFirmwareFingerprint = FirmwareStore.configurationFingerprint
@@ -80,6 +81,20 @@ struct ContentView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showLibrary) {
+            LibraryView(
+                library: emulator.library,
+                loadedItemID: emulator.loadedLibraryItemID,
+                onImport: { url in
+                    try emulator.importIntoLibrary(url: url)
+                },
+                onRun: { item in
+                    try emulator.loadLibraryItem(item)
+                }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
         .fileImporter(
             isPresented: $showImporter,
             allowedContentTypes: [.data, .archive],
@@ -124,10 +139,17 @@ struct ContentView: View {
             Button {
                 showImporter = true
             } label: {
-                Label("Open", systemImage: "folder")
+                Label("Import", systemImage: "square.and.arrow.down")
             }
             .buttonStyle(.borderedProminent)
             .disabled(!emulator.firmwareReady)
+
+            Button {
+                showLibrary = true
+            } label: {
+                Label("Library", systemImage: "books.vertical")
+            }
+            .buttonStyle(.bordered)
 
             Button {
                 openSettings(.system)

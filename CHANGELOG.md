@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added a persistent media library for D64, PRG, CRT, TAP and T64 files.
+- Added library search, favorites, recent usage, editable titles and deletion.
+- Added direct media launch from the library and automatic tracking of the currently running item.
+- Changed the main Open action to import media into the library before launching it.
+
+## 0.4.2
+
 - Changed both C64 joyports to default to `None` at application startup.
 - Added multiple physical-controller discovery and per-port assignment using Game Controller.
 - Mapped each controller's D-pad and left stick to C64 directions, with both A and B acting as FIRE.

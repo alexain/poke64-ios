@@ -25,8 +25,10 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var joyport1Assignment: JoyportAssignment = .none
     @Published private(set) var joyport2Assignment: JoyportAssignment = .none
     @Published private(set) var physicalControllers: [PhysicalControllerInfo] = []
+    @Published private(set) var loadedLibraryItemID: UUID?
 
     let session = LibretroSession()
+    let library = LibraryStore()
 
     private var didAttemptAutomaticStart = false
     private var virtualJoypadMask: UInt32 = 0
@@ -88,6 +90,7 @@ final class EmulatorModel: ObservableObject {
 
         if session.startWithoutContent() {
             loadedContent = nil
+            loadedLibraryItemID = nil
             isRunning = true
             syncInputConfiguration()
             status = "C64 started"
@@ -100,35 +103,56 @@ final class EmulatorModel: ObservableObject {
     }
 
     func importAndLoad(url: URL) {
+        do {
+            let item = try importIntoLibrary(url: url)
+            try loadLibraryItem(item)
+        } catch {
+            present(error)
+        }
+    }
+
+    @discardableResult
+    func importIntoLibrary(url: URL) throws -> LibraryItem {
+        let item = try library.importMedia(from: url)
+        status = "Imported: \(item.title)"
+        return item
+    }
+
+    func loadLibraryItem(_ item: LibraryItem) throws {
         presentedError = nil
         refreshFirmwareState()
         guard firmwareReady else {
-            status = "Configure firmware before loading content"
-            return
-        }
-
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer {
-            if accessing { url.stopAccessingSecurityScopedResource() }
+            throw EmulatorModelError.firmwareRequired
         }
 
         do {
-            let imported = try Self.copyIntoSandbox(url: url)
-            if session.loadContent(at: imported) {
-                loadedContent = imported.lastPathComponent
-                isRunning = true
-                syncInputConfiguration()
-                status = "Running: \(imported.lastPathComponent)"
-            } else {
+            let mediaURL = try library.mediaURL(for: item)
+            guard session.loadContent(at: mediaURL) else {
                 isRunning = false
+                loadedContent = nil
+                loadedLibraryItemID = nil
                 let message = session.lastErrorMessage ?? "Unable to load content"
                 status = Self.errorSummary(message)
-                presentedError = message
+                throw EmulatorModelError.coreFailure(message)
             }
+
+            loadedContent = item.originalFilename
+            loadedLibraryItemID = item.id
+            isRunning = true
+            syncInputConfiguration()
+            do {
+                try library.markOpened(item)
+            } catch {
+                print("Unable to update library recents: \(error)")
+            }
+            status = "Running: \(item.title)"
         } catch {
-            let message = error.localizedDescription
-            status = Self.errorSummary(message)
-            presentedError = message
+            if !isRunning {
+                loadedContent = nil
+                loadedLibraryItemID = nil
+            }
+            status = Self.errorSummary(error.localizedDescription)
+            throw error
         }
     }
 
@@ -144,6 +168,7 @@ final class EmulatorModel: ObservableObject {
             session.stop()
             isRunning = false
             loadedContent = nil
+            loadedLibraryItemID = nil
         }
 
         if firmwareReady {
@@ -157,6 +182,8 @@ final class EmulatorModel: ObservableObject {
     func stop() {
         session.stop()
         isRunning = false
+        loadedContent = nil
+        loadedLibraryItemID = nil
         status = firmwareReady ? "Core stopped" : "Firmware required"
     }
 
@@ -184,6 +211,7 @@ final class EmulatorModel: ObservableObject {
         session.stop()
         isRunning = false
         loadedContent = nil
+        loadedLibraryItemID = nil
         status = "Ejecting cartridge…"
         await startEmpty()
     }
@@ -530,29 +558,23 @@ final class EmulatorModel: ObservableObject {
         return String(normalized.prefix(93)) + "…"
     }
 
-    private static func copyIntoSandbox(url: URL) throws -> URL {
-        let fileManager = FileManager.default
-        let documents = try fileManager.url(
-            for: .documentDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let imports = documents.appendingPathComponent("Imported", isDirectory: true)
-        try fileManager.createDirectory(at: imports, withIntermediateDirectories: true)
+    private func present(_ error: Error) {
+        let message = error.localizedDescription
+        status = Self.errorSummary(message)
+        presentedError = message
+    }
+}
 
-        var destination = imports.appendingPathComponent(url.lastPathComponent)
-        if fileManager.fileExists(atPath: destination.path) {
-            let base = url.deletingPathExtension().lastPathComponent
-            let ext = url.pathExtension
-            let suffix = ISO8601DateFormatter().string(from: Date())
-                .replacingOccurrences(of: ":", with: "-")
-            destination = imports
-                .appendingPathComponent("\(base)-\(suffix)")
-                .appendingPathExtension(ext)
+private enum EmulatorModelError: LocalizedError {
+    case firmwareRequired
+    case coreFailure(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .firmwareRequired:
+            return "Configure BASIC, KERNAL and character ROMs before importing or running media."
+        case .coreFailure(let message):
+            return message
         }
-
-        try fileManager.copyItem(at: url, to: destination)
-        return destination
     }
 }
