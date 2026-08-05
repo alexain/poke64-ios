@@ -17,6 +17,8 @@
 		75AB048B9A3F820BC3EAEF4B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E4BACE62D631B6765D0E3B6 /* ContentView.swift */; };
 		7998F522E76A742788F5AE40 /* HardwareKeyboardCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD4721181C78231CB5D16BDB /* HardwareKeyboardCapture.swift */; };
 		8FA3804304433C32B07BD7BB /* POKE64App.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A7820C6E392E65D7B9F2F1 /* POKE64App.swift */; };
+		9118A17B1D75C369377C7D2B /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 83CD78913256CCF47245C2A7 /* GameController.framework */; };
+		AB7CAB3269F9F45FE27C565E /* C64MouseCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 541E8DF10CD05F93890E6977 /* C64MouseCaptureView.swift */; };
 		C469C7BC9C78F50CAE96AEB7 /* FirmwareSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64CD239BF939255B799F19C0 /* FirmwareSettingsView.swift */; };
 		CD4C301C1535EBE53E483172 /* C64MetalView.mm in Sources */ = {isa = PBXBuildFile; fileRef = C3ADE8835878CBE3A1F54492 /* C64MetalView.mm */; };
 		D34583E3E5139A853354474B /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 814D62254F1D37CDE3B0D024 /* AVFoundation.framework */; };
@@ -32,12 +34,14 @@
 		1EE2221E50EDD7D2A0ED4DA8 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		4AA91E3CFCCE98FA078C40FE /* LibretroSession.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LibretroSession.h; sourceTree = "<group>"; };
 		4E4BACE62D631B6765D0E3B6 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		541E8DF10CD05F93890E6977 /* C64MouseCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = C64MouseCaptureView.swift; sourceTree = "<group>"; };
 		64CD239BF939255B799F19C0 /* FirmwareSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirmwareSettingsView.swift; sourceTree = "<group>"; };
 		652D411DA724DCA54E11D189 /* C64MetalView.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = C64MetalView.h; sourceTree = "<group>"; };
 		705328D2DF5D31506F01A7C0 /* LibretroMinimal.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LibretroMinimal.h; sourceTree = "<group>"; };
-		767C59A1CE2422039F2D20BB /* POKE64.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = POKE64.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		767C59A1CE2422039F2D20BB /* POKE64.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = POKE64.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7725FE7F892841556F15BC3E /* LibretroSession.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = LibretroSession.mm; sourceTree = "<group>"; };
 		814D62254F1D37CDE3B0D024 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		83CD78913256CCF47245C2A7 /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
 		87B773761B2C079BD76E63C7 /* POKE64-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "POKE64-Bridging-Header.h"; sourceTree = "<group>"; };
 		9B9E8A020E592A88D7AB9194 /* FirmwareStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirmwareStore.swift; sourceTree = "<group>"; };
 		A7F58AFDD31BC4F048A4B03B /* C64KeyboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = C64KeyboardView.swift; sourceTree = "<group>"; };
@@ -57,6 +61,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D34583E3E5139A853354474B /* AVFoundation.framework in Frameworks */,
+				9118A17B1D75C369377C7D2B /* GameController.framework in Frameworks */,
 				51E44C46A1C49917E8A5AA43 /* AudioToolbox.framework in Frameworks */,
 				DEC81CF48A00FB0B67D71208 /* Metal.framework in Frameworks */,
 				66C247BC53BA5720225153A7 /* MetalKit.framework in Frameworks */,
@@ -126,6 +131,7 @@
 			isa = PBXGroup;
 			children = (
 				A7F58AFDD31BC4F048A4B03B /* C64KeyboardView.swift */,
+				541E8DF10CD05F93890E6977 /* C64MouseCaptureView.swift */,
 				4E4BACE62D631B6765D0E3B6 /* ContentView.swift */,
 				F2E05DEE9B3F9F2DDD233038 /* EmulatorModel.swift */,
 				64CD239BF939255B799F19C0 /* FirmwareSettingsView.swift */,
@@ -144,6 +150,7 @@
 			children = (
 				A9C94FB248449DE144B8E521 /* AudioToolbox.framework */,
 				814D62254F1D37CDE3B0D024 /* AVFoundation.framework */,
+				83CD78913256CCF47245C2A7 /* GameController.framework */,
 				03A8AFEB9042C3C96638CBFB /* Metal.framework */,
 				D4D4991D381190429755583D /* MetalKit.framework */,
 			);
@@ -247,6 +254,7 @@
 			files = (
 				02D735014547E54BA8C0B28F /* C64KeyboardView.swift in Sources */,
 				CD4C301C1535EBE53E483172 /* C64MetalView.mm in Sources */,
+				AB7CAB3269F9F45FE27C565E /* C64MouseCaptureView.swift in Sources */,
 				FB9ACFE0427D95B7B90E795B /* C64Shaders.metal in Sources */,
 				75AB048B9A3F820BC3EAEF4B /* ContentView.swift in Sources */,
 				36B65395C555CF90241B04F7 /* EmulatorModel.swift in Sources */,
@@ -267,7 +275,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = 6QM7NE4FWS;
 				INFOPLIST_FILE = POKE64/App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -292,7 +299,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = 6QM7NE4FWS;
 				INFOPLIST_FILE = POKE64/App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (

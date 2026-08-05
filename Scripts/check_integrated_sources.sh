@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 required=(
   "POKE64/App/ContentView.swift"
+  "POKE64/App/C64MouseCaptureView.swift"
   "POKE64/App/EmulatorModel.swift"
   "POKE64/App/FirmwareStore.swift"
   "POKE64/App/FirmwareSettingsView.swift"
@@ -25,6 +26,10 @@ done
 
 grep -q 'func setRawKey' "${ROOT}/POKE64/App/EmulatorModel.swift"
 grep -q 'settingsDidClose' "${ROOT}/POKE64/App/EmulatorModel.swift"
+grep -q 'GCController.controllers' "${ROOT}/POKE64/App/EmulatorModel.swift"
+grep -q 'GCMouse.mice' "${ROOT}/POKE64/App/EmulatorModel.swift"
+grep -q 'setJoypadMask' "${ROOT}/POKE64/LibretroHost/LibretroSession.h"
+grep -q 'RETRO_DEVICE_MOUSE' "${ROOT}/POKE64/LibretroHost/LibretroSession.mm"
 grep -q 'SettingsView' "${ROOT}/POKE64/App/ContentView.swift"
 grep -q 'NavigationSplitView' "${ROOT}/POKE64/App/SettingsView.swift"
 grep -q 'FirmwareSettingsView' "${ROOT}/POKE64/App/SettingsView.swift"

@@ -12,6 +12,8 @@ POKE64 is an independent open-source project. It is not affiliated with Commodor
 - Locally built and signed VICE `x64sc` libretro core.
 - Metal video rendering and AVAudioEngine audio output.
 - Hardware-keyboard input, an on-screen C64 keyboard and a virtual joystick assignable to C64 port 1 or 2.
+- Multiple physical game controllers with D-pad/left-stick movement and A/B fire input.
+- Commodore 1351 mouse input from the iPad touchscreen, trackpad or external mouse.
 - Import and launch of supported C64 media through the iOS document picker.
 - Settings panels for System, Graphics, Audio, Tape, Disk Drives, Printer, Firmware / ROMs, Networking and About.
 - External BASIC, KERNAL and character ROM management, plus an optional 1541-II ROM slot.

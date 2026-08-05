@@ -28,6 +28,17 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Color.black)
 
+                    if emulator.mousePort != nil {
+                        C64MouseCaptureView(
+                            onMove: { deltaX, deltaY in
+                                emulator.moveMouse(deltaX: deltaX, deltaY: deltaY)
+                            },
+                            onButton: { button, pressed in
+                                emulator.setMouseButton(button, pressed: pressed)
+                            }
+                        )
+                    }
+
                     if !emulator.firmwareReady {
                         firmwareRequiredOverlay
                     }
@@ -187,14 +198,52 @@ struct ContentView: View {
                 )
             }
 
-            Section("Planned") {
-                Button("Physical Controller", systemImage: "gamecontroller.fill") {}
-                    .disabled(true)
-                Button("Commodore Mouse", systemImage: "computermouse") {}
-                    .disabled(true)
+            Button {
+                emulator.setJoyportAssignment(.commodoreMouse, for: port)
+            } label: {
+                Label(
+                    "Commodore Mouse",
+                    systemImage: assignment == .commodoreMouse
+                        ? "checkmark.circle.fill"
+                        : "computermouse"
+                )
+            }
+
+            Divider()
+
+            Section("Physical Controllers") {
+                if emulator.physicalControllers.isEmpty {
+                    Button("No controllers connected", systemImage: "gamecontroller") {}
+                        .disabled(true)
+                } else {
+                    ForEach(emulator.physicalControllers) { controller in
+                        let assignedPort = emulator.controllerAssignedPort(controller.id)
+                        let isSelected = assignment == .physicalController(controller.id)
+
+                        Button {
+                            emulator.setJoyportAssignment(
+                                .physicalController(controller.id),
+                                for: port
+                            )
+                        } label: {
+                            Label(
+                                assignedPort != nil && assignedPort != port
+                                    ? "\(controller.name) — Port \(assignedPort!)"
+                                    : controller.name,
+                                systemImage: isSelected
+                                    ? "checkmark.circle.fill"
+                                    : "gamecontroller.fill"
+                            )
+                        }
+                        .disabled(assignedPort != nil && assignedPort != port)
+                    }
+                }
             }
         } label: {
-            JoyportMenuLabel(port: port, assignment: assignment)
+            JoyportMenuLabel(
+                port: port,
+                assignmentTitle: emulator.joyportAssignmentTitle(for: port)
+            )
         }
         .buttonStyle(.bordered)
         .disabled(!emulator.isRunning)
@@ -282,9 +331,9 @@ struct ContentView: View {
 
 private struct JoyportMenuLabel: View {
     let port: Int
-    let assignment: JoyportAssignment
+    let assignmentTitle: String
 
-    private let fixedWidth: CGFloat = 154
+    private let fixedWidth: CGFloat = 184
     private let fixedHeight: CGFloat = 34
 
     var body: some View {
@@ -297,7 +346,7 @@ private struct JoyportMenuLabel: View {
                 Text("Port \(port)")
                     .lineLimit(1)
 
-                Text(assignment.rawValue)
+                Text(assignmentTitle)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

@@ -37,8 +37,10 @@ typedef NS_ENUM(NSInteger, C64KeyCode) {
 - (void)stop;
 - (void)softReset;
 - (void)hardReset;
-- (void)setVirtualJoystickPort:(NSInteger)port;
-- (void)setJoypadButton:(C64JoypadButton)button pressed:(BOOL)pressed;
+- (void)setMousePort:(NSInteger)port;
+- (void)setJoypadMask:(uint32_t)mask forC64Port:(NSInteger)port;
+- (void)addMouseDeltaX:(NSInteger)deltaX deltaY:(NSInteger)deltaY;
+- (void)setMouseButton:(NSInteger)button pressed:(BOOL)pressed;
 - (void)setKey:(C64KeyCode)key pressed:(BOOL)pressed;
 - (void)setRawKeyCode:(NSUInteger)keyCode pressed:(BOOL)pressed;
 
