@@ -5,6 +5,8 @@
 #import <AVFoundation/AVFoundation.h>
 #import <dlfcn.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -113,8 +115,12 @@ struct SessionImpl {
     std::atomic<int> resetModeRequested{-1};
     std::atomic<bool> shutdownRequested{false};
     std::thread coreThread;
-    std::atomic<uint32_t> joypadMask{0};
-    std::atomic<unsigned> virtualJoystickPort{2};
+    std::array<std::atomic<uint32_t>, 2> joypadMasks{};
+    std::atomic<unsigned> currentJoyport{1};
+    std::atomic<unsigned> mousePort{0};
+    std::atomic<int> mouseDeltaX{0};
+    std::atomic<int> mouseDeltaY{0};
+    std::atomic<uint32_t> mouseButtons{0};
     std::mutex keyMutex;
     std::vector<KeyEvent> keyEvents;
     retro_keyboard_event_t keyboardCallback = nullptr;
@@ -140,6 +146,24 @@ struct SessionImpl {
     std::mutex startupMutex;
     std::condition_variable startupCondition;
     bool firstRunCompleted = false;
+
+    SessionImpl() {
+        clearInputState();
+    }
+
+    unsigned retroPortForC64Port(unsigned c64Port) const {
+        const unsigned current = currentJoyport.load(std::memory_order_acquire);
+        return c64Port == current ? 0u : 1u;
+    }
+
+    void clearInputState() {
+        for (auto &mask : joypadMasks) {
+            mask.store(0, std::memory_order_release);
+        }
+        mouseDeltaX.store(0, std::memory_order_release);
+        mouseDeltaY.store(0, std::memory_order_release);
+        mouseButtons.store(0, std::memory_order_release);
+    }
 
     void clearCoreDiagnostics() {
         std::lock_guard<std::mutex> lock(diagnosticMutex);
@@ -462,12 +486,22 @@ static bool environmentCallback(unsigned command, void *data) {
             retro_variable *variable = static_cast<retro_variable *>(data);
             const char *key = variable->key ?: "";
 
-            // The virtual joystick always enters libretro through frontend port 0.
-            // VICE's joyport option routes that RetroPad to C64 port 1 or 2.
+            // VICE maps frontend port 0 to the selected C64 joyport and
+            // frontend port 1 to the opposite joyport. POKE64 keeps that
+            // mapping explicit so two controllers can be used simultaneously.
             if (std::strcmp(key, "vice_joyport") == 0) {
-                variable->value = session->virtualJoystickPort.load(std::memory_order_acquire) == 1
+                variable->value = session->currentJoyport.load(std::memory_order_acquire) == 2
+                    ? "2"
+                    : "1";
+                return true;
+            }
+
+            // Type 3 is the Commodore 1351 mouse. VICE applies it to the
+            // selected joyport while leaving the opposite port as a joystick.
+            if (std::strcmp(key, "vice_joyport_type") == 0) {
+                variable->value = session->mousePort.load(std::memory_order_acquire) == 0
                     ? "1"
-                    : "2";
+                    : "3";
                 return true;
             }
 
@@ -585,17 +619,53 @@ static size_t audioBatchCallback(const int16_t *data, size_t frames) {
 
 static void inputPollCallback(void) {}
 
+static int16_t clampedMouseDelta(std::atomic<int> &delta) {
+    const int value = delta.exchange(0, std::memory_order_acq_rel);
+    if (value > INT16_MAX) return INT16_MAX;
+    if (value < INT16_MIN) return INT16_MIN;
+    return static_cast<int16_t>(value);
+}
+
 static int16_t inputStateCallback(unsigned port, unsigned device, unsigned index, unsigned id) {
     (void)index;
     SessionImpl *session = gSession;
-    if (!session ||
-        session->virtualJoystickPort.load(std::memory_order_acquire) == 0 ||
-        port != 0 ||
-        (device & RETRO_DEVICE_MASK) != RETRO_DEVICE_JOYPAD) return 0;
-    const uint32_t mask = session->joypadMask.load(std::memory_order_acquire);
-    if (id == RETRO_DEVICE_ID_JOYPAD_MASK) return static_cast<int16_t>(mask & 0xffff);
-    if (id > 31) return 0;
-    return (mask & (1u << id)) ? 1 : 0;
+    if (!session || port > 1) return 0;
+
+    switch (device & RETRO_DEVICE_MASK) {
+        case RETRO_DEVICE_JOYPAD: {
+            const uint32_t mask = session->joypadMasks[port].load(std::memory_order_acquire);
+            if (id == RETRO_DEVICE_ID_JOYPAD_MASK) {
+                return static_cast<int16_t>(mask & 0xffff);
+            }
+            if (id > 31) return 0;
+            return (mask & (1u << id)) ? 1 : 0;
+        }
+
+        case RETRO_DEVICE_MOUSE: {
+            const unsigned c64MousePort = session->mousePort.load(std::memory_order_acquire);
+            if (c64MousePort == 0 || port != session->retroPortForC64Port(c64MousePort)) {
+                return 0;
+            }
+
+            switch (id) {
+                case RETRO_DEVICE_ID_MOUSE_X:
+                    return clampedMouseDelta(session->mouseDeltaX);
+                case RETRO_DEVICE_ID_MOUSE_Y:
+                    return clampedMouseDelta(session->mouseDeltaY);
+                case RETRO_DEVICE_ID_MOUSE_LEFT:
+                    return (session->mouseButtons.load(std::memory_order_acquire) & 0x1u) ? 1 : 0;
+                case RETRO_DEVICE_ID_MOUSE_RIGHT:
+                    return (session->mouseButtons.load(std::memory_order_acquire) & 0x2u) ? 1 : 0;
+                case RETRO_DEVICE_ID_MOUSE_MIDDLE:
+                    return (session->mouseButtons.load(std::memory_order_acquire) & 0x4u) ? 1 : 0;
+                default:
+                    return 0;
+            }
+        }
+
+        default:
+            return 0;
+    }
 }
 
 bool SessionImpl::start(const char *path, std::string &error) {
@@ -637,6 +707,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
         return false;
     }
     api.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+    api.retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
 
     retro_game_info game{};
     const retro_game_info *gamePointer = nullptr;
@@ -811,21 +882,46 @@ bool SessionImpl::start(const char *path, std::string &error) {
     _impl->resetModeRequested.store(2, std::memory_order_release);
 }
 
-- (void)setVirtualJoystickPort:(NSInteger)port {
+- (void)setMousePort:(NSInteger)port {
     if (port < 0 || port > 2) return;
 
-    _impl->virtualJoystickPort.store(static_cast<unsigned>(port), std::memory_order_release);
-    _impl->joypadMask.store(0, std::memory_order_release);
+    const unsigned selectedPort = static_cast<unsigned>(port);
+    _impl->mousePort.store(selectedPort, std::memory_order_release);
+    _impl->currentJoyport.store(selectedPort == 0 ? 1u : selectedPort, std::memory_order_release);
+    _impl->clearInputState();
     _impl->variablesUpdated.store(true, std::memory_order_release);
 }
 
-- (void)setJoypadButton:(C64JoypadButton)button pressed:(BOOL)pressed {
-    if (button < 0 || button > 31) return;
+- (void)setJoypadMask:(uint32_t)mask forC64Port:(NSInteger)port {
+    if (port < 1 || port > 2) return;
+    const unsigned retroPort = _impl->retroPortForC64Port(static_cast<unsigned>(port));
+    _impl->joypadMasks[retroPort].store(mask, std::memory_order_release);
+}
+
+- (void)addMouseDeltaX:(NSInteger)deltaX deltaY:(NSInteger)deltaY {
+    if (_impl->mousePort.load(std::memory_order_acquire) == 0) return;
+
+    const NSInteger clampedX = std::clamp(
+        deltaX,
+        static_cast<NSInteger>(INT_MIN),
+        static_cast<NSInteger>(INT_MAX)
+    );
+    const NSInteger clampedY = std::clamp(
+        deltaY,
+        static_cast<NSInteger>(INT_MIN),
+        static_cast<NSInteger>(INT_MAX)
+    );
+    _impl->mouseDeltaX.fetch_add(static_cast<int>(clampedX), std::memory_order_acq_rel);
+    _impl->mouseDeltaY.fetch_add(static_cast<int>(clampedY), std::memory_order_acq_rel);
+}
+
+- (void)setMouseButton:(NSInteger)button pressed:(BOOL)pressed {
+    if (button < 0 || button > 2) return;
     const uint32_t bit = 1u << static_cast<unsigned>(button);
     if (pressed) {
-        _impl->joypadMask.fetch_or(bit, std::memory_order_acq_rel);
+        _impl->mouseButtons.fetch_or(bit, std::memory_order_acq_rel);
     } else {
-        _impl->joypadMask.fetch_and(~bit, std::memory_order_acq_rel);
+        _impl->mouseButtons.fetch_and(~bit, std::memory_order_acq_rel);
     }
 }
 

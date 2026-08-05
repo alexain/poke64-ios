@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Changed both C64 joyports to default to `None` at application startup.
+- Added multiple physical-controller discovery and per-port assignment using Game Controller.
+- Mapped each controller's D-pad and left stick to C64 directions, with both A and B acting as FIRE.
+- Added Commodore 1351 mouse assignment for either joyport.
+- Added touchscreen trackpad gestures: one-finger movement, one-finger left click and two-finger right click.
+- Added external mouse and trackpad movement plus left, right and middle button input.
+
 ## 0.4.1
 
 - Prevented the native iPadOS software keyboard from appearing when interacting with the Port 1 and Port 2 menus.
