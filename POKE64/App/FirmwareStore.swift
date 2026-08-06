@@ -138,6 +138,12 @@ enum FirmwareStore {
         FirmwareSlot.allCases.map(status(for:))
     }
 
+    static var characterROMData: Data? {
+        let status = status(for: .chargen)
+        guard status.isValid else { return nil }
+        return try? Data(contentsOf: status.fileURL, options: [.mappedIfSafe])
+    }
+
     static var isBootReady: Bool {
         statuses
             .filter { $0.slot.isRequiredForBoot }
