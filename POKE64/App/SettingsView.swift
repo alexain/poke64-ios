@@ -177,7 +177,7 @@ enum C64TapeSettings {
     static let defaultAutoShowControls = true
     static let defaultResetCounterOnInsert = true
     static let defaultResetWithCPU = false
-    static let defaultAutostartBasicLoad = false
+    static let defaultAutostartBasicLoad = true
 
     private static func boolValue(forKey key: String, defaultValue: Bool) -> Bool {
         let defaults = UserDefaults.standard
@@ -1266,7 +1266,7 @@ private struct TapeSettingsView: View {
         Form {
             Section {
                 Toggle(
-                    "Show controls when a tape is inserted",
+                    "Show controls when a TAP image is inserted",
                     isOn: $autoShowControls
                 )
                 Toggle(
@@ -1276,7 +1276,7 @@ private struct TapeSettingsView: View {
             } header: {
                 Text("Interface")
             } footer: {
-                Text("The docked datasette controls can always be shown or hidden from the main toolbar while a tape is inserted.")
+                Text("TAP controls can always be shown or hidden by tapping the counter/status panel beside the emulator. T64 containers do not display datasette controls.")
             }
 
             Section {
@@ -1294,7 +1294,7 @@ private struct TapeSettingsView: View {
                     systemImage: "recordingtape"
                 )
                 Label(
-                    "T64 is a read-only logical container. Play and Stop remain available, but fast transport and the physical counter are disabled.",
+                    "T64 is a read-only logical container. It is always launched through autostart and does not display physical datasette controls.",
                     systemImage: "info.circle"
                 )
             }

@@ -27,6 +27,7 @@
 
 ### Changed
 
+- Changed T64 handling to always use autostart and reserved the on-screen datasette transport, counter and status controls exclusively for TAP images.
 - Moved datasette control access from the top toolbar to the side tape-status panel.
 - Kept the side tape-status panel compact when the keyboard or datasette controls are visible.
 - Set the default datasette audio volume to 20%.

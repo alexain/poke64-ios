@@ -811,8 +811,10 @@ struct SessionImpl {
     }
 
     bool executeMediaCommand(const std::shared_ptr<MediaCommand> &command, std::string &error) {
-        constexpr unsigned int kTapePort = 1;
-        constexpr int kDatasettePort = 0;
+        // VICE uses a 1-based tape image unit for attach/detach, but a
+        // 0-based tape-port index for autostart and datasette transport.
+        constexpr unsigned int kTapeUnit = 1;
+        constexpr unsigned int kTapePort = 0;
         constexpr unsigned int kAutostartModeRun = 0;
         constexpr int kCartridgeCRT = 0;
 
@@ -873,7 +875,7 @@ struct SessionImpl {
                     error = "The VICE core does not expose runtime tape attachment";
                     return false;
                 }
-                if (api.tape_image_attach(kTapePort, command->path.c_str()) != 0) {
+                if (api.tape_image_attach(kTapeUnit, command->path.c_str()) != 0) {
                     error = "VICE could not insert the selected tape";
                     return false;
                 }
@@ -946,7 +948,7 @@ struct SessionImpl {
                     error = "The VICE core does not expose runtime tape ejection";
                     return false;
                 }
-                if (api.tape_image_detach(kTapePort) != 0) {
+                if (api.tape_image_detach(kTapeUnit) != 0) {
                     error = "VICE could not eject the current tape";
                     return false;
                 }
@@ -964,7 +966,7 @@ struct SessionImpl {
                     error = "Unsupported datasette command";
                     return false;
                 }
-                api.datasette_control(kDatasettePort, command->unit);
+                api.datasette_control(static_cast<int>(kTapePort), command->unit);
                 updateDatasetteState(true);
                 return true;
 

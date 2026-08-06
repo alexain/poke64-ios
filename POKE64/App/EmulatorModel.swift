@@ -21,15 +21,6 @@ enum DatasetteTransportCommand: Int, CaseIterable {
         C64DatasetteCommand(rawValue: rawValue)!
     }
 
-    var requiresPhysicalTapePosition: Bool {
-        switch self {
-        case .fastForward, .rewind, .reset, .resetCounter:
-            return true
-        case .stop, .play:
-            return false
-        }
-    }
-
     var statusTitle: String {
         switch self {
         case .stop:
@@ -507,10 +498,18 @@ final class EmulatorModel: ObservableObject {
         guard isRunning else {
             throw EmulatorModelError.coreNotRunning
         }
-        try validateDiskCompatibility(for: action, media: media)
+
+        let effectiveAction: MediaAction
+        if action == .insertTape, media.mediaType == .t64 {
+            effectiveAction = .autostartTape
+        } else {
+            effectiveAction = action
+        }
+
+        try validateDiskCompatibility(for: effectiveAction, media: media)
 
         if !replacingExisting,
-           let replacement = replacementInfo(for: action, media: media) {
+           let replacement = replacementInfo(for: effectiveAction, media: media) {
             throw EmulatorModelError.replacementRequired(
                 replacement.existingTitle,
                 replacement.destination
@@ -521,7 +520,7 @@ final class EmulatorModel: ObservableObject {
         let programReleasedByReset: MediaReference?
         let success: Bool
 
-        switch action {
+        switch effectiveAction {
         case .runProgram:
             replacedMedia = activeProgram
             programReleasedByReset = nil
@@ -559,7 +558,7 @@ final class EmulatorModel: ObservableObject {
             )
         }
 
-        switch action {
+        switch effectiveAction {
         case .runProgram:
             activeProgram = media
             status = "Running program: \(media.title)"
@@ -589,7 +588,9 @@ final class EmulatorModel: ObservableObject {
             mountedTape = media
             resetDatasettePresentation(for: media)
             resetTapeCounterAfterInsertionIfNeeded(media)
-            status = "Autostarting tape: \(media.title)"
+            status = media.mediaType == .t64
+                ? "Autostarting T64: \(media.title)"
+                : "Autostarting tape: \(media.title)"
         }
 
         if let itemID = media.libraryItemID,
@@ -727,9 +728,9 @@ final class EmulatorModel: ObservableObject {
         guard let tape = mountedTape else {
             throw EmulatorModelError.coreFailure("No tape is inserted")
         }
-        if tape.mediaType == .t64, command.requiresPhysicalTapePosition {
+        guard tape.mediaType == .tap else {
             throw EmulatorModelError.coreFailure(
-                "T64 is a logical read-only container and does not expose a physical tape position"
+                "T64 containers are launched through autostart and do not expose datasette transport controls"
             )
         }
         guard session.controlDatasette(command.coreCommand) else {
@@ -1213,8 +1214,10 @@ final class EmulatorModel: ObservableObject {
             actions = availableDriveUnits.flatMap { unit in
                 [.insertDisk(unit), .autostartDisk(unit)]
             }
-        case .tap, .t64:
+        case .tap:
             actions = [.insertTape, .autostartTape]
+        case .t64:
+            actions = [.autostartTape]
         }
         return MediaActionRequest(media: media, actions: actions)
     }

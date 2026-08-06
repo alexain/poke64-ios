@@ -51,7 +51,8 @@ struct ContentView: View {
                     )
                     .environmentObject(emulator)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
-                } else if showDatasetteControls, emulator.mountedTape != nil {
+                } else if showDatasetteControls,
+                          emulator.mountedTapeSupportsPhysicalTransport {
                     Divider()
                         .overlay(.white.opacity(0.12))
 
@@ -84,7 +85,7 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.2), value: showDatasetteControls)
         .onChange(of: emulator.mountedTape?.id) { previousID, currentID in
             guard previousID != currentID else { return }
-            if currentID == nil {
+            if currentID == nil || !emulator.mountedTapeSupportsPhysicalTransport {
                 showDatasetteControls = false
             } else if autoShowDatasetteControls {
                 showKeyboard = false
@@ -205,7 +206,8 @@ struct ContentView: View {
                 .clipped()
 
                 if sideMargin >= 72,
-                   emulator.trueDriveEmulationConfigured || emulator.mountedTape != nil {
+                   emulator.trueDriveEmulationConfigured
+                    || emulator.mountedTapeSupportsPhysicalTransport {
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
                         VStack(spacing: 12) {
@@ -219,7 +221,7 @@ struct ContentView: View {
                                 .allowsHitTesting(false)
                             }
 
-                            if emulator.mountedTape != nil {
+                            if emulator.mountedTapeSupportsPhysicalTransport {
                                 DatasetteStatusPanel(
                                     emulator: emulator,
                                     controlsVisible: showDatasetteControls,
@@ -589,7 +591,9 @@ private enum DeviceImportTarget {
                     destination: "the datasette"
                 )
             }
-            actions = [.insertTape, .autostartTape]
+            actions = media.mediaType == .t64
+                ? [.autostartTape]
+                : [.insertTape, .autostartTape]
 
         case .cartridge:
             guard media.mediaType == .crt else {
@@ -939,12 +943,16 @@ private struct DevicesConfigurationView: View {
                 systemImage: "recordingtape"
             )
 
-            if emulator.mountedTape != nil {
-                LabeledContent(
-                    "Transport",
-                    value: emulator.datasetteTransportState.title
-                )
-                LabeledContent("Counter", value: emulator.datasetteCounterDisplay)
+            if let media = emulator.mountedTape {
+                if media.mediaType == .tap {
+                    LabeledContent(
+                        "Transport",
+                        value: emulator.datasetteTransportState.title
+                    )
+                    LabeledContent("Counter", value: emulator.datasetteCounterDisplay)
+                } else if media.mediaType == .t64 {
+                    LabeledContent("Launch mode", value: "Autostart")
+                }
                 LabeledContent("Format", value: emulator.datasetteFormatSummary)
             }
 
@@ -952,7 +960,10 @@ private struct DevicesConfigurationView: View {
                 Button {
                     perform(.autostartTape, media: media)
                 } label: {
-                    Label("Autostart Tape", systemImage: "play.circle.fill")
+                    Label(
+                        media.mediaType == .t64 ? "Run T64" : "Autostart Tape",
+                        systemImage: "play.circle.fill"
+                    )
                 }
 
                 Button {
@@ -1627,8 +1638,10 @@ private struct MediaActionPromptModifier: ViewModifier {
         switch prompt.request.media.mediaType {
         case .d64, .d71, .d81:
             return "Choose whether to insert the disk without resetting the C64 or autostart it."
-        case .tap, .t64:
-            return "Choose whether to insert the tape without resetting the C64 or autostart it."
+        case .tap:
+            return "Choose whether to insert the TAP image without resetting the C64 or autostart it."
+        case .t64:
+            return nil
         case .prg, .crt:
             return nil
         }
