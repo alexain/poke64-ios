@@ -26,18 +26,11 @@ Most Settings panels currently provide the interface structure only. Firmware / 
 
 ## Firmware policy
 
-This repository and its release archives do **not** contain Commodore firmware, games, disk images, tapes or cartridges.
+This repository and its release archives do **not** contain Commodore firmware, games, disk images, tapes, cartridges, or other commercial content.
 
-POKE64 currently requires the user to import legally obtained:
+POKE64 currently requires users to import legally obtained firmware files. Any future redistributable firmware profile (for example based on open-source ROM replacements) will be documented separately and included only if its license permits redistribution.
 
-| Firmware | Size | Required |
-|---|---:|:---:|
-| C64 BASIC ROM | 8,192 bytes | Yes |
-| C64 KERNAL ROM | 8,192 bytes | Yes |
-| C64 character ROM | 4,096 bytes | Yes |
-| 1541-II drive ROM | 16,384 bytes | No |
-
-An optional redistributable open-firmware profile is planned.
+POKE64 does not include or distribute original Commodore ROMs or BIOS. Users and redistributors are responsible for ensuring that any firmware or media they use or distribute is lawfully obtained and used.
 
 ## Development status
 
@@ -61,8 +54,8 @@ Created by [Alessandro Capano](https://www.alexain.it/poke64) in 2026.
 
 ## Licensing
 
-The original POKE64 application code is distributed under [LICENSE](LICENSE).
+The POKE64 application code in this repository is licensed under the MIT License. See the [LICENSE](LICENSE) file for the full text.
 
-VICE and `vice-libretro` are separate GPL-licensed components. Distributors are responsible for the applicable source, notice and license obligations.
+VICE and `vice-libretro` are separate GPL-licensed components. If you redistribute a build that includes a VICE-derived core, you must comply with the applicable GPL obligations for that exact upstream revision, including source availability and license notices.
 
-POKE64 does not license or distribute Commodore firmware or commercial content. Users and distributors are responsible for ensuring that imported firmware and media are lawfully used.
+POKE64 does not license or distribute Commodore firmware or commercial content. Users and redistributors are responsible for ensuring that imported firmware and media are lawfully used.
