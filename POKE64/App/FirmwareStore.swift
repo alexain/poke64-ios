@@ -217,6 +217,13 @@ enum FirmwareStore {
         lines.append("Drive9TrueEmulation=0")
         lines.append("TrapDevice8=1")
         lines.append("TrapDevice9=1")
+        // Do not expose VICE's host-filesystem device when no disk image is
+        // mounted. Runtime disk attachment switches the unit to its virtual
+        // disk-image backend; an empty unit must answer DEVICE NOT PRESENT.
+        lines.append("FileSystemDevice8=0")
+        lines.append("FileSystemDevice9=0")
+        lines.append("FileSystemDevice10=0")
+        lines.append("FileSystemDevice11=0")
         if driveInstalled {
             // Retain the imported 1541-II ROM for the future drive backend.
             lines.append("DosName1541ii=\"\(escapedVicercPath(drive.path))\"")

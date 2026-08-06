@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var showKeyboard = false
     @State private var showLibrary = false
     @State private var showPorts = false
+    @State private var mediaActionPrompt: MediaActionPromptState?
     @State private var showSettings = false
     @State private var settingsInitialPanel: SettingsPanel = .system
     @State private var settingsFirmwareFingerprint = FirmwareStore.configurationFingerprint
@@ -83,21 +84,7 @@ struct ContentView: View {
                 .presentationDragIndicator(.visible)
         }
         .fullScreenCover(isPresented: $showLibrary) {
-            LibraryView(
-                library: emulator.library,
-                loadedItemID: emulator.loadedLibraryItemID,
-                temporaryMedia: emulator.loadedTemporaryMedia,
-                temporaryMediaAddedItemID: emulator.loadedTemporaryMediaLibraryItemID,
-                onImport: { url in
-                    try emulator.importIntoLibrary(url: url)
-                },
-                onAddTemporaryMedia: {
-                    try emulator.addCurrentTemporaryMediaToLibrary()
-                },
-                onRun: { item in
-                    try emulator.loadLibraryItem(item)
-                }
-            )
+            LibraryView(emulator: emulator)
         }
         .fileImporter(
             isPresented: $showImporter,
@@ -106,13 +93,18 @@ struct ContentView: View {
         ) { result in
             switch result {
             case .success(let urls):
-                if let url = urls.first {
-                    emulator.openTemporaryMedia(url: url)
+                if let url = urls.first,
+                   let request = emulator.prepareTemporaryMedia(url: url) {
+                    beginMediaRequest(request)
                 }
             case .failure(let error):
                 print("File importer: \(error)")
             }
         }
+        .mediaActionPrompt(
+            prompt: $mediaActionPrompt,
+            emulator: emulator
+        )
         .sheet(
             isPresented: Binding(
                 get: { emulator.presentedError != nil },
@@ -200,24 +192,53 @@ struct ContentView: View {
                     emulator.softReset()
                 }
                 Button("Hard Reset", systemImage: "power") {
-                    Task {
-                        await emulator.hardReset()
-                    }
+                    emulator.hardReset()
                 }
 
-                if emulator.hasLoadedCartridge {
-                    Divider()
-                    Button("Eject Cartridge and Reset", systemImage: "eject") {
-                        Task {
-                            await emulator.ejectCartridgeAndReset()
-                        }
-                    }
+                Divider()
+
+                Button(
+                    "Eject All Media and Reset",
+                    systemImage: "eject"
+                ) {
+                    emulator.ejectAllMediaAndReset()
                 }
             } label: {
                 toolbarLabel("Reset", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.bordered)
             .disabled(!emulator.isRunning)
+        }
+    }
+
+    private func beginMediaRequest(_ request: MediaActionRequest) {
+        if request.actions.count > 1 {
+            mediaActionPrompt = .choose(request)
+            return
+        }
+
+        guard let action = request.actions.first else {
+            emulator.discardPreparedMedia(request.media)
+            return
+        }
+
+        if let replacement = emulator.replacementInfo(
+            for: action,
+            media: request.media
+        ) {
+            mediaActionPrompt = .replace(
+                request,
+                action: action,
+                replacement: replacement
+            )
+            return
+        }
+
+        do {
+            try emulator.performMediaAction(action, media: request.media)
+        } catch {
+            emulator.discardPreparedMedia(request.media)
+            emulator.presentMediaError(error)
         }
     }
 
@@ -545,6 +566,203 @@ private struct HoldButtonShape: Shape {
     }
 }
 
+
+struct MediaActionPromptState: Identifiable, Equatable {
+    enum Mode: Equatable {
+        case choose
+        case replace(MediaAction, MediaReplacementInfo)
+    }
+
+    let id: UUID
+    let request: MediaActionRequest
+    let mode: Mode
+
+    static func choose(_ request: MediaActionRequest) -> MediaActionPromptState {
+        MediaActionPromptState(id: UUID(), request: request, mode: .choose)
+    }
+
+    static func replace(
+        _ request: MediaActionRequest,
+        action: MediaAction,
+        replacement: MediaReplacementInfo
+    ) -> MediaActionPromptState {
+        MediaActionPromptState(
+            id: UUID(),
+            request: request,
+            mode: .replace(action, replacement)
+        )
+    }
+}
+
+extension View {
+    func mediaActionPrompt(
+        prompt: Binding<MediaActionPromptState?>,
+        emulator: EmulatorModel,
+        onComplete: @escaping () -> Void = {}
+    ) -> some View {
+        modifier(
+            MediaActionPromptModifier(
+                prompt: prompt,
+                emulator: emulator,
+                onComplete: onComplete
+            )
+        )
+    }
+}
+
+private struct MediaActionPromptModifier: ViewModifier {
+    @Binding var prompt: MediaActionPromptState?
+    @ObservedObject var emulator: EmulatorModel
+    let onComplete: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(
+                chooseDialogTitle,
+                isPresented: chooseDialogBinding,
+                titleVisibility: .visible
+            ) {
+                chooseDialogButtons
+            } message: {
+                if let message = chooseDialogMessage {
+                    Text(message)
+                }
+            }
+            .alert(
+                "Replace Media?",
+                isPresented: replacementAlertBinding
+            ) {
+                replacementAlertButtons
+            } message: {
+                if let message = replacementAlertMessage {
+                    Text(message)
+                }
+            }
+    }
+
+    private var chooseDialogBinding: Binding<Bool> {
+        Binding(
+            get: {
+                guard let prompt else { return false }
+                if case .choose = prompt.mode { return true }
+                return false
+            },
+            set: { isPresented in
+                guard !isPresented,
+                      let current = prompt,
+                      case .choose = current.mode else { return }
+                cancel(current.request)
+            }
+        )
+    }
+
+    private var replacementAlertBinding: Binding<Bool> {
+        Binding(
+            get: {
+                guard let prompt else { return false }
+                if case .replace = prompt.mode { return true }
+                return false
+            },
+            set: { isPresented in
+                guard !isPresented,
+                      let current = prompt,
+                      case .replace = current.mode else { return }
+                cancel(current.request)
+            }
+        )
+    }
+
+    private var chooseDialogTitle: String {
+        guard let prompt, case .choose = prompt.mode else { return "Media" }
+        return prompt.request.media.title
+    }
+
+    private var chooseDialogMessage: String? {
+        guard let prompt, case .choose = prompt.mode else { return nil }
+        switch prompt.request.media.mediaType {
+        case .d64:
+            return "Choose whether to insert the disk without resetting the C64 or autostart it."
+        case .tap, .t64:
+            return "Choose whether to insert the tape without resetting the C64 or autostart it."
+        case .prg, .crt:
+            return nil
+        }
+    }
+
+    private var replacementAlertMessage: String? {
+        guard let prompt,
+              case .replace(_, let replacement) = prompt.mode else { return nil }
+        return "\(replacement.destination) already contains “\(replacement.existingTitle)”. Replace it with “\(prompt.request.media.originalFilename)”?"
+    }
+
+    @ViewBuilder
+    private var chooseDialogButtons: some View {
+        if let prompt, case .choose = prompt.mode {
+            ForEach(prompt.request.actions) { action in
+                Button(action.title) {
+                    select(action, request: prompt.request)
+                }
+            }
+
+            Button("Cancel", role: .cancel) {
+                cancel(prompt.request)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var replacementAlertButtons: some View {
+        if let prompt, case .replace(let action, _) = prompt.mode {
+            Button("Replace", role: .destructive) {
+                perform(action, request: prompt.request, replacingExisting: true)
+            }
+
+            Button("Cancel", role: .cancel) {
+                cancel(prompt.request)
+            }
+        }
+    }
+
+    private func cancel(_ request: MediaActionRequest) {
+        emulator.discardPreparedMedia(request.media)
+        prompt = nil
+    }
+
+    private func select(_ action: MediaAction, request: MediaActionRequest) {
+        if let replacement = emulator.replacementInfo(
+            for: action,
+            media: request.media
+        ) {
+            prompt = .replace(
+                request,
+                action: action,
+                replacement: replacement
+            )
+            return
+        }
+        perform(action, request: request, replacingExisting: false)
+    }
+
+    private func perform(
+        _ action: MediaAction,
+        request: MediaActionRequest,
+        replacingExisting: Bool
+    ) {
+        do {
+            try emulator.performMediaAction(
+                action,
+                media: request.media,
+                replacingExisting: replacingExisting
+            )
+            prompt = nil
+            onComplete()
+        } catch {
+            emulator.discardPreparedMedia(request.media)
+            prompt = nil
+            emulator.presentMediaError(error)
+        }
+    }
+}
 
 private struct StartupErrorView: View {
     let message: String

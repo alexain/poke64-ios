@@ -14,6 +14,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -100,6 +101,42 @@ struct CoreAPI {
     void (*retro_run)(void) = nullptr;
     void (*retro_reset)(void) = nullptr;
     void (*emu_reset)(int) = nullptr;
+    int (*file_system_attach_disk)(unsigned int, unsigned int, const char *) = nullptr;
+    void (*file_system_detach_disk)(unsigned int, unsigned int) = nullptr;
+    void (*file_system_detach_disk_all)(void) = nullptr;
+    int (*machine_bus_device_detach)(unsigned int) = nullptr;
+    int (*tape_image_attach)(unsigned int, const char *) = nullptr;
+    int (*tape_image_detach)(unsigned int) = nullptr;
+    void (*tape_image_detach_all)(void) = nullptr;
+    int (*cartridge_attach_image)(int, const char *) = nullptr;
+    void (*cartridge_detach_image)(int) = nullptr;
+    int (*autostart_disk)(int, int, const char *, const char *, unsigned int, unsigned int) = nullptr;
+    int (*autostart_tape)(const char *, const char *, unsigned int, unsigned int, unsigned int) = nullptr;
+    int (*autostart_prg)(const char *, unsigned int) = nullptr;
+};
+
+enum class MediaCommandType {
+    AttachDisk,
+    AutostartDisk,
+    AttachTape,
+    AutostartTape,
+    RunProgram,
+    AttachCartridge,
+    EjectDisk,
+    EjectTape,
+    EjectCartridge,
+    EjectAllAndReset
+};
+
+struct MediaCommand {
+    MediaCommandType type;
+    std::string path;
+    int unit = 0;
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool completed = false;
+    bool success = false;
+    std::string error;
 };
 
 struct KeyEvent {
@@ -123,6 +160,8 @@ struct SessionImpl {
     std::atomic<uint32_t> mouseButtons{0};
     std::mutex keyMutex;
     std::vector<KeyEvent> keyEvents;
+    std::mutex mediaCommandMutex;
+    std::deque<std::shared_ptr<MediaCommand>> mediaCommands;
     retro_keyboard_event_t keyboardCallback = nullptr;
     retro_pixel_format pixelFormat = RETRO_PIXEL_FORMAT_0RGB1555;
     retro_disk_control_callback diskControl{};
@@ -288,6 +327,47 @@ struct SessionImpl {
         // retro_reset(), whose default action autostarts the current content.
         api.emu_reset = reinterpret_cast<void (*)(int)>(dlsym(coreHandle, "emu_reset"));
 
+        // Native VICE entry points used for media changes while the core is
+        // already running. These are optional at startup so an older core can
+        // still boot; individual media commands report a precise error when a
+        // required entry point is unavailable.
+        api.file_system_attach_disk = reinterpret_cast<int (*)(unsigned int, unsigned int, const char *)>(
+            dlsym(coreHandle, "file_system_attach_disk")
+        );
+        api.file_system_detach_disk = reinterpret_cast<void (*)(unsigned int, unsigned int)>(
+            dlsym(coreHandle, "file_system_detach_disk")
+        );
+        api.file_system_detach_disk_all = reinterpret_cast<void (*)(void)>(
+            dlsym(coreHandle, "file_system_detach_disk_all")
+        );
+        api.machine_bus_device_detach = reinterpret_cast<int (*)(unsigned int)>(
+            dlsym(coreHandle, "machine_bus_device_detach")
+        );
+        api.tape_image_attach = reinterpret_cast<int (*)(unsigned int, const char *)>(
+            dlsym(coreHandle, "tape_image_attach")
+        );
+        api.tape_image_detach = reinterpret_cast<int (*)(unsigned int)>(
+            dlsym(coreHandle, "tape_image_detach")
+        );
+        api.tape_image_detach_all = reinterpret_cast<void (*)(void)>(
+            dlsym(coreHandle, "tape_image_detach_all")
+        );
+        api.cartridge_attach_image = reinterpret_cast<int (*)(int, const char *)>(
+            dlsym(coreHandle, "cartridge_attach_image")
+        );
+        api.cartridge_detach_image = reinterpret_cast<void (*)(int)>(
+            dlsym(coreHandle, "cartridge_detach_image")
+        );
+        api.autostart_disk = reinterpret_cast<int (*)(int, int, const char *, const char *, unsigned int, unsigned int)>(
+            dlsym(coreHandle, "autostart_disk")
+        );
+        api.autostart_tape = reinterpret_cast<int (*)(const char *, const char *, unsigned int, unsigned int, unsigned int)>(
+            dlsym(coreHandle, "autostart_tape")
+        );
+        api.autostart_prg = reinterpret_cast<int (*)(const char *, unsigned int)>(
+            dlsym(coreHandle, "autostart_prg")
+        );
+
         if (api.retro_api_version() != RETRO_API_VERSION) {
             error = "Incompatible libretro API version";
             return false;
@@ -305,8 +385,264 @@ struct SessionImpl {
 
     bool start(const char *path, std::string &error);
 
+    void completeMediaCommand(
+        const std::shared_ptr<MediaCommand> &command,
+        bool success,
+        const std::string &error = {}
+    ) {
+        {
+            std::lock_guard<std::mutex> lock(command->mutex);
+            command->success = success;
+            command->error = error;
+            command->completed = true;
+        }
+        command->condition.notify_all();
+    }
+
+    void failPendingMediaCommands(const char *message) {
+        std::deque<std::shared_ptr<MediaCommand>> pending;
+        {
+            std::lock_guard<std::mutex> lock(mediaCommandMutex);
+            pending.swap(mediaCommands);
+        }
+        const char *resolvedMessage = message ? message : "The core is not running";
+        for (const auto &command : pending) {
+            completeMediaCommand(command, false, resolvedMessage);
+        }
+    }
+
+    bool executeMediaCommand(const std::shared_ptr<MediaCommand> &command, std::string &error) {
+        constexpr unsigned int kTapePort = 1;
+        constexpr unsigned int kAutostartModeRun = 0;
+        constexpr int kCartridgeCRT = 0;
+
+        switch (command->type) {
+            case MediaCommandType::AttachDisk:
+                if (!api.file_system_attach_disk) {
+                    error = "The VICE core does not expose runtime disk attachment";
+                    return false;
+                }
+                if (api.file_system_attach_disk(
+                        static_cast<unsigned int>(command->unit),
+                        0,
+                        command->path.c_str()
+                    ) != 0) {
+                    error = "VICE could not insert the selected disk";
+                    return false;
+                }
+                return true;
+
+            case MediaCommandType::AutostartDisk:
+                if (!api.autostart_disk) {
+                    error = "The VICE core does not expose disk autostart";
+                    return false;
+                }
+                if (api.autostart_disk(
+                        command->unit,
+                        0,
+                        command->path.c_str(),
+                        nullptr,
+                        0,
+                        kAutostartModeRun
+                    ) != 0) {
+                    error = "VICE could not autostart the selected disk";
+                    return false;
+                }
+                return true;
+
+            case MediaCommandType::AttachTape:
+                if (!api.tape_image_attach) {
+                    error = "The VICE core does not expose runtime tape attachment";
+                    return false;
+                }
+                if (api.tape_image_attach(kTapePort, command->path.c_str()) != 0) {
+                    error = "VICE could not insert the selected tape";
+                    return false;
+                }
+                return true;
+
+            case MediaCommandType::AutostartTape:
+                if (!api.autostart_tape) {
+                    error = "The VICE core does not expose tape autostart";
+                    return false;
+                }
+                if (api.autostart_tape(
+                        command->path.c_str(),
+                        nullptr,
+                        0,
+                        kAutostartModeRun,
+                        kTapePort
+                    ) != 0) {
+                    error = "VICE could not autostart the selected tape";
+                    return false;
+                }
+                return true;
+
+            case MediaCommandType::RunProgram:
+                if (!api.autostart_prg) {
+                    error = "The VICE core does not expose PRG autostart";
+                    return false;
+                }
+                if (api.autostart_prg(command->path.c_str(), kAutostartModeRun) != 0) {
+                    error = "VICE could not run the selected program";
+                    return false;
+                }
+                return true;
+
+            case MediaCommandType::AttachCartridge:
+                if (!api.cartridge_attach_image) {
+                    error = "The VICE core does not expose runtime cartridge attachment";
+                    return false;
+                }
+                if (api.cartridge_attach_image(kCartridgeCRT, command->path.c_str()) != 0) {
+                    error = "VICE could not insert the selected cartridge";
+                    return false;
+                }
+                if (api.emu_reset) {
+                    api.emu_reset(2);
+                } else {
+                    api.retro_reset();
+                }
+                return true;
+
+            case MediaCommandType::EjectDisk:
+                if (!api.file_system_detach_disk) {
+                    error = "The VICE core does not expose runtime disk ejection";
+                    return false;
+                }
+                api.file_system_detach_disk(static_cast<unsigned int>(command->unit), 0);
+                // VICE restores its host-filesystem backend after detaching an
+                // image. Remove those serial hooks so an empty drive reports
+                // DEVICE NOT PRESENT instead of listing the app sandbox.
+                if (api.machine_bus_device_detach) {
+                    api.machine_bus_device_detach(
+                        static_cast<unsigned int>(command->unit)
+                    );
+                }
+                return true;
+
+            case MediaCommandType::EjectTape:
+                if (!api.tape_image_detach) {
+                    error = "The VICE core does not expose runtime tape ejection";
+                    return false;
+                }
+                if (api.tape_image_detach(kTapePort) != 0) {
+                    error = "VICE could not eject the current tape";
+                    return false;
+                }
+                return true;
+
+            case MediaCommandType::EjectCartridge:
+                if (!api.cartridge_detach_image) {
+                    error = "The VICE core does not expose runtime cartridge ejection";
+                    return false;
+                }
+                api.cartridge_detach_image(-1);
+                return true;
+
+            case MediaCommandType::EjectAllAndReset:
+                if (!api.file_system_detach_disk_all ||
+                    !api.tape_image_detach_all ||
+                    !api.cartridge_detach_image) {
+                    error = "The VICE core does not expose complete media ejection";
+                    return false;
+                }
+                api.file_system_detach_disk_all();
+                if (api.machine_bus_device_detach) {
+                    for (unsigned int unit = 8; unit <= 11; ++unit) {
+                        api.machine_bus_device_detach(unit);
+                    }
+                }
+                api.tape_image_detach_all();
+                api.cartridge_detach_image(-1);
+                if (api.emu_reset) {
+                    api.emu_reset(2);
+                } else {
+                    api.retro_reset();
+                }
+                return true;
+        }
+        error = "Unknown media command";
+        return false;
+    }
+
+    void drainMediaCommands() {
+        std::deque<std::shared_ptr<MediaCommand>> pending;
+        {
+            std::lock_guard<std::mutex> lock(mediaCommandMutex);
+            pending.swap(mediaCommands);
+        }
+
+        for (const auto &command : pending) {
+            std::string error;
+            const bool success = executeMediaCommand(command, error);
+            completeMediaCommand(command, success, error);
+        }
+    }
+
+    bool performMediaCommand(
+        MediaCommandType type,
+        const char *path,
+        int unit,
+        std::string &error
+    ) {
+        if (!running.load(std::memory_order_acquire)) {
+            error = "The C64 core is not running";
+            return false;
+        }
+
+        auto command = std::make_shared<MediaCommand>();
+        command->type = type;
+        command->unit = unit;
+        if (path) command->path = path;
+
+        {
+            std::lock_guard<std::mutex> lock(mediaCommandMutex);
+            mediaCommands.push_back(command);
+        }
+
+        std::unique_lock<std::mutex> lock(command->mutex);
+        bool completed = command->condition.wait_for(
+            lock,
+            std::chrono::seconds(3),
+            [&command] { return command->completed; }
+        );
+        if (!completed) {
+            lock.unlock();
+
+            bool removedBeforeExecution = false;
+            {
+                std::lock_guard<std::mutex> queueLock(mediaCommandMutex);
+                const auto iterator = std::find(mediaCommands.begin(), mediaCommands.end(), command);
+                if (iterator != mediaCommands.end()) {
+                    mediaCommands.erase(iterator);
+                    removedBeforeExecution = true;
+                }
+            }
+
+            if (removedBeforeExecution) {
+                error = "VICE did not begin the media operation in time";
+                return false;
+            }
+
+            lock.lock();
+            completed = command->condition.wait_for(
+                lock,
+                std::chrono::seconds(7),
+                [&command] { return command->completed; }
+            );
+            if (!completed) {
+                error = "VICE did not complete the media operation in time";
+                return false;
+            }
+        }
+        error = command->error;
+        return command->success;
+    }
+
     void stop() {
         running.store(false, std::memory_order_release);
+        failPendingMediaCommands("The core stopped before completing the media operation");
         if (coreThread.joinable() && coreThread.get_id() != std::this_thread::get_id()) {
             coreThread.join();
         }
@@ -748,6 +1084,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
         bool firstIteration = true;
         while (running.load(std::memory_order_acquire) &&
                !shutdownRequested.load(std::memory_order_acquire)) {
+            drainMediaCommands();
             const int resetMode = resetModeRequested.exchange(-1, std::memory_order_acq_rel);
             if (resetMode >= 0) {
                 if (api.emu_reset) {
@@ -787,6 +1124,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
             startupCondition.notify_all();
         }
         running.store(false, std::memory_order_release);
+        failPendingMediaCommands("The core stopped before completing the media operation");
     });
 
     {
@@ -862,6 +1200,72 @@ bool SessionImpl::start(const char *path, std::string &error) {
         self.lastErrorMessage = [NSString stringWithUTF8String:message.c_str()];
     }
     return success;
+}
+
+- (BOOL)performMediaCommand:(MediaCommandType)type
+                        URL:(NSURL * _Nullable)url
+                  driveUnit:(NSInteger)unit {
+    self.lastErrorMessage = nil;
+    if (url && !url.isFileURL) {
+        self.lastErrorMessage = @"A local file is required";
+        return NO;
+    }
+    if (unit != 0 && (unit < 8 || unit > 11)) {
+        self.lastErrorMessage = @"Drive unit must be between 8 and 11";
+        return NO;
+    }
+
+    std::string message;
+    const bool success = _impl->performMediaCommand(
+        type,
+        url ? url.fileSystemRepresentation : nullptr,
+        static_cast<int>(unit),
+        message
+    );
+    if (!success) {
+        self.lastErrorMessage = [NSString stringWithUTF8String:message.c_str()];
+    }
+    return success;
+}
+
+- (BOOL)attachDiskAtURL:(NSURL *)url driveUnit:(NSInteger)unit {
+    return [self performMediaCommand:MediaCommandType::AttachDisk URL:url driveUnit:unit];
+}
+
+- (BOOL)autostartDiskAtURL:(NSURL *)url driveUnit:(NSInteger)unit {
+    return [self performMediaCommand:MediaCommandType::AutostartDisk URL:url driveUnit:unit];
+}
+
+- (BOOL)attachTapeAtURL:(NSURL *)url {
+    return [self performMediaCommand:MediaCommandType::AttachTape URL:url driveUnit:0];
+}
+
+- (BOOL)autostartTapeAtURL:(NSURL *)url {
+    return [self performMediaCommand:MediaCommandType::AutostartTape URL:url driveUnit:0];
+}
+
+- (BOOL)runProgramAtURL:(NSURL *)url {
+    return [self performMediaCommand:MediaCommandType::RunProgram URL:url driveUnit:0];
+}
+
+- (BOOL)attachCartridgeAtURL:(NSURL *)url {
+    return [self performMediaCommand:MediaCommandType::AttachCartridge URL:url driveUnit:0];
+}
+
+- (BOOL)ejectDiskFromDriveUnit:(NSInteger)unit {
+    return [self performMediaCommand:MediaCommandType::EjectDisk URL:nil driveUnit:unit];
+}
+
+- (BOOL)ejectTape {
+    return [self performMediaCommand:MediaCommandType::EjectTape URL:nil driveUnit:0];
+}
+
+- (BOOL)ejectCartridge {
+    return [self performMediaCommand:MediaCommandType::EjectCartridge URL:nil driveUnit:0];
+}
+
+- (BOOL)ejectAllMediaAndReset {
+    return [self performMediaCommand:MediaCommandType::EjectAllAndReset URL:nil driveUnit:0];
 }
 
 - (void)stop {

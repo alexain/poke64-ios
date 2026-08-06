@@ -14,16 +14,105 @@ struct PhysicalControllerInfo: Identifiable, Equatable {
     let name: String
 }
 
-struct TemporaryMediaInfo: Equatable {
+enum MediaAction: Hashable, Identifiable {
+    case runProgram
+    case insertCartridgeAndReset
+    case insertDisk(Int)
+    case autostartDisk(Int)
+    case insertTape
+    case autostartTape
+
+    var id: String {
+        switch self {
+        case .runProgram:
+            return "run-program"
+        case .insertCartridgeAndReset:
+            return "insert-cartridge"
+        case .insertDisk(let unit):
+            return "insert-disk-\(unit)"
+        case .autostartDisk(let unit):
+            return "autostart-disk-\(unit)"
+        case .insertTape:
+            return "insert-tape"
+        case .autostartTape:
+            return "autostart-tape"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .runProgram:
+            return "Run Program"
+        case .insertCartridgeAndReset:
+            return "Insert Cartridge and Reset"
+        case .insertDisk(let unit):
+            return "Insert in Drive \(unit)"
+        case .autostartDisk(let unit):
+            return "Autostart from Drive \(unit)"
+        case .insertTape:
+            return "Insert Tape"
+        case .autostartTape:
+            return "Autostart Tape"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .runProgram:
+            return "play.fill"
+        case .insertCartridgeAndReset:
+            return "shippingbox.fill"
+        case .insertDisk:
+            return "externaldrive.fill"
+        case .autostartDisk:
+            return "play.circle.fill"
+        case .insertTape:
+            return "recordingtape"
+        case .autostartTape:
+            return "play.circle.fill"
+        }
+    }
+}
+
+struct MediaReference: Identifiable, Equatable {
+    let id: UUID
     let title: String
     let originalFilename: String
     let mediaType: LibraryMediaType
+    let url: URL
+    let isTemporary: Bool
+    var libraryItemID: UUID?
+    var addedLibraryItemID: UUID?
+}
+
+struct MediaActionRequest: Identifiable, Equatable {
+    let id: UUID
+    let media: MediaReference
+    let actions: [MediaAction]
+
+    init(media: MediaReference, actions: [MediaAction]) {
+        id = UUID()
+        self.media = media
+        self.actions = actions
+    }
+}
+
+struct MediaReplacementInfo: Equatable {
+    let existingTitle: String
+    let destination: String
+}
+
+struct TemporaryMediaInfo: Identifiable, Equatable {
+    let id: UUID
+    let title: String
+    let originalFilename: String
+    let mediaType: LibraryMediaType
+    let addedLibraryItemID: UUID?
 }
 
 @MainActor
 final class EmulatorModel: ObservableObject {
     @Published private(set) var status = "Core not started"
-    @Published private(set) var loadedContent: String?
     @Published private(set) var isRunning = false
     @Published private(set) var firmwareReady = false
     @Published private(set) var isStarting = false
@@ -31,12 +120,15 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var joyport1Assignment: JoyportAssignment = .none
     @Published private(set) var joyport2Assignment: JoyportAssignment = .none
     @Published private(set) var physicalControllers: [PhysicalControllerInfo] = []
-    @Published private(set) var loadedLibraryItemID: UUID?
-    @Published private(set) var loadedTemporaryMedia: TemporaryMediaInfo?
-    @Published private(set) var loadedTemporaryMediaLibraryItemID: UUID?
+    @Published private(set) var mountedDisks: [Int: MediaReference] = [:]
+    @Published private(set) var mountedTape: MediaReference?
+    @Published private(set) var mountedCartridge: MediaReference?
+    @Published private(set) var activeProgram: MediaReference?
 
     let session = LibretroSession()
     let library = LibraryStore()
+
+    let availableDriveUnits = [8]
 
     private var didAttemptAutomaticStart = false
     private var virtualJoypadMask: UInt32 = 0
@@ -46,7 +138,6 @@ final class EmulatorModel: ObservableObject {
     private var configuredMouseIDs: Set<ObjectIdentifier> = []
     private var notificationTokens: [NSObjectProtocol] = []
     private var configuredMousePort = 0
-    private var loadedTemporaryMediaURL: URL?
 
     init() {
         Self.cleanTemporaryMediaDirectory()
@@ -60,6 +151,24 @@ final class EmulatorModel: ObservableObject {
         if !firmwareReady {
             status = "Firmware required"
         }
+    }
+
+    var temporaryMediaItems: [TemporaryMediaInfo] {
+        uniqueMediaReferences
+            .filter(\.isTemporary)
+            .map {
+                TemporaryMediaInfo(
+                    id: $0.id,
+                    title: $0.title,
+                    originalFilename: $0.originalFilename,
+                    mediaType: $0.mediaType,
+                    addedLibraryItemID: $0.addedLibraryItemID
+                )
+            }
+    }
+
+    var mountedLibraryItemIDs: Set<UUID> {
+        Set(uniqueMediaReferences.compactMap(\.libraryItemID))
     }
 
     func attach(videoView: C64MetalView) {
@@ -93,17 +202,11 @@ final class EmulatorModel: ObservableObject {
         status = "Starting C64…"
         defer { isStarting = false }
 
-        // Give SwiftUI time to draw the loading screen before VICE performs
-        // synchronous startup work on the main actor.
         await Task.yield()
         try? await Task.sleep(for: .milliseconds(120))
 
         if session.startWithoutContent() {
-            loadedContent = nil
-            loadedLibraryItemID = nil
-            loadedTemporaryMediaURL = nil
-            loadedTemporaryMedia = nil
-            loadedTemporaryMediaLibraryItemID = nil
+            clearMediaState(removeTemporaryFiles: true)
             isRunning = true
             syncInputConfiguration()
             status = "C64 started"
@@ -115,7 +218,7 @@ final class EmulatorModel: ObservableObject {
         }
     }
 
-    func openTemporaryMedia(url: URL) {
+    func prepareTemporaryMedia(url: URL) -> MediaActionRequest? {
         do {
             presentedError = nil
             refreshFirmwareState()
@@ -124,55 +227,211 @@ final class EmulatorModel: ObservableObject {
             }
 
             let copiedMedia = try copyToTemporaryMediaDirectory(sourceURL: url)
-            guard session.loadContent(at: copiedMedia.url) else {
-                try? FileManager.default.removeItem(at: copiedMedia.url)
-                isRunning = false
-                loadedContent = nil
-                loadedLibraryItemID = nil
-                loadedTemporaryMediaURL = nil
-                loadedTemporaryMedia = nil
-                loadedTemporaryMediaLibraryItemID = nil
-                Self.cleanTemporaryMediaDirectory()
-                let message = session.lastErrorMessage ?? "Unable to load content"
-                throw EmulatorModelError.coreFailure(message)
-            }
-
-            let title = Self.displayTitle(for: url)
-            loadedContent = url.lastPathComponent
-            loadedLibraryItemID = nil
-            loadedTemporaryMediaURL = copiedMedia.url
-            loadedTemporaryMedia = TemporaryMediaInfo(
-                title: title,
+            let media = MediaReference(
+                id: UUID(),
+                title: Self.displayTitle(for: url),
                 originalFilename: url.lastPathComponent,
-                mediaType: copiedMedia.mediaType
+                mediaType: copiedMedia.mediaType,
+                url: copiedMedia.url,
+                isTemporary: true,
+                libraryItemID: nil,
+                addedLibraryItemID: nil
             )
-            loadedTemporaryMediaLibraryItemID = nil
-            isRunning = true
-            syncInputConfiguration()
-            Self.cleanTemporaryMediaDirectory(preserving: copiedMedia.url)
-            status = "Running temporarily: \(title)"
+            return makeActionRequest(for: media)
         } catch {
             present(error)
+            return nil
         }
     }
 
+    func actionRequest(for item: LibraryItem) throws -> MediaActionRequest {
+        let url = try library.mediaURL(for: item)
+        let media = MediaReference(
+            id: item.id,
+            title: item.title,
+            originalFilename: item.originalFilename,
+            mediaType: item.mediaType,
+            url: url,
+            isTemporary: false,
+            libraryItemID: item.id,
+            addedLibraryItemID: nil
+        )
+        return makeActionRequest(for: media)
+    }
+
+    func replacementInfo(
+        for action: MediaAction,
+        media: MediaReference
+    ) -> MediaReplacementInfo? {
+        let existing: MediaReference?
+        let destination: String
+
+        switch action {
+        case .insertDisk(let unit), .autostartDisk(let unit):
+            existing = mountedDisks[unit]
+            destination = "Drive \(unit)"
+        case .insertTape, .autostartTape:
+            existing = mountedTape
+            destination = "the datasette"
+        case .insertCartridgeAndReset:
+            existing = mountedCartridge
+            destination = "the cartridge port"
+        case .runProgram:
+            return nil
+        }
+
+        guard let existing, existing.id != media.id else { return nil }
+        if let existingLibraryItemID = existing.libraryItemID,
+           existingLibraryItemID == media.libraryItemID {
+            return nil
+        }
+        return MediaReplacementInfo(
+            existingTitle: existing.originalFilename,
+            destination: destination
+        )
+    }
+
+    func performMediaAction(
+        _ action: MediaAction,
+        media: MediaReference,
+        replacingExisting: Bool = false
+    ) throws {
+        presentedError = nil
+        refreshFirmwareState()
+        guard firmwareReady else {
+            throw EmulatorModelError.firmwareRequired
+        }
+        guard isRunning else {
+            throw EmulatorModelError.coreNotRunning
+        }
+        if !replacingExisting,
+           let replacement = replacementInfo(for: action, media: media) {
+            throw EmulatorModelError.replacementRequired(
+                replacement.existingTitle,
+                replacement.destination
+            )
+        }
+
+        let replacedMedia: MediaReference?
+        let programReleasedByReset: MediaReference?
+        let success: Bool
+
+        switch action {
+        case .runProgram:
+            replacedMedia = activeProgram
+            programReleasedByReset = nil
+            success = session.runProgram(at: media.url)
+
+        case .insertCartridgeAndReset:
+            replacedMedia = mountedCartridge
+            programReleasedByReset = activeProgram
+            success = session.attachCartridge(at: media.url)
+
+        case .insertDisk(let unit):
+            replacedMedia = mountedDisks[unit]
+            programReleasedByReset = nil
+            success = session.attachDisk(at: media.url, driveUnit: unit)
+
+        case .autostartDisk(let unit):
+            replacedMedia = mountedDisks[unit]
+            programReleasedByReset = activeProgram
+            success = session.autostartDisk(at: media.url, driveUnit: unit)
+
+        case .insertTape:
+            replacedMedia = mountedTape
+            programReleasedByReset = nil
+            success = session.attachTape(at: media.url)
+
+        case .autostartTape:
+            replacedMedia = mountedTape
+            programReleasedByReset = activeProgram
+            success = session.autostartTape(at: media.url)
+        }
+
+        guard success else {
+            throw EmulatorModelError.coreFailure(
+                session.lastErrorMessage ?? "Unable to complete the media operation"
+            )
+        }
+
+        switch action {
+        case .runProgram:
+            activeProgram = media
+            status = "Running program: \(media.title)"
+
+        case .insertCartridgeAndReset:
+            activeProgram = nil
+            mountedCartridge = media
+            status = "Cartridge inserted: \(media.title)"
+
+        case .insertDisk(let unit):
+            mountedDisks[unit] = media
+            status = "Inserted in Drive \(unit): \(media.title)"
+
+        case .autostartDisk(let unit):
+            activeProgram = nil
+            mountedDisks[unit] = media
+            status = "Autostarting from Drive \(unit): \(media.title)"
+
+        case .insertTape:
+            mountedTape = media
+            status = "Tape inserted: \(media.title)"
+
+        case .autostartTape:
+            activeProgram = nil
+            mountedTape = media
+            status = "Autostarting tape: \(media.title)"
+        }
+
+        if let itemID = media.libraryItemID,
+           let item = library.item(withID: itemID) {
+            do {
+                try library.markOpened(item)
+            } catch {
+                print("Unable to update library recents: \(error)")
+            }
+        }
+
+        if let replacedMedia, replacedMedia.id != media.id {
+            removeTemporaryFileIfUnused(replacedMedia)
+        }
+        if let programReleasedByReset, programReleasedByReset.id != media.id {
+            removeTemporaryFileIfUnused(programReleasedByReset)
+        }
+    }
+
+    func discardPreparedMedia(_ media: MediaReference) {
+        removeTemporaryFileIfUnused(media)
+    }
+
+    func presentMediaError(_ error: Error) {
+        present(error)
+    }
+
     @discardableResult
-    func addCurrentTemporaryMediaToLibrary() throws -> LibraryItem {
-        guard let sourceURL = loadedTemporaryMediaURL,
-              let temporaryMedia = loadedTemporaryMedia else {
+    func addTemporaryMediaToLibrary(id: UUID) throws -> LibraryItem {
+        guard let media = uniqueMediaReferences.first(where: { $0.id == id && $0.isTemporary }) else {
             throw EmulatorModelError.noTemporaryMedia
         }
 
-        if let itemID = loadedTemporaryMediaLibraryItemID,
+        if let itemID = media.addedLibraryItemID,
            let existingItem = library.item(withID: itemID) {
             return existingItem
         }
 
         let item = try library.importMedia(
-            from: sourceURL,
-            originalFilename: temporaryMedia.originalFilename
+            from: media.url,
+            originalFilename: media.originalFilename
         )
-        loadedTemporaryMediaLibraryItemID = item.id
+        updateMediaReference(id: media.id) {
+            $0.libraryItemID = item.id
+            $0.addedLibraryItemID = item.id
+        }
+        do {
+            try library.markOpened(item)
+        } catch {
+            print("Unable to update library recents: \(error)")
+        }
         status = "Added to Library: \(item.title)"
         return item
     }
@@ -182,52 +441,6 @@ final class EmulatorModel: ObservableObject {
         let item = try library.importMedia(from: url)
         status = "Imported: \(item.title)"
         return item
-    }
-
-    func loadLibraryItem(_ item: LibraryItem) throws {
-        presentedError = nil
-        refreshFirmwareState()
-        guard firmwareReady else {
-            throw EmulatorModelError.firmwareRequired
-        }
-
-        do {
-            let mediaURL = try library.mediaURL(for: item)
-            guard session.loadContent(at: mediaURL) else {
-                isRunning = false
-                loadedContent = nil
-                loadedLibraryItemID = nil
-                loadedTemporaryMediaURL = nil
-                loadedTemporaryMedia = nil
-                loadedTemporaryMediaLibraryItemID = nil
-                Self.cleanTemporaryMediaDirectory()
-                let message = session.lastErrorMessage ?? "Unable to load content"
-                status = Self.errorSummary(message)
-                throw EmulatorModelError.coreFailure(message)
-            }
-
-            loadedContent = item.originalFilename
-            loadedLibraryItemID = item.id
-            loadedTemporaryMediaURL = nil
-            loadedTemporaryMedia = nil
-            loadedTemporaryMediaLibraryItemID = nil
-            isRunning = true
-            syncInputConfiguration()
-            Self.cleanTemporaryMediaDirectory()
-            do {
-                try library.markOpened(item)
-            } catch {
-                print("Unable to update library recents: \(error)")
-            }
-            status = "Running: \(item.title)"
-        } catch {
-            if !isRunning {
-                loadedContent = nil
-                loadedLibraryItemID = nil
-            }
-            status = Self.errorSummary(error.localizedDescription)
-            throw error
-        }
     }
 
     func settingsDidClose(previousFirmwareFingerprint: String) async {
@@ -241,12 +454,7 @@ final class EmulatorModel: ObservableObject {
         if isRunning {
             session.stop()
             isRunning = false
-            loadedContent = nil
-            loadedLibraryItemID = nil
-            loadedTemporaryMediaURL = nil
-            loadedTemporaryMedia = nil
-            loadedTemporaryMediaLibraryItemID = nil
-            Self.cleanTemporaryMediaDirectory()
+            clearMediaState(removeTemporaryFiles: true)
         }
 
         if firmwareReady {
@@ -260,61 +468,81 @@ final class EmulatorModel: ObservableObject {
     func stop() {
         session.stop()
         isRunning = false
-        loadedContent = nil
-        loadedLibraryItemID = nil
-        loadedTemporaryMediaURL = nil
-        loadedTemporaryMedia = nil
-        loadedTemporaryMediaLibraryItemID = nil
-        Self.cleanTemporaryMediaDirectory()
+        clearMediaState(removeTemporaryFiles: true)
         status = firmwareReady ? "Core stopped" : "Firmware required"
     }
 
     func softReset() {
         guard isRunning else { return }
+        let previousProgram = activeProgram
+        activeProgram = nil
         session.softReset()
+        if let previousProgram {
+            removeTemporaryFileIfUnused(previousProgram)
+        }
         status = "Soft reset requested"
     }
 
-    func hardReset() async {
+    func hardReset() {
         guard isRunning else { return }
-
-        guard loadedTemporaryMediaURL != nil else {
-            session.hardReset()
-            status = "Hard reset requested"
-            return
+        let previousProgram = activeProgram
+        activeProgram = nil
+        session.hardReset()
+        if let previousProgram {
+            removeTemporaryFileIfUnused(previousProgram)
         }
-
-        session.stop()
-        isRunning = false
-        loadedContent = nil
-        loadedLibraryItemID = nil
-        loadedTemporaryMediaURL = nil
-        loadedTemporaryMedia = nil
-        loadedTemporaryMediaLibraryItemID = nil
-        status = "Hard resetting…"
-        Self.cleanTemporaryMediaDirectory()
-        await startEmpty()
+        status = "Hard reset requested"
     }
 
-    var hasLoadedCartridge: Bool {
-        guard let loadedContent else { return false }
-        return URL(fileURLWithPath: loadedContent)
-            .pathExtension
-            .caseInsensitiveCompare("crt") == .orderedSame
+    func ejectDisk(from unit: Int) throws {
+        guard let media = mountedDisks[unit] else { return }
+        guard session.ejectDisk(fromDriveUnit: unit) else {
+            throw EmulatorModelError.coreFailure(
+                session.lastErrorMessage ?? "Unable to eject the disk"
+            )
+        }
+        mountedDisks[unit] = nil
+        removeTemporaryFileIfUnused(media)
+        status = "Drive \(unit) ejected"
     }
 
-    func ejectCartridgeAndReset() async {
-        guard hasLoadedCartridge else { return }
-        session.stop()
-        isRunning = false
-        loadedContent = nil
-        loadedLibraryItemID = nil
-        loadedTemporaryMediaURL = nil
-        loadedTemporaryMedia = nil
-        loadedTemporaryMediaLibraryItemID = nil
-        Self.cleanTemporaryMediaDirectory()
-        status = "Ejecting cartridge…"
-        await startEmpty()
+    func ejectTape() throws {
+        guard let media = mountedTape else { return }
+        guard session.ejectTape() else {
+            throw EmulatorModelError.coreFailure(
+                session.lastErrorMessage ?? "Unable to eject the tape"
+            )
+        }
+        mountedTape = nil
+        removeTemporaryFileIfUnused(media)
+        status = "Tape ejected"
+    }
+
+    func ejectCartridge() throws {
+        guard let media = mountedCartridge else { return }
+        guard session.ejectCartridge() else {
+            throw EmulatorModelError.coreFailure(
+                session.lastErrorMessage ?? "Unable to eject the cartridge"
+            )
+        }
+        mountedCartridge = nil
+        removeTemporaryFileIfUnused(media)
+        status = "Cartridge ejected"
+    }
+
+    func ejectAllMediaAndReset() {
+        guard isRunning else { return }
+        do {
+            guard session.ejectAllMediaAndReset() else {
+                throw EmulatorModelError.coreFailure(
+                    session.lastErrorMessage ?? "Unable to eject all media"
+                )
+            }
+            clearMediaState(removeTemporaryFiles: true)
+            status = "All media ejected and C64 reset"
+        } catch {
+            present(error)
+        }
     }
 
     var virtualJoystickPort: Int? {
@@ -671,7 +899,81 @@ final class EmulatorModel: ObservableObject {
     }
 
 
-    private func copyToTemporaryMediaDirectory(sourceURL: URL) throws -> (url: URL, mediaType: LibraryMediaType) {
+
+    private func makeActionRequest(for media: MediaReference) -> MediaActionRequest {
+        let actions: [MediaAction]
+        switch media.mediaType {
+        case .prg:
+            actions = [.runProgram]
+        case .crt:
+            actions = [.insertCartridgeAndReset]
+        case .d64:
+            actions = availableDriveUnits.flatMap { unit in
+                [.insertDisk(unit), .autostartDisk(unit)]
+            }
+        case .tap, .t64:
+            actions = [.insertTape, .autostartTape]
+        }
+        return MediaActionRequest(media: media, actions: actions)
+    }
+
+    private var uniqueMediaReferences: [MediaReference] {
+        var seen: Set<UUID> = []
+        var result: [MediaReference] = []
+        let candidates = [activeProgram, mountedCartridge, mountedTape]
+            .compactMap { $0 }
+            + mountedDisks.keys.sorted().compactMap { mountedDisks[$0] }
+
+        for media in candidates where seen.insert(media.id).inserted {
+            result.append(media)
+        }
+        return result
+    }
+
+    private func updateMediaReference(
+        id: UUID,
+        mutation: (inout MediaReference) -> Void
+    ) {
+        if var media = activeProgram, media.id == id {
+            mutation(&media)
+            activeProgram = media
+        }
+        if var media = mountedCartridge, media.id == id {
+            mutation(&media)
+            mountedCartridge = media
+        }
+        if var media = mountedTape, media.id == id {
+            mutation(&media)
+            mountedTape = media
+        }
+        for unit in mountedDisks.keys {
+            guard var media = mountedDisks[unit], media.id == id else { continue }
+            mutation(&media)
+            mountedDisks[unit] = media
+        }
+    }
+
+    private func clearMediaState(removeTemporaryFiles: Bool) {
+        activeProgram = nil
+        mountedCartridge = nil
+        mountedTape = nil
+        mountedDisks = [:]
+        if removeTemporaryFiles {
+            Self.cleanTemporaryMediaDirectory()
+        }
+    }
+
+    private func removeTemporaryFileIfUnused(_ media: MediaReference) {
+        guard media.isTemporary,
+              !uniqueMediaReferences.contains(where: { $0.id == media.id }) else {
+            return
+        }
+        try? FileManager.default.removeItem(at: media.url)
+    }
+
+    private func copyToTemporaryMediaDirectory(
+        sourceURL: URL
+    ) throws -> (url: URL, mediaType: LibraryMediaType) {
         let accessing = sourceURL.startAccessingSecurityScopedResource()
         defer {
             if accessing {
@@ -715,7 +1017,7 @@ final class EmulatorModel: ObservableObject {
             .appendingPathComponent("TemporaryMedia", isDirectory: true)
     }
 
-    private static func cleanTemporaryMediaDirectory(preserving preservedURL: URL? = nil) {
+    private static func cleanTemporaryMediaDirectory() {
         let fileManager = FileManager.default
         let directoryURL = temporaryMediaDirectoryURL
 
@@ -726,9 +1028,7 @@ final class EmulatorModel: ObservableObject {
                 includingPropertiesForKeys: nil,
                 options: [.skipsHiddenFiles]
             )
-            let preservedPath = preservedURL?.standardizedFileURL.path
-
-            for entry in entries where entry.standardizedFileURL.path != preservedPath {
+            for entry in entries {
                 try fileManager.removeItem(at: entry)
             }
         } catch {
@@ -764,17 +1064,24 @@ final class EmulatorModel: ObservableObject {
     }
 }
 
+
 private enum EmulatorModelError: LocalizedError {
     case firmwareRequired
+    case coreNotRunning
     case noTemporaryMedia
+    case replacementRequired(String, String)
     case coreFailure(String)
 
     var errorDescription: String? {
         switch self {
         case .firmwareRequired:
             return "Configure BASIC, KERNAL and character ROMs before opening or running media."
+        case .coreNotRunning:
+            return "Start the C64 before changing media."
         case .noTemporaryMedia:
-            return "There is no temporary media to add to the Library."
+            return "The selected temporary media is no longer available."
+        case .replacementRequired(let current, let destination):
+            return "\(destination) already contains \(current). Confirm replacement before continuing."
         case .coreFailure(let message):
             return message
         }
