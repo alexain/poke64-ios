@@ -26,6 +26,37 @@
 - Limited T64 controls to operations that do not imply a physical reel position; T64 fast transport and counter reset are disabled.
 - Updated the roadmap to mark datasette transport as complete and retain writable TAP recording/export as future work.
 
+## 0.7.0 — 2026-08-06
+
+### Added
+
+- Added an IEC virtual printer selectable on device 4 or 5.
+- Added Commodore MPS-803 text, PETSCII and bit-image rendering through the VICE printer core.
+- Added PDF output as the default format, with optional PNG pages, RAW diagnostic capture and PDF plus RAW export.
+- Added a live paper preview with scrolling, full-screen zoom and automatic updates during printing.
+- Added a contextual PRN 4/5 status panel with ready and flashing printing states.
+- Added paper eject and discard operations that preserve the running C64 session and mounted media.
+- Added persistent completed print jobs and sharing of generated output.
+- Added a user-supplied 4 KB MPS-803 printer-ROM slot with exact-size validation.
+
+### Changed
+
+- Restored the real VICE MPS-803 driver in place of the libretro printer stub.
+- Added a sandbox-safe grayscale raster backend compiled as part of the GPL VICE component.
+- Pinned the VICE/libretro source used by this release to `c8c242db75a559246d6d51017e6dd4ecd75d6a9f`.
+- Changed printer refresh and sharing actions to flush active output before reading it.
+
+### Fixed
+
+- Fixed retention and export of printer bridge symbols used through `dlsym()`.
+- Fixed false symbol-verification failures caused by `pipefail` and early `grep` termination.
+- Fixed short RAW captures appearing empty until a larger buffered print was produced.
+
+### Documentation
+
+- Updated the README, roadmap, firmware policy and third-party notices for the virtual printer.
+- Documented the exact VICE/libretro revision and the licensing boundary between the MIT application and GPL printer backend.
+
 ## 0.6.5 — 2026-08-06
 
 ### Added

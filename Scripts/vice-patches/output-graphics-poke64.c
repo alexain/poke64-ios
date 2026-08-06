@@ -1,4 +1,5 @@
 /*
+ * SPDX-License-Identifier: GPL-2.0-or-later
  * POKE64 raster printer output for the VICE libretro core.
  *
  * This file replaces VICE's host graphics-export backend in the locally built

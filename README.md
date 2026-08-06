@@ -75,6 +75,7 @@ A cartridge, disk or tape remains mounted across Soft and Hard Reset, matching p
 ## Documentation
 
 - [Build and development guide](Docs/BUILDING.md)
+- [VICE revision used by v0.7.0](Docs/VICE_REVISION.md)
 - [Architecture](Docs/ARCHITECTURE.md)
 - [Roadmap](Docs/ROADMAP.md)
 - [External-firmware testing](Docs/TESTING_EXTERNAL_FIRMWARE.md)
@@ -92,4 +93,9 @@ VICE and `vice-libretro` are separate GPL-2.0-or-later components, subject to th
 
 The libretro API header subset used by POKE64 is MIT-licensed. OpenROMs, XcodeGen and other third-party components retain their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-POKE64 does not license or distribute proprietary Commodore firmware, JiffyDOS or commercial media.
+POKE64 does not license or distribute proprietary Commodore firmware, including the MPS-803 printer ROM, JiffyDOS or commercial media.
+
+
+### Virtual-printer licensing
+
+The POKE64 raster-printer backend stored under `Scripts/vice-patches` is compiled into the VICE-derived core and is licensed GPL-2.0-or-later. It is not covered by the MIT License used by the application frontend.

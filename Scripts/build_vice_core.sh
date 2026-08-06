@@ -8,7 +8,7 @@ OUTPUT_DIR="${ROOT_DIR}/Vendor/Core"
 OUTPUT_CORE="${OUTPUT_DIR}/vice_x64sc_libretro_ios.dylib"
 SOURCE_PATCH_REPORT="${OUTPUT_DIR}/external-firmware-source-patch-report.json"
 VERIFICATION_REPORT="${OUTPUT_DIR}/external-firmware-verification-report.json"
-VICE_REF="${VICE_REF:-master}"
+VICE_REF="${VICE_REF:-c8c242db75a559246d6d51017e6dd4ecd75d6a9f}"
 DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET:-17.0}"
 JOBS="${JOBS:-$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4)}"
 

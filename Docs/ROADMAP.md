@@ -6,7 +6,7 @@ This document lists only work that is still pending. Completed Library, keyboard
 
 ## 1. Core, firmware and diagnostics
 
-- Pin the exact VICE/libretro revision used by every release build.
+- Automate verification and release-note recording of the exact pinned VICE/libretro revision used by every release build.
 - Make the external-firmware-only core build fully reproducible from a recorded revision and patch set.
 - Improve startup, firmware, drive-ROM and media-operation diagnostics.
 - Add known-ROM identification and clearly label standard, JiffyDOS and other recognized replacements.
@@ -55,7 +55,7 @@ This document lists only work that is still pending. Completed Library, keyboard
 
 ## 7. Printer
 
-- Validate MPS-803 text, PETSCII graphics and bit-image output against a wider set of C64 productivity and printing software.
+- Broaden virtual-printer compatibility testing beyond the validated BASIC text, direct bit-image and PrintMaster MPS-801 workflows, including PETSCII-heavy productivity software.
 - Add MPS-801, MPS-802 and other VICE printer models after their firmware requirements are defined.
 - Add a persistent print-job browser and optional continuous-paper presentation.
 - Add printer mechanism sound and finer ribbon-wear simulation.
