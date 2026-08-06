@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -9,6 +10,8 @@ struct ContentView: View {
     @State private var keyboardShiftLockIsActive = false
     @State private var showLibrary = false
     @State private var showPorts = false
+    @State private var showDevices = false
+    @State private var deviceImportTarget: DeviceImportTarget?
     @State private var mediaActionPrompt: MediaActionPromptState?
     @State private var showSettings = false
     @State private var settingsInitialPanel: SettingsPanel = .system
@@ -74,12 +77,24 @@ struct ContentView: View {
             allowedContentTypes: [.data, .archive],
             allowsMultipleSelection: false
         ) { result in
+            let target = deviceImportTarget
+            deviceImportTarget = nil
+
             switch result {
             case .success(let urls):
-                if let url = urls.first,
-                   let request = emulator.prepareTemporaryMedia(url: url) {
-                    beginMediaRequest(request)
+                guard let url = urls.first,
+                      let request = emulator.prepareTemporaryMedia(url: url) else {
+                    return
                 }
+
+                do {
+                    let resolvedRequest = try target?.request(for: request.media) ?? request
+                    beginMediaRequest(resolvedRequest)
+                } catch {
+                    emulator.discardPreparedMedia(request.media)
+                    emulator.presentMediaError(error)
+                }
+
             case .failure(let error):
                 print("File importer: \(error)")
             }
@@ -184,12 +199,28 @@ struct ContentView: View {
                 )
                 .presentationCompactAdaptation(.sheet)
         }
+        .popover(isPresented: $showDevices, arrowEdge: .top) {
+            DevicesConfigurationView(
+                emulator: emulator,
+                onChooseMedia: { target in
+                    chooseMedia(for: target)
+                }
+            )
+            .frame(
+                minWidth: 440,
+                idealWidth: 480,
+                minHeight: 560,
+                idealHeight: 620
+            )
+            .presentationCompactAdaptation(.sheet)
+        }
     }
 
     @ViewBuilder
     private var toolbarButtons: some View {
         HStack(spacing: 10) {
             Button {
+                deviceImportTarget = nil
                 showImporter = true
             } label: {
                 toolbarLabel("Open", systemImage: "folder")
@@ -218,11 +249,25 @@ struct ContentView: View {
             .disabled(!emulator.isRunning)
 
             Button {
+                showDevices = false
                 showPorts = true
             } label: {
                 PortsToolbarLabel(
                     port1Title: emulator.joyportCompactAssignmentTitle(for: 1),
                     port2Title: emulator.joyportCompactAssignmentTitle(for: 2)
+                )
+            }
+            .buttonStyle(.bordered)
+            .disabled(!emulator.isRunning)
+
+            Button {
+                showPorts = false
+                showDevices = true
+            } label: {
+                DevicesToolbarLabel(
+                    drive8Mounted: emulator.mountedDisks[8] != nil,
+                    tapeMounted: emulator.mountedTape != nil,
+                    cartridgeMounted: emulator.mountedCartridge != nil
                 )
             }
             .buttonStyle(.bordered)
@@ -256,6 +301,15 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .disabled(!emulator.isRunning)
+        }
+    }
+
+    private func chooseMedia(for target: DeviceImportTarget) {
+        deviceImportTarget = target
+        showDevices = false
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            showImporter = true
         }
     }
 
@@ -373,6 +427,58 @@ struct ContentView: View {
         .contentShape(Rectangle())
         .disabled(!emulator.isRunning)
         .opacity(emulator.isRunning ? 1 : 0.45)
+    }
+}
+
+private enum DeviceImportTarget {
+    case drive(Int)
+    case tape
+    case cartridge
+
+    func request(for media: MediaReference) throws -> MediaActionRequest {
+        let actions: [MediaAction]
+
+        switch self {
+        case .drive(let unit):
+            guard media.mediaType == .d64 else {
+                throw DeviceMediaSelectionError.unsupported(
+                    expected: "a D64 disk image",
+                    destination: "Drive \(unit)"
+                )
+            }
+            actions = [.insertDisk(unit), .autostartDisk(unit)]
+
+        case .tape:
+            guard media.mediaType == .tap || media.mediaType == .t64 else {
+                throw DeviceMediaSelectionError.unsupported(
+                    expected: "a TAP or T64 tape image",
+                    destination: "the datasette"
+                )
+            }
+            actions = [.insertTape, .autostartTape]
+
+        case .cartridge:
+            guard media.mediaType == .crt else {
+                throw DeviceMediaSelectionError.unsupported(
+                    expected: "a CRT cartridge image",
+                    destination: "the cartridge port"
+                )
+            }
+            actions = [.insertCartridgeAndReset]
+        }
+
+        return MediaActionRequest(media: media, actions: actions)
+    }
+}
+
+private enum DeviceMediaSelectionError: LocalizedError {
+    case unsupported(expected: String, destination: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupported(let expected, let destination):
+            return "Select \(expected) for \(destination)."
+        }
     }
 }
 
@@ -517,6 +623,262 @@ private struct PortsConfigurationView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.primary)
+    }
+}
+
+private struct DevicesToolbarLabel: View {
+    let drive8Mounted: Bool
+    let tapeMounted: Bool
+    let cartridgeMounted: Bool
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "externaldrive.fill")
+                .font(.body.weight(.semibold))
+
+            Text("Devices")
+
+            Text(summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
+        .contentShape(Rectangle())
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var summary: String {
+        "8 \(drive8Mounted ? "Disk" : "Empty") · T \(tapeMounted ? "Tape" : "Empty") · C \(cartridgeMounted ? "CRT" : "Empty")"
+    }
+
+    private var accessibilitySummary: String {
+        let drive = drive8Mounted ? "Drive 8 loaded" : "Drive 8 empty"
+        let tape = tapeMounted ? "tape loaded" : "tape empty"
+        let cartridge = cartridgeMounted ? "cartridge loaded" : "cartridge empty"
+        return "Devices, \(drive), \(tape), \(cartridge)"
+    }
+}
+
+private struct DevicesConfigurationView: View {
+    @ObservedObject var emulator: EmulatorModel
+    let onChooseMedia: (DeviceImportTarget) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                driveSection(unit: 8)
+                tapeSection
+                cartridgeSection
+
+                Section {
+                    Button(role: .destructive) {
+                        emulator.ejectAllMediaAndReset()
+                    } label: {
+                        Label("Eject All Media and Reset", systemImage: "eject")
+                    }
+                    .disabled(!hasMountedMedia)
+                } footer: {
+                    Text("Device changes are applied immediately. Hard Reset keeps mounted media inserted.")
+                }
+            }
+            .navigationTitle("Devices")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .alert(
+                "Device error",
+                isPresented: Binding(
+                    get: { errorMessage != nil },
+                    set: { if !$0 { errorMessage = nil } }
+                )
+            ) {
+                Button("OK") {
+                    errorMessage = nil
+                }
+            } message: {
+                Text(errorMessage ?? "Unknown error")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func driveSection(unit: Int) -> some View {
+        let media = emulator.mountedDisks[unit]
+
+        Section("Drive \(unit)") {
+            deviceStatusRow(
+                media: media,
+                emptyTitle: "No disk inserted",
+                systemImage: "externaldrive.fill"
+            )
+
+            if let media {
+                Button {
+                    perform(.autostartDisk(unit), media: media)
+                } label: {
+                    Label("Autostart Disk", systemImage: "play.circle.fill")
+                }
+
+                Button {
+                    choose(.drive(unit))
+                } label: {
+                    Label("Replace Disk…", systemImage: "arrow.triangle.2.circlepath")
+                }
+
+                Button(role: .destructive) {
+                    do {
+                        try emulator.ejectDisk(from: unit)
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                } label: {
+                    Label("Eject Disk", systemImage: "eject")
+                }
+            } else {
+                Button {
+                    choose(.drive(unit))
+                } label: {
+                    Label("Insert Disk…", systemImage: "plus.circle")
+                }
+            }
+        }
+    }
+
+    private var tapeSection: some View {
+        Section("Datasette") {
+            deviceStatusRow(
+                media: emulator.mountedTape,
+                emptyTitle: "No tape inserted",
+                systemImage: "recordingtape"
+            )
+
+            if let media = emulator.mountedTape {
+                Button {
+                    perform(.autostartTape, media: media)
+                } label: {
+                    Label("Autostart Tape", systemImage: "play.circle.fill")
+                }
+
+                Button {
+                    choose(.tape)
+                } label: {
+                    Label("Replace Tape…", systemImage: "arrow.triangle.2.circlepath")
+                }
+
+                Button(role: .destructive) {
+                    do {
+                        try emulator.ejectTape()
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                } label: {
+                    Label("Eject Tape", systemImage: "eject")
+                }
+            } else {
+                Button {
+                    choose(.tape)
+                } label: {
+                    Label("Insert Tape…", systemImage: "plus.circle")
+                }
+            }
+        }
+    }
+
+    private var cartridgeSection: some View {
+        Section("Cartridge") {
+            deviceStatusRow(
+                media: emulator.mountedCartridge,
+                emptyTitle: "No cartridge inserted",
+                systemImage: "shippingbox.fill"
+            )
+
+            if emulator.mountedCartridge != nil {
+                Button {
+                    choose(.cartridge)
+                } label: {
+                    Label("Replace Cartridge…", systemImage: "arrow.triangle.2.circlepath")
+                }
+
+                Button(role: .destructive) {
+                    do {
+                        try emulator.ejectCartridge()
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                } label: {
+                    Label("Eject Cartridge", systemImage: "eject")
+                }
+            } else {
+                Button {
+                    choose(.cartridge)
+                } label: {
+                    Label("Insert Cartridge…", systemImage: "plus.circle")
+                }
+            }
+        }
+    }
+
+    private var hasMountedMedia: Bool {
+        !emulator.mountedDisks.isEmpty
+            || emulator.mountedTape != nil
+            || emulator.mountedCartridge != nil
+    }
+
+    private func deviceStatusRow(
+        media: MediaReference?,
+        emptyTitle: String,
+        systemImage: String
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.title3)
+                .foregroundStyle(media == nil ? Color.secondary : Color.accentColor)
+                .frame(width: 30)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(media?.title ?? emptyTitle)
+                    .font(.body.weight(.medium))
+                    .lineLimit(1)
+
+                if let media {
+                    Text(media.originalFilename)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    Text(media.isTemporary ? "Temporary media" : "Library media")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: media == nil ? "circle" : "checkmark.circle.fill")
+                .foregroundStyle(media == nil ? Color.secondary : Color.green)
+        }
+    }
+
+    private func choose(_ target: DeviceImportTarget) {
+        dismiss()
+        onChooseMedia(target)
+    }
+
+    private func perform(_ action: MediaAction, media: MediaReference) {
+        do {
+            try emulator.performMediaAction(action, media: media)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
 
