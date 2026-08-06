@@ -367,13 +367,18 @@ enum FirmwareStore {
     }
 
     private static func sanitizeDriveConfiguration() {
-        let model = C64DriveModel.selected
         let defaults = UserDefaults.standard
+        let drive9Enabled = defaults.object(forKey: C64DriveSettings.drive9EnabledKey) == nil
+            ? C64DriveSettings.defaultDrive9Enabled
+            : defaults.bool(forKey: C64DriveSettings.drive9EnabledKey)
         let requested = defaults.object(forKey: C64DriveSettings.trueDriveEmulationKey) == nil
             ? C64DriveSettings.defaultTrueDriveEmulation
             : defaults.bool(forKey: C64DriveSettings.trueDriveEmulationKey)
+        let drive8Ready = status(for: C64DriveModel.selected(for: 8).firmwareSlot).isValid
+        let drive9Ready = !drive9Enabled
+            || status(for: C64DriveModel.selected(for: 9).firmwareSlot).isValid
 
-        if requested && !status(for: model.firmwareSlot).isValid {
+        if requested && (!drive8Ready || !drive9Ready) {
             defaults.set(false, forKey: C64DriveSettings.trueDriveEmulationKey)
         }
     }
@@ -402,19 +407,27 @@ enum FirmwareStore {
             lines.append("ChargenName=\"\(escapedVicercPath(chargen.path))\"")
         }
 
-        let selectedDriveModel = C64DriveModel.selected
-        let selectedFirmwareIsValid = status(for: selectedDriveModel.firmwareSlot).isValid
         let defaults = UserDefaults.standard
+        let drive8Model = C64DriveModel.selected(for: 8)
+        let drive9Model = C64DriveModel.selected(for: 9)
+        let drive9Enabled = defaults.object(forKey: C64DriveSettings.drive9EnabledKey) == nil
+            ? C64DriveSettings.defaultDrive9Enabled
+            : defaults.bool(forKey: C64DriveSettings.drive9EnabledKey)
+        let drive8FirmwareIsValid = status(for: drive8Model.firmwareSlot).isValid
+        let drive9FirmwareIsValid = !drive9Enabled
+            || status(for: drive9Model.firmwareSlot).isValid
         let trueDriveRequested = defaults.object(forKey: C64DriveSettings.trueDriveEmulationKey) == nil
             ? C64DriveSettings.defaultTrueDriveEmulation
             : defaults.bool(forKey: C64DriveSettings.trueDriveEmulationKey)
-        let trueDriveEnabled = trueDriveRequested && selectedFirmwareIsValid
+        let trueDriveEnabled = trueDriveRequested
+            && drive8FirmwareIsValid
+            && drive9FirmwareIsValid
         let writeProtected = defaults.object(forKey: C64DriveSettings.writeProtectionKey) == nil
             ? C64DriveSettings.defaultWriteProtection
             : defaults.bool(forKey: C64DriveSettings.writeProtectionKey)
 
         // VICE validates a drive model against its configured ROM. Write the
-        // ROM resources before Drive8Type so configuration loading never tries
+        // ROM resources before drive types so configuration loading never tries
         // to enable a model while it still points at a missing default ROM.
         let driveROMs: [(URL, String)] = [
             (drive1541, "DosName1541"),
@@ -426,20 +439,24 @@ enum FirmwareStore {
             lines.append("\(resource)=\"\(escapedVicercPath(url.path))\"")
         }
 
-        lines.append("Drive8Type=\(selectedDriveModel.resourceValue)")
+        lines.append("Drive8Type=\(drive8Model.resourceValue)")
+        lines.append("Drive9Type=\(drive9Enabled ? drive9Model.resourceValue : 0)")
         lines.append("Drive8TrueEmulation=\(trueDriveEnabled ? 1 : 0)")
-        lines.append("Drive9TrueEmulation=0")
+        lines.append("Drive9TrueEmulation=\(drive9Enabled && trueDriveEnabled ? 1 : 0)")
         lines.append("TrapDevice8=\(trueDriveEnabled ? 0 : 1)")
-        lines.append("TrapDevice9=1")
+        lines.append("TrapDevice9=\(drive9Enabled ? (trueDriveEnabled ? 0 : 1) : 0)")
         lines.append("AttachDevice8d0Readonly=\(writeProtected ? 1 : 0)")
         lines.append("AttachDevice8d1Readonly=\(writeProtected ? 1 : 0)")
+        lines.append("AttachDevice9d0Readonly=\(writeProtected ? 1 : 0)")
+        lines.append("AttachDevice9d1Readonly=\(writeProtected ? 1 : 0)")
 
         let storedSoundLevel = defaults.object(forKey: C64DriveSettings.soundLevelKey) == nil
             ? C64DriveSettings.defaultSoundLevel
             : defaults.integer(forKey: C64DriveSettings.soundLevelKey)
         let soundLevel = min(100, max(0, ((storedSoundLevel + 2) / 5) * 5))
         let driveSoundEnabled = trueDriveEnabled
-            && selectedDriveModel.supportsMechanicalSound
+            && (drive8Model.supportsMechanicalSound
+                || (drive9Enabled && drive9Model.supportsMechanicalSound))
             && soundLevel > 0
         lines.append("DriveSoundEmulation=\(driveSoundEnabled ? 1 : 0)")
         lines.append("DriveSoundEmulationVolume=\(driveSoundEnabled ? soundLevel * 20 : 0)")

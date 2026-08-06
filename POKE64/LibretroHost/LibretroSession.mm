@@ -153,11 +153,12 @@ struct KeyEvent {
     unsigned key;
 };
 
+static bool storedDriveEnabled(unsigned int unit);
 static bool storedTrueDriveEmulationEnabled();
-static int storedDriveTypeResourceValue();
+static int storedDriveTypeResourceValue(unsigned int unit);
 static int storedDriveSoundVolumeResourceValue();
-static const char *storedDriveROMResourceName();
-static std::string storedDriveROMPath();
+static const char *storedDriveROMResourceName(unsigned int unit);
+static std::string storedDriveROMPath(unsigned int unit);
 
 struct SessionImpl {
     void *coreHandle = nullptr;
@@ -513,14 +514,14 @@ struct SessionImpl {
         return true;
     }
 
-    bool loadSelectedDriveROM(std::string &error) {
+    bool loadSelectedDriveROM(unsigned int unit, std::string &error) {
         if (!api.resources_set_string) {
             error = "The VICE core does not expose runtime drive-ROM configuration";
             return false;
         }
 
-        const char *resourceName = storedDriveROMResourceName();
-        const std::string romPath = storedDriveROMPath();
+        const char *resourceName = storedDriveROMResourceName(unit);
+        const std::string romPath = storedDriveROMPath(unit);
         if (!resourceName || romPath.empty()) {
             error = "The selected drive ROM is not available";
             return false;
@@ -532,7 +533,7 @@ struct SessionImpl {
         }
 
         int result = -1;
-        switch (storedDriveTypeResourceValue()) {
+        switch (storedDriveTypeResourceValue(unit)) {
             case 1541:
                 if (api.iecrom_load_1541) result = api.iecrom_load_1541();
                 break;
@@ -557,7 +558,14 @@ struct SessionImpl {
     }
 
     bool applyRuntimeDriveConfiguration(unsigned int unit, std::string &error) {
-        if (unit != 8 || !storedTrueDriveEmulationEnabled()) {
+        if (unit < 8 || unit > 9) {
+            return true;
+        }
+        if (!storedDriveEnabled(unit)) {
+            error = std::string("Drive ") + std::to_string(unit) + " is disabled";
+            return false;
+        }
+        if (!storedTrueDriveEmulationEnabled()) {
             return true;
         }
 
@@ -566,23 +574,22 @@ struct SessionImpl {
             return false;
         }
 
-        const int expectedDriveType = storedDriveTypeResourceValue();
+        const int expectedDriveType = storedDriveTypeResourceValue(unit);
+        const std::string prefix = std::string("Drive") + std::to_string(unit);
+        const std::string typeResource = prefix + "Type";
         int currentDriveType = 0;
-        if (api.resources_get_int("Drive8Type", &currentDriveType) < 0) {
-            error = "VICE could not read the Drive 8 model";
+        if (api.resources_get_int(typeResource.c_str(), &currentDriveType) < 0) {
+            error = std::string("VICE could not read the Drive ")
+                + std::to_string(unit) + " model";
             return false;
         }
 
-        // VICE disables the drive when its ROM was not available during
-        // startup. Load the selected ROM explicitly on the core thread before
-        // enabling the selected hardware model. This also avoids the libretro
-        // autodetect path, which changes Drive8Type and reattaches the image.
         if (currentDriveType != expectedDriveType) {
-            if (!loadSelectedDriveROM(error)) {
+            if (!loadSelectedDriveROM(unit, error)) {
                 return false;
             }
             if (!setRuntimeIntegerResource(
-                    "Drive8Type",
+                    typeResource.c_str(),
                     expectedDriveType,
                     error
                 )) {
@@ -590,17 +597,21 @@ struct SessionImpl {
             }
         }
 
-        const struct {
-            const char *name;
-            int value;
-        } resources[] = {
-            {"Drive8TrueEmulation", 1},
-            {"TrapDevice8", 0},
-            {"FileSystemDevice8", 0}
+        const std::string trueDriveResource = prefix + "TrueEmulation";
+        const std::string trapResource = std::string("TrapDevice") + std::to_string(unit);
+        const std::string filesystemResource = std::string("FileSystemDevice") + std::to_string(unit);
+        const std::pair<std::string, int> resources[] = {
+            {trueDriveResource, 1},
+            {trapResource, 0},
+            {filesystemResource, 0}
         };
 
         for (const auto &resource : resources) {
-            if (!setRuntimeIntegerResource(resource.name, resource.value, error)) {
+            if (!setRuntimeIntegerResource(
+                    resource.first.c_str(),
+                    resource.second,
+                    error
+                )) {
                 return false;
             }
         }
@@ -610,7 +621,8 @@ struct SessionImpl {
     bool applyRuntimeDriveSoundConfiguration(std::string &error) {
         const int volume = storedDriveSoundVolumeResourceValue();
         const bool enabled = storedTrueDriveEmulationEnabled()
-            && storedDriveTypeResourceValue() != 1581
+            && ((storedDriveEnabled(8) && storedDriveTypeResourceValue(8) != 1581)
+                || (storedDriveEnabled(9) && storedDriveTypeResourceValue(9) != 1581))
             && volume > 0;
 
         if (!setRuntimeIntegerResource(
@@ -645,19 +657,23 @@ struct SessionImpl {
     }
 
     bool finalizeDiskAttachment(unsigned int unit, std::string &error) {
-        if (!storedTrueDriveEmulationEnabled() || unit != 8) {
+        if (!storedTrueDriveEmulationEnabled()) {
             return true;
         }
 
+        const std::string typeResource = std::string("Drive")
+            + std::to_string(unit) + "Type";
         int driveType = 0;
         if (!api.resources_get_int ||
-            api.resources_get_int("Drive8Type", &driveType) < 0) {
-            error = "VICE could not verify the Drive 8 model after insertion";
+            api.resources_get_int(typeResource.c_str(), &driveType) < 0) {
+            error = std::string("VICE could not verify the Drive ")
+                + std::to_string(unit) + " model after insertion";
             return false;
         }
 
-        if (driveType != storedDriveTypeResourceValue()) {
-            error = "VICE inserted the disk but the selected hardware drive is not active";
+        if (driveType != storedDriveTypeResourceValue(unit)) {
+            error = std::string("VICE inserted the disk but the selected Drive ")
+                + std::to_string(unit) + " hardware is not active";
             return false;
         }
 
@@ -1119,6 +1135,15 @@ static void applyStoredVideoOptions(SessionImpl *session) {
     }
 }
 
+static bool storedDriveEnabled(unsigned int unit) {
+    if (unit == 8) return true;
+    if (unit != 9) return false;
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    return [defaults objectForKey:@"poke64.drive9.enabled"] != nil
+        ? [defaults boolForKey:@"poke64.drive9.enabled"]
+        : false;
+}
+
 static bool storedTrueDriveEmulationEnabled() {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     return [defaults objectForKey:@"poke64.drive.trueEmulation"] != nil
@@ -1126,24 +1151,25 @@ static bool storedTrueDriveEmulationEnabled() {
         : false;
 }
 
-static NSString *storedDriveModel() {
+static NSString *storedDriveModel(unsigned int unit) {
+    NSString *key = unit == 9 ? @"poke64.drive9.model" : @"poke64.drive.model";
     return validatedDefaultString(
-        @"poke64.drive.model",
+        key,
         @[@"1541", @"1541-II", @"1571", @"1581"],
         @"1541-II"
     );
 }
 
-static int storedDriveTypeResourceValue() {
-    NSString *model = storedDriveModel();
+static int storedDriveTypeResourceValue(unsigned int unit) {
+    NSString *model = storedDriveModel(unit);
     if ([model isEqualToString:@"1541"]) return 1541;
     if ([model isEqualToString:@"1571"]) return 1571;
     if ([model isEqualToString:@"1581"]) return 1581;
     return 1542;
 }
 
-static const char *storedDriveROMResourceName() {
-    switch (storedDriveTypeResourceValue()) {
+static const char *storedDriveROMResourceName(unsigned int unit) {
+    switch (storedDriveTypeResourceValue(unit)) {
         case 1541: return "DosName1541";
         case 1571: return "DosName1571";
         case 1581: return "DosName1581";
@@ -1164,8 +1190,8 @@ static int storedDriveSoundVolumeResourceValue() {
     return static_cast<int>(level * 20);
 }
 
-static NSString *storedDriveROMFilename() {
-    switch (storedDriveTypeResourceValue()) {
+static NSString *storedDriveROMFilename(unsigned int unit) {
+    switch (storedDriveTypeResourceValue(unit)) {
         case 1541: return @"poke64-dos1541.bin";
         case 1571: return @"poke64-dos1571.bin";
         case 1581: return @"poke64-dos1581.bin";
@@ -1173,7 +1199,7 @@ static NSString *storedDriveROMFilename() {
     }
 }
 
-static std::string storedDriveROMPath() {
+static std::string storedDriveROMPath(unsigned int unit) {
     NSFileManager *manager = NSFileManager.defaultManager;
     NSURL *base = [manager URLForDirectory:NSApplicationSupportDirectory
                                   inDomain:NSUserDomainMask
@@ -1184,7 +1210,7 @@ static std::string storedDriveROMPath() {
         URLByAppendingPathComponent:@"vice" isDirectory:YES]
         URLByAppendingPathComponent:@"POKE64" isDirectory:YES]
         URLByAppendingPathComponent:@"Firmware" isDirectory:YES];
-    url = [url URLByAppendingPathComponent:storedDriveROMFilename() isDirectory:NO];
+    url = [url URLByAppendingPathComponent:storedDriveROMFilename(unit) isDirectory:NO];
 
     NSDictionary<NSURLResourceKey, id> *values = [url resourceValuesForKeys:@[
         NSURLIsRegularFileKey,
@@ -1195,7 +1221,7 @@ static std::string storedDriveROMPath() {
     }
 
     const long long expectedSize =
-        storedDriveTypeResourceValue() == 1571 || storedDriveTypeResourceValue() == 1581
+        storedDriveTypeResourceValue(unit) == 1571 || storedDriveTypeResourceValue(unit) == 1581
             ? 32768
             : 16384;
     if ([values[NSURLFileSizeKey] longLongValue] != expectedSize) {
@@ -1238,12 +1264,9 @@ static void applyStoredDriveOptions(SessionImpl *session) {
         static_cast<NSInteger>(0),
         static_cast<NSInteger>(100)
     );
-    NSString *driveModel = validatedDefaultString(
-        @"poke64.drive.model",
-        @[@"1541", @"1541-II", @"1571", @"1581"],
-        @"1541-II"
-    );
-    const bool supportsSound = ![driveModel isEqualToString:@"1581"];
+    const bool supportsSound =
+        (storedDriveEnabled(8) && storedDriveTypeResourceValue(8) != 1581)
+        || (storedDriveEnabled(9) && storedDriveTypeResourceValue(9) != 1581);
     assignCoreOption(
         session,
         "vice_drive_sound_emulation",
@@ -1346,7 +1369,7 @@ static void applyStoredAudioOptions(SessionImpl *session) {
 
 static void ledStateCallback(int led, int state) {
     // VICE-libretro LED mapping: 0 = machine power, 1 = floppy,
-    // 2 = datasette. POKE64 currently exposes Drive 8 activity only.
+    // 2 = datasette. VICE exposes a single aggregate floppy activity LED.
     if (gSession && led == 1) {
         gSession->updateDriveLED(state);
     }
@@ -1737,6 +1760,9 @@ bool SessionImpl::start(const char *path, std::string &error) {
                 if (storedTrueDriveEmulationEnabled()) {
                     std::string driveError;
                     if (!applyRuntimeDriveConfiguration(8, driveError)) {
+                        recordCoreMessage(driveError.c_str(), true);
+                    } else if (storedDriveEnabled(9)
+                               && !applyRuntimeDriveConfiguration(9, driveError)) {
                         recordCoreMessage(driveError.c_str(), true);
                     } else {
                         std::string soundError;

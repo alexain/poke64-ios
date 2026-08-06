@@ -355,7 +355,9 @@ enum C64DriveModel: String, CaseIterable, Identifiable {
     case cbm1571 = "1571"
     case cbm1581 = "1581"
 
-    static let defaultsKey = "poke64.drive.model"
+    static let drive8DefaultsKey = "poke64.drive.model"
+    static let drive9DefaultsKey = "poke64.drive9.model"
+    static let defaultsKey = drive8DefaultsKey
     static let defaultValue: C64DriveModel = .cbm1541II
 
     var id: String { rawValue }
@@ -406,33 +408,44 @@ enum C64DriveModel: String, CaseIterable, Identifiable {
         self != .cbm1581
     }
 
+    static func defaultsKey(for unit: Int) -> String {
+        unit == 9 ? drive9DefaultsKey : drive8DefaultsKey
+    }
+
+    static func selected(for unit: Int) -> C64DriveModel {
+        guard let value = UserDefaults.standard.string(forKey: defaultsKey(for: unit)),
+              let model = C64DriveModel(rawValue: value) else {
+            return defaultValue
+        }
+        return model
+    }
+
     static var selected: C64DriveModel {
-        get {
-            guard let value = UserDefaults.standard.string(forKey: defaultsKey),
-                  let model = C64DriveModel(rawValue: value) else {
-                return defaultValue
-            }
-            return model
-        }
-        set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey)
-        }
+        get { selected(for: 8) }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: drive8DefaultsKey) }
     }
 }
 
 enum C64DriveSettings {
     static let trueDriveEmulationKey = "poke64.drive.trueEmulation"
+    static let drive9EnabledKey = "poke64.drive9.enabled"
     static let writeProtectionKey = "poke64.drive.writeProtection"
     static let soundLevelKey = "poke64.drive.soundLevel"
 
     static let defaultTrueDriveEmulation = false
+    static let defaultDrive9Enabled = false
     static let defaultWriteProtection = false
     static let defaultSoundLevel = 20
 
     static var configurationFingerprint: String {
         let defaults = UserDefaults.standard
         return [
-            defaults.string(forKey: C64DriveModel.defaultsKey)
+            defaults.string(forKey: C64DriveModel.drive8DefaultsKey)
+                ?? C64DriveModel.defaultValue.rawValue,
+            String(defaults.object(forKey: drive9EnabledKey) == nil
+                ? defaultDrive9Enabled
+                : defaults.bool(forKey: drive9EnabledKey)),
+            defaults.string(forKey: C64DriveModel.drive9DefaultsKey)
                 ?? C64DriveModel.defaultValue.rawValue,
             String(defaults.object(forKey: trueDriveEmulationKey) == nil
                 ? defaultTrueDriveEmulation
@@ -1037,8 +1050,14 @@ private struct AudioLevelSlider: View {
 }
 
 private struct DiskDriveSettingsView: View {
-    @AppStorage(C64DriveModel.defaultsKey)
-    private var driveModelRawValue = C64DriveModel.defaultValue.rawValue
+    @AppStorage(C64DriveModel.drive8DefaultsKey)
+    private var drive8ModelRawValue = C64DriveModel.defaultValue.rawValue
+
+    @AppStorage(C64DriveSettings.drive9EnabledKey)
+    private var drive9Enabled = C64DriveSettings.defaultDrive9Enabled
+
+    @AppStorage(C64DriveModel.drive9DefaultsKey)
+    private var drive9ModelRawValue = C64DriveModel.defaultValue.rawValue
 
     @AppStorage(C64DriveSettings.trueDriveEmulationKey)
     private var trueDriveEmulation = C64DriveSettings.defaultTrueDriveEmulation
@@ -1049,80 +1068,109 @@ private struct DiskDriveSettingsView: View {
     @AppStorage(C64DriveSettings.soundLevelKey)
     private var driveSoundLevel = C64DriveSettings.defaultSoundLevel
 
-    private var selectedModel: C64DriveModel {
-        C64DriveModel(rawValue: driveModelRawValue) ?? .defaultValue
+    private var drive8Model: C64DriveModel {
+        C64DriveModel(rawValue: drive8ModelRawValue) ?? .defaultValue
     }
 
-    private var firmwareStatus: FirmwareStatus {
-        FirmwareStore.status(for: selectedModel.firmwareSlot)
+    private var drive9Model: C64DriveModel {
+        C64DriveModel(rawValue: drive9ModelRawValue) ?? .defaultValue
+    }
+
+    private var drive8FirmwareStatus: FirmwareStatus {
+        FirmwareStore.status(for: drive8Model.firmwareSlot)
+    }
+
+    private var drive9FirmwareStatus: FirmwareStatus {
+        FirmwareStore.status(for: drive9Model.firmwareSlot)
     }
 
     private var canEnableTrueDrive: Bool {
-        firmwareStatus.isValid
+        drive8FirmwareStatus.isValid
+            && (!drive9Enabled || drive9FirmwareStatus.isValid)
+    }
+
+    private var anyEnabledDriveSupportsSound: Bool {
+        drive8Model.supportsMechanicalSound
+            || (drive9Enabled && drive9Model.supportsMechanicalSound)
     }
 
     var body: some View {
         Form {
             Section {
-                Picker("Drive model", selection: $driveModelRawValue) {
-                    ForEach(C64DriveModel.allCases) { model in
-                        Text(model.title).tag(model.rawValue)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Toggle("True Drive Emulation", isOn: $trueDriveEmulation)
-                    .disabled(!canEnableTrueDrive)
+                Toggle(
+                    "True Drive Emulation",
+                    isOn: $trueDriveEmulation
+                )
+                .disabled(!canEnableTrueDrive)
 
                 LabeledContent(
                     "Active backend",
-                    value: trueDriveEmulation ? "Hardware-level drive" : "Fast virtual drive"
+                    value: trueDriveEmulation ? "Hardware-level drives" : "Fast virtual drives"
                 )
-
-                LabeledContent("Typical media", value: selectedModel.mediaSummary)
             } header: {
-                Text("Drive 8")
+                Text("Drive Emulation")
             } footer: {
                 Text(trueDriveEmulation
-                    ? "True Drive Emulation executes the selected drive ROM and is required for complete JiffyDOS compatibility, accurate drive timing and mechanical drive sound."
-                    : "Fast virtual drive uses VICE traps for convenient loading. It does not execute drive firmware, so drive-side JiffyDOS commands are unavailable.")
+                    ? "True Drive Emulation applies to every enabled drive. It executes each selected model's ROM and is required for complete JiffyDOS compatibility, accurate timing and mechanical drive sound."
+                    : "Fast virtual drive mode applies to every enabled drive and uses VICE traps for convenient loading. It does not execute drive firmware, so drive-side JiffyDOS commands are unavailable.")
             }
 
             Section {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(selectedModel.firmwareSlot.title)
-                            .font(.body.weight(.medium))
-                        Text(selectedModel.firmwareSlot.detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                driveModelPicker(
+                    title: "Drive model",
+                    selection: $drive8ModelRawValue
+                )
 
-                    Spacer()
+                LabeledContent("Typical media", value: drive8Model.mediaSummary)
+            } header: {
+                Text("Drive 8")
+            } footer: {
+                Text("Drive 8 is always enabled. Its model is independent, while the emulation backend is shared by all enabled drives.")
+            }
 
-                    if firmwareStatus.isValid {
-                        Label("Installed", systemImage: "checkmark.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                    } else if firmwareStatus.isInstalled {
-                        Label("Invalid", systemImage: "xmark.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    } else {
-                        Label("Missing", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
+            Section {
+                Toggle("Enable Drive 9", isOn: $drive9Enabled)
+
+                driveModelPicker(
+                    title: "Drive model",
+                    selection: $drive9ModelRawValue
+                )
+                .disabled(!drive9Enabled)
+
+                LabeledContent(
+                    "Active backend",
+                    value: drive9Enabled
+                        ? (trueDriveEmulation ? "Hardware-level drive" : "Fast virtual drive")
+                        : "Disabled"
+                )
+
+                if drive9Enabled {
+                    LabeledContent("Typical media", value: drive9Model.mediaSummary)
+                }
+            } header: {
+                Text("Drive 9")
+            } footer: {
+                Text("Drive 9 is optional. Its model can be configured independently, while the emulation backend is shared by all enabled drives.")
+            }
+
+            Section {
+                firmwareRow(
+                    units: drive9Enabled && drive9Model == drive8Model ? [8, 9] : [8],
+                    model: drive8Model,
+                    status: drive8FirmwareStatus
+                )
+
+                if drive9Enabled && drive9Model != drive8Model {
+                    firmwareRow(
+                        units: [9],
+                        model: drive9Model,
+                        status: drive9FirmwareStatus
+                    )
                 }
 
-                if let fileSize = firmwareStatus.fileSize {
-                    LabeledContent("ROM size", value: "\(fileSize) bytes")
-                        .font(.caption)
-                }
-
-                if !firmwareStatus.isValid {
+                if !canEnableTrueDrive {
                     Label(
-                        "Import this ROM in Firmware / ROMs before enabling True Drive Emulation.",
+                        "Import every required drive ROM in Firmware / ROMs before enabling True Drive Emulation.",
                         systemImage: "info.circle"
                     )
                     .font(.footnote)
@@ -1131,7 +1179,7 @@ private struct DiskDriveSettingsView: View {
             } header: {
                 Text("Drive Firmware")
             } footer: {
-                Text("POKE64 accepts standard or compatible replacement firmware. For JiffyDOS, use a matching C64 KERNAL and drive ROM; POKE64 cannot determine compatibility from the filename alone.")
+                Text("Drive ROMs are shared by model, not assigned separately to unit 8 or 9. Two enabled drives using the same model must therefore use the same ROM. POKE64 accepts standard or compatible replacement firmware; for JiffyDOS, use matching C64 KERNAL and drive ROMs.")
             }
 
             Section {
@@ -1139,7 +1187,7 @@ private struct DiskDriveSettingsView: View {
             } header: {
                 Text("Media Safety")
             } footer: {
-                Text("When enabled, newly attached Drive 8 images are opened read-only. Existing files are not modified by this setting.")
+                Text("When enabled, newly attached images in Drive 8 and Drive 9 are opened read-only. Existing files are not modified by this setting.")
             }
 
             Section {
@@ -1150,22 +1198,22 @@ private struct DiskDriveSettingsView: View {
                     step: 5,
                     valueText: { $0 == 0 ? "Off" : "\($0)%" }
                 )
-                .disabled(!trueDriveEmulation || !selectedModel.supportsMechanicalSound)
+                .disabled(!trueDriveEmulation || !anyEnabledDriveSupportsSound)
             } header: {
                 Text("Drive Sound")
             } footer: {
-                if !selectedModel.supportsMechanicalSound {
+                if !anyEnabledDriveSupportsSound {
                     Text("The VICE libretro drive-sound option supports 1541-family and 1571 drives, not the 1581.")
                 } else if !trueDriveEmulation {
                     Text("Mechanical drive sound requires True Drive Emulation and a compatible disk image.")
                 } else {
-                    Text("Mechanical drive sound is produced while a compatible D64 or D71 image is active.")
+                    Text("Mechanical drive sound is shared by the enabled 1541-family and 1571 drives.")
                 }
             }
 
             Section("Compatibility") {
                 Label(
-                    "Drive model changes apply when Settings is closed and the C64 restarts.",
+                    "Drive configuration changes apply when Settings is closed and the C64 restarts.",
                     systemImage: "arrow.clockwise"
                 )
                 .font(.callout)
@@ -1173,7 +1221,7 @@ private struct DiskDriveSettingsView: View {
 
                 if trueDriveEmulation {
                     Label(
-                        "JiffyDOS requires a matching custom C64 KERNAL and drive ROM.",
+                        "JiffyDOS requires matching custom C64 KERNAL and drive ROMs.",
                         systemImage: "bolt.horizontal.circle"
                     )
                     .font(.callout)
@@ -1188,10 +1236,14 @@ private struct DiskDriveSettingsView: View {
                 .disabled(isUsingDefaults)
             }
         }
-        .onChange(of: driveModelRawValue) { _, _ in
-            if !canEnableTrueDrive {
-                trueDriveEmulation = false
-            }
+        .onChange(of: drive8ModelRawValue) { _, _ in
+            sanitizeTrueDriveSelection()
+        }
+        .onChange(of: drive9ModelRawValue) { _, _ in
+            sanitizeTrueDriveSelection()
+        }
+        .onChange(of: drive9Enabled) { _, _ in
+            sanitizeTrueDriveSelection()
         }
         .onChange(of: trueDriveEmulation) { _, enabled in
             if enabled && !canEnableTrueDrive {
@@ -1200,15 +1252,77 @@ private struct DiskDriveSettingsView: View {
         }
     }
 
+    private func driveModelPicker(
+        title: String,
+        selection: Binding<String>
+    ) -> some View {
+        Picker(title, selection: selection) {
+            ForEach(C64DriveModel.allCases) { model in
+                Text(model.title).tag(model.rawValue)
+            }
+        }
+        .pickerStyle(.menu)
+    }
+
+    @ViewBuilder
+    private func firmwareRow(
+        units: [Int],
+        model: C64DriveModel,
+        status: FirmwareStatus
+    ) -> some View {
+        let unitLabel = units.count == 1
+            ? "Drive \(units[0])"
+            : "Drives \(units.map { String($0) }.joined(separator: " and "))"
+
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(unitLabel) · \(model.firmwareSlot.title)")
+                    .font(.body.weight(.medium))
+                Text(model.firmwareSlot.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Shared by every enabled drive using \(model.title).")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            if status.isValid {
+                Label("Installed", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            } else if status.isInstalled {
+                Label("Invalid", systemImage: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            } else {
+                Label("Missing", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
     private var isUsingDefaults: Bool {
-        driveModelRawValue == C64DriveModel.defaultValue.rawValue
+        drive8ModelRawValue == C64DriveModel.defaultValue.rawValue
+            && drive9Enabled == C64DriveSettings.defaultDrive9Enabled
+            && drive9ModelRawValue == C64DriveModel.defaultValue.rawValue
             && trueDriveEmulation == C64DriveSettings.defaultTrueDriveEmulation
             && writeProtection == C64DriveSettings.defaultWriteProtection
             && driveSoundLevel == C64DriveSettings.defaultSoundLevel
     }
 
+    private func sanitizeTrueDriveSelection() {
+        if trueDriveEmulation && !canEnableTrueDrive {
+            trueDriveEmulation = false
+        }
+    }
+
     private func restoreDefaults() {
-        driveModelRawValue = C64DriveModel.defaultValue.rawValue
+        drive8ModelRawValue = C64DriveModel.defaultValue.rawValue
+        drive9Enabled = C64DriveSettings.defaultDrive9Enabled
+        drive9ModelRawValue = C64DriveModel.defaultValue.rawValue
         trueDriveEmulation = C64DriveSettings.defaultTrueDriveEmulation
         writeProtection = C64DriveSettings.defaultWriteProtection
         driveSoundLevel = C64DriveSettings.defaultSoundLevel

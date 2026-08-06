@@ -99,6 +99,13 @@ struct FirmwareSettingsView: View {
                 }
 
                 Section {
+                    Label(
+                        "Each ROM slot is shared by every enabled drive using that model.",
+                        systemImage: "square.stack.3d.up"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
                     firmwareRow(for: .drive1541)
                     firmwareRow(for: .drive1541II)
                     firmwareRow(for: .drive1571)
@@ -106,7 +113,7 @@ struct FirmwareSettingsView: View {
                 } header: {
                     Text("Drive ROMs")
                 } footer: {
-                    Text("Drive firmware is optional for the fast virtual backend. Import the ROM matching the model selected in Disk Drives before enabling True Drive Emulation. Compatible replacement ROMs such as JiffyDOS are accepted.")
+                    Text("Drive firmware is optional for the fast virtual backend. Import the ROM matching each model selected in Disk Drives before enabling True Drive Emulation. Units 8 and 9 cannot use different ROMs when configured with the same model. Compatible replacement ROMs such as JiffyDOS are accepted.")
                 }
 
                 Section("Storage") {
