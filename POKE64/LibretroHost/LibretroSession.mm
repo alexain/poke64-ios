@@ -1251,6 +1251,21 @@ static std::string storedDriveROMPath(unsigned int unit) {
     return std::string(url.fileSystemRepresentation);
 }
 
+static void applyStoredREUOptions(SessionImpl *session) {
+    assignCoreOption(
+        session,
+        "vice_ram_expansion_unit",
+        validatedDefaultString(
+            @"poke64.system.reuSize",
+            @[
+                @"none", @"128kB", @"256kB", @"512kB", @"1024kB",
+                @"2048kB", @"4096kB", @"8192kB", @"16384kB"
+            ],
+            @"none"
+        )
+    );
+}
+
 static void applyStoredDriveOptions(SessionImpl *session) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     const bool trueDrive = storedTrueDriveEmulationEnabled();
@@ -1475,6 +1490,7 @@ static bool environmentCallback(unsigned command, void *data) {
                 ? storedModel
                 : @"C64 PAL";
             session->variables["vice_c64_model"] = selectedModel.UTF8String;
+            applyStoredREUOptions(session);
             applyStoredVideoOptions(session);
             applyStoredAudioOptions(session);
             applyStoredDriveOptions(session);

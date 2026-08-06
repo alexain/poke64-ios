@@ -797,6 +797,7 @@ private struct DevicesConfigurationView: View {
                 }
                 tapeSection
                 cartridgeSection
+                reuSection
 
                 Section {
                     Button(role: .destructive) {
@@ -953,6 +954,50 @@ private struct DevicesConfigurationView: View {
                 } label: {
                     Label("Insert Cartridge…", systemImage: "plus.circle")
                 }
+            }
+        }
+    }
+
+    private var reuSection: some View {
+        let size = C64REUSize.selected
+        let persistentMemory = C64REUSettings.persistentMemoryEnabled
+
+        return Section {
+            HStack(spacing: 12) {
+                Image(systemName: "memorychip")
+                    .font(.title3)
+                    .foregroundStyle(size == .disabled ? Color.secondary : Color.accentColor)
+                    .frame(width: 30)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("REU")
+                        .font(.body.weight(.medium))
+
+                    if size == .disabled {
+                        Text("Disabled")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("\(size.capacityTitle) · Active")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text(persistentMemory ? "Persistent memory enabled" : "Volatile memory")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: size == .disabled ? "circle" : "checkmark.circle.fill")
+                    .foregroundStyle(size == .disabled ? Color.secondary : Color.green)
+            }
+        } header: {
+            Text("RAM Expansion Unit")
+        } footer: {
+            if size != .disabled {
+                Text("Some cartridges use the same expansion-port address space and may require the REU to be disabled in Settings → System.")
             }
         }
     }

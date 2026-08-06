@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.2 — 2026-08-06
+
+### Added
+
+- Added configurable Commodore REU support from 128 KB through 16 MB in Settings → System.
+- Added optional persistent REU memory backed by an app-managed image file.
+- Added REU size, activity and persistence status to the Devices interface.
+
+### Fixed
+
+- Improved Commodore 1351 mouse handling, including compatibility with Final Cartridge III.
+
+### Documentation
+
+- Added planned iCloud Drive and Google Drive backup/synchronization for the library, imported media and user-supplied firmware/ROM files.
+
 ## 0.6.0 — 2026-08-06
 
 ### Added

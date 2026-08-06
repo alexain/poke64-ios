@@ -31,6 +31,7 @@ This document lists only work that is still pending. Completed Library, keyboard
 - Preview BASIC listings where practical.
 - Associate hardware profiles, joyports, firmware, save states and multidisk sets with library entries.
 - Add explicit export/share workflows for created or modified disk images.
+- Add optional iCloud Drive and Google Drive backup/synchronization for the library, imported media and user-supplied firmware/ROM files, supporting recovery after app reinstallation and synchronization across multiple devices.
 
 ## 4. Keyboard and input
 
@@ -45,7 +46,6 @@ This document lists only work that is still pending. Completed Library, keyboard
 - Expose independent per-drive activity indicators by connecting to a VICE API that identifies the active unit; the current libretro LED is aggregate.
 - Add multidisk sets, disk-side navigation and disk-flip workflows.
 - Add complete datasette transport controls, counter and status.
-- Add supported REU configuration, status and memory-size options.
 - Extend cartridge handling for supported expansion devices beyond basic CRT attachment.
 
 ## 6. Graphics and audio
