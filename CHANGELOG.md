@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.1 — 2026-08-06
 
 - Added media-specific actions shared by Open and Library: direct PRG execution, CRT insertion with reset, D64 insertion or autostart in Drive 8, and TAP/T64 insertion or autostart in the datasette.
 - Added replacement confirmation when a drive, datasette or cartridge slot already contains another medium.
