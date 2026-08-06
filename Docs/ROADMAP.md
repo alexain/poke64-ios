@@ -2,11 +2,11 @@
 
 POKE64 is designed for **iPadOS first**, with landscape iPad use as the primary interface target. iPhone and macOS adaptations will be considered after the core iPad experience is stable.
 
-This document lists only work that is still pending. Completed Library, keyboard, Devices, video, audio, Drive 8/9, REU and datasette transport items have been removed.
+This document lists only work that is still pending. Completed Library, keyboard, Devices, video, audio, Drive 8/9, REU, datasette transport and the first MPS-803 virtual-printer implementation have been removed.
 
 ## 1. Core, firmware and diagnostics
 
-- Pin the exact VICE/libretro revision used by every release build.
+- Automate verification and release-note recording of the exact pinned VICE/libretro revision used by every release build.
 - Make the external-firmware-only core build fully reproducible from a recorded revision and patch set.
 - Improve startup, firmware, drive-ROM and media-operation diagnostics.
 - Add known-ROM identification and clearly label standard, JiffyDOS and other recognized replacements.
@@ -15,7 +15,6 @@ This document lists only work that is still pending. Completed Library, keyboard
 
 ## 2. Remaining settings panels
 
-- Implement Printer settings and output management.
 - Add firmware profile selection, profile naming and known-ROM status.
 - Implement Networking and modem settings.
 - Add advanced options only where they can be applied safely without destabilizing the current core lifecycle.
@@ -56,9 +55,10 @@ This document lists only work that is still pending. Completed Library, keyboard
 
 ## 7. Printer
 
-- Emulate MPS-801, MPS-802 and MPS-803 output through VICE.
-- Produce realistic dot-matrix multipage PDFs.
-- Add continuous paper, ribbon intensity, queue, preview, export and sound options.
+- Broaden virtual-printer compatibility testing beyond the validated BASIC text, direct bit-image and PrintMaster MPS-801 workflows, including PETSCII-heavy productivity software.
+- Add MPS-801, MPS-802 and other VICE printer models after their firmware requirements are defined.
+- Add a persistent print-job browser and optional continuous-paper presentation.
+- Add printer mechanism sound and finer ribbon-wear simulation.
 - Investigate Okimate 20 protocol and color-print support.
 
 ## 8. Networking and BBS
@@ -112,7 +112,7 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 Library inspection, duplicate handling and metadata
 → firmware profiles and diagnostics
 → advanced CRT graphics and SID options
-→ printer and networking
+→ printer validation and networking
 → save states, multidisk and additional drives
 → release engineering and App Store preparation
 → hardware link and experimental features

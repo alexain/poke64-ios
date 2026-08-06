@@ -4,17 +4,58 @@
 
 ### Added
 
+- Added Commodore MPS-803 text and bit-image rendering through a locally patched VICE printer core.
+- Added PDF output as the default virtual-printer format, plus PNG pages and optional PDF + RAW export.
+- Added live paper preview, dot-intensity controls and multi-file sharing for completed print jobs.
+- Added an optional 4 KB MPS-803 printer-ROM import slot and documented the printer firmware policy.
+- Added experimental IEC device 4 or 5 RAW printer capture for validating C64 printing through the libretro core.
+- Added a contextual PRN 4/5 status panel beside the emulator with capture size and activity feedback.
+- Added a Virtual Printer sheet for previewing, sharing, ejecting and discarding the active paper.
+- Added persistent completed print jobs when ejecting virtual paper.
 - Added docked datasette controls with Play, Stop, Rewind, Fast Forward and counter reset.
 - Added native VICE tape transport telemetry, motor/activity status and a three-digit TAP counter in the emulator side margin and Devices panel.
 - Added Tape settings for automatic control presentation, counter reset on insertion, CPU-reset behavior and tape autostart load mode.
 
 ### Changed
 
+- Changed printer paper eject and discard to operate without restarting the C64 or detaching mounted media.
+- Added selection between IEC printer devices 4 and 5.
 - Moved datasette control access from the main toolbar to the tappable tape counter/status panel beside the emulator.
 - Kept the tappable datasette status panel compact when the keyboard or control dock reduces the emulator display size.
 - Set the default datasette sound level to 20%, matching the default mechanical drive-noise level.
 - Limited T64 controls to operations that do not imply a physical reel position; T64 fast transport and counter reset are disabled.
 - Updated the roadmap to mark datasette transport as complete and retain writable TAP recording/export as future work.
+
+## 0.7.0 — 2026-08-06
+
+### Added
+
+- Added an IEC virtual printer selectable on device 4 or 5.
+- Added Commodore MPS-803 text, PETSCII and bit-image rendering through the VICE printer core.
+- Added PDF output as the default format, with optional PNG pages, RAW diagnostic capture and PDF plus RAW export.
+- Added a live paper preview with scrolling, full-screen zoom and automatic updates during printing.
+- Added a contextual PRN 4/5 status panel with ready and flashing printing states.
+- Added paper eject and discard operations that preserve the running C64 session and mounted media.
+- Added persistent completed print jobs and sharing of generated output.
+- Added a user-supplied 4 KB MPS-803 printer-ROM slot with exact-size validation.
+
+### Changed
+
+- Restored the real VICE MPS-803 driver in place of the libretro printer stub.
+- Added a sandbox-safe grayscale raster backend compiled as part of the GPL VICE component.
+- Pinned the VICE/libretro source used by this release to `c8c242db75a559246d6d51017e6dd4ecd75d6a9f`.
+- Changed printer refresh and sharing actions to flush active output before reading it.
+
+### Fixed
+
+- Fixed retention and export of printer bridge symbols used through `dlsym()`.
+- Fixed false symbol-verification failures caused by `pipefail` and early `grep` termination.
+- Fixed short RAW captures appearing empty until a larger buffered print was produced.
+
+### Documentation
+
+- Updated the README, roadmap, firmware policy and third-party notices for the virtual printer.
+- Documented the exact VICE/libretro revision and the licensing boundary between the MIT application and GPL printer backend.
 
 ## 0.6.5 — 2026-08-06
 

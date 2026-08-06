@@ -6,9 +6,17 @@ struct ContentView: View {
     @EnvironmentObject private var emulator: EmulatorModel
     @AppStorage(C64TapeSettings.autoShowControlsKey)
     private var autoShowDatasetteControls = C64TapeSettings.defaultAutoShowControls
+    @AppStorage(C64PrinterSettings.enabledKey)
+    private var printerEnabled = C64PrinterSettings.defaultEnabled
+    @AppStorage(C64PrinterSettings.deviceKey)
+    private var printerDevice = C64PrinterSettings.defaultDevice
     @State private var showImporter = false
     @State private var showKeyboard = false
     @State private var showDatasetteControls = false
+    @State private var showPrinterControls = false
+    @State private var printerCapturedBytes: Int?
+    @State private var printerActivityPulse = false
+    @State private var printerActivitySequence = 0
     @State private var keyboardMode: C64KeyboardMode = .compact
     @State private var keyboardShiftLockIsActive = false
     @State private var showLibrary = false
@@ -92,8 +100,18 @@ struct ContentView: View {
                 showDatasetteControls = true
             }
         }
+        .onChange(of: printerEnabled) { _, enabled in
+            if !enabled {
+                showPrinterControls = false
+                printerCapturedBytes = nil
+                printerActivityPulse = false
+            }
+        }
         .task {
             await emulator.startAutomatically()
+        }
+        .task(id: printerEnabled) {
+            await monitorPrinterCapture()
         }
         .fullScreenCover(isPresented: $showSettings, onDismiss: {
             Task {
@@ -106,6 +124,13 @@ struct ContentView: View {
         }
         .fullScreenCover(isPresented: $showLibrary) {
             LibraryView(emulator: emulator)
+        }
+        .sheet(isPresented: $showPrinterControls) {
+            PrinterCaptureSheet(
+                capturedBytes: $printerCapturedBytes,
+                isPrinting: printerActivityPulse
+            )
+            .environmentObject(emulator)
         }
         .sheet(isPresented: $showNewDisk) {
             NewDiskView(
@@ -207,7 +232,8 @@ struct ContentView: View {
 
                 if sideMargin >= 72,
                    emulator.trueDriveEmulationConfigured
-                    || emulator.mountedTapeSupportsPhysicalTransport {
+                    || emulator.mountedTapeSupportsPhysicalTransport
+                    || (printerEnabled && emulator.isRunning) {
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
                         VStack(spacing: 12) {
@@ -219,6 +245,18 @@ struct ContentView: View {
                                     activityOn: emulator.driveActivityLEDOn
                                 )
                                 .allowsHitTesting(false)
+                            }
+
+                            if printerEnabled, emulator.isRunning {
+                                PrinterStatusPanel(
+                                    device: printerDevice,
+                                    format: C64PrinterSettings.exportFormat,
+                                    capturedBytes: printerCapturedBytes,
+                                    activityPulse: printerActivityPulse,
+                                    onOpen: {
+                                        showPrinterControls = true
+                                    }
+                                )
                             }
 
                             if emulator.mountedTapeSupportsPhysicalTransport {
@@ -544,6 +582,47 @@ struct ContentView: View {
         .padding(24)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .padding(24)
+    }
+
+    @MainActor
+    private func monitorPrinterCapture() async {
+        guard printerEnabled else {
+            printerCapturedBytes = nil
+            printerActivityPulse = false
+            return
+        }
+
+        var previousByteCount = C64PrinterOutputStore.capturedByteCount()
+        printerCapturedBytes = previousByteCount
+
+        while printerEnabled, !Task.isCancelled {
+            do {
+                try await Task.sleep(for: .milliseconds(300))
+            } catch {
+                return
+            }
+
+            let currentByteCount = C64PrinterOutputStore.capturedByteCount()
+            if let currentByteCount,
+               currentByteCount > (previousByteCount ?? 0) {
+                signalPrinterActivity()
+            }
+            printerCapturedBytes = currentByteCount
+            previousByteCount = currentByteCount
+        }
+    }
+
+    @MainActor
+    private func signalPrinterActivity() {
+        printerActivitySequence += 1
+        let sequence = printerActivitySequence
+        printerActivityPulse = true
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1_250))
+            guard sequence == printerActivitySequence else { return }
+            printerActivityPulse = false
+        }
     }
 
     private var gameControlsOverlay: some View {
@@ -1257,6 +1336,101 @@ private struct DatasetteControlDock: View {
             return true
         default:
             return false
+        }
+    }
+}
+
+private struct PrinterStatusPanel: View {
+    let device: Int
+    let format: C64PrinterExportFormat
+    let capturedBytes: Int?
+    let activityPulse: Bool
+    let onOpen: () -> Void
+
+    private var capturedSizeDescription: String {
+        guard let capturedBytes, capturedBytes > 0 else { return "0 B" }
+        return ByteCountFormatter.string(
+            fromByteCount: Int64(capturedBytes),
+            countStyle: .file
+        )
+    }
+
+    var body: some View {
+        Button(action: onOpen) {
+            VStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    Text("PRN \(device)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+
+                    Spacer(minLength: 2)
+
+                    Image(systemName: "chevron.up.circle")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.58))
+                }
+
+                printerActivityLED
+
+                Text(activityPulse ? "PRINTING" : format.rawValue.uppercased())
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(activityPulse ? .orange : .white.opacity(0.55))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+
+                Text(capturedSizeDescription)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
+            .padding(.vertical, 11)
+            .padding(.horizontal, 7)
+            .frame(maxWidth: .infinity)
+            .background(
+                .white.opacity(activityPulse ? 0.075 : 0.045),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(
+                        activityPulse ? .orange.opacity(0.32) : .white.opacity(0.08),
+                        lineWidth: 1
+                    )
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "IEC printer \(device), \(activityPulse ? "printing" : "ready"), captured data \(capturedSizeDescription)"
+        )
+        .accessibilityHint("Opens the virtual printer controls")
+        .animation(.easeOut(duration: 0.15), value: activityPulse)
+    }
+
+    @ViewBuilder
+    private var printerActivityLED: some View {
+        if activityPulse {
+            TimelineView(.periodic(from: .now, by: 0.32)) { context in
+                let phase = Int(context.date.timeIntervalSinceReferenceDate / 0.32)
+                let illuminated = phase.isMultiple(of: 2)
+
+                Circle()
+                    .fill(.orange)
+                    .frame(width: 13, height: 13)
+                    .opacity(illuminated ? 1 : 0.42)
+                    .shadow(
+                        color: .orange.opacity(illuminated ? 0.95 : 0.3),
+                        radius: illuminated ? 8 : 3
+                    )
+                    .scaleEffect(illuminated ? 1.14 : 0.96)
+            }
+        } else {
+            Circle()
+                .fill(.green)
+                .frame(width: 13, height: 13)
+                .shadow(color: .green.opacity(0.72), radius: 4)
         }
     }
 }
