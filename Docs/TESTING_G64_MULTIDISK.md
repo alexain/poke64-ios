@@ -48,14 +48,29 @@ POKE64 should:
 - show each physical image as a child row with its Disk/Side label;
 - show a **Multi-disk Set** section in Media Details;
 - order disk numbers numerically and Side A before Side B;
+- identify the parent row with a **MULTI-DISK** badge;
 - expose quick insert actions for Drive 8 and, when enabled, Drive 9.
 
 Start the first member with autostart. When the program requests another disk, use one of these non-resetting replacement paths:
 
 1. In the Library, expand the set and insert the requested member.
-2. In the emulator side panel, use **Previous**, **Disk List** or **Next** under the mounted drive.
+2. Open **Devices**, locate the mounted drive and choose **Swap Multi-Disk Set…**. Select the requested member from the sheet.
 
-The side panel should show the set name, current member and a position such as `Disk 1 of 3`. Do not autostart replacement disks unless the software explicitly requires a reset.
+Devices should show the set name, current member and a position such as `Disk 1 of 3`. Do not autostart replacement disks unless the software explicitly requires a reset.
+
+## Disk inspection
+
+Import one known-good D64, D71 and D81 image. For each image, verify that Media Details shows a compact Commodore-style directory immediately below the editable title and before the technical Media section. The listing should include:
+
+- the disk name, ID and DOS type on the header line;
+- file names rendered with the active C64 character ROM, including PETSCII graphic characters;
+- PRG, SEQ, USR or REL type markers and block counts;
+- unclosed (`*`) and locked (`<`) markers where present;
+- the final `BLOCKS FREE.` line.
+
+Confirm that long directories scroll vertically without shrinking the 40-column display and that **Refresh Directory** updates the listing after the disk is modified. Technical geometry, writable state and free-block metadata should remain available below the Media section.
+
+For G64, verify that Media Details shows the container version, half-track slots, populated half-tracks and maximum track size. The first inspector intentionally does not decode a G64 directory because the container stores raw GCR track data.
 
 ## Duplicate and conflict handling
 
@@ -72,5 +87,7 @@ The feature is ready for integration when:
 - at least one ordinary G64 and one protected/custom-loader G64 launch correctly with the appropriate drive mode;
 - a two-member disk set can be swapped without restarting the C64;
 - a Disk/Side set is grouped and ordered correctly;
+- D64/D71/D81 metadata and directory entries are readable;
+- D64/D71/D81 directory listings preserve PETSCII graphics through the active character ROM;
 - duplicate and same-name conflict choices behave as described;
 - existing pre-upgrade Library entries remain visible and receive SHA-256 metadata automatically.

@@ -186,6 +186,71 @@ enum LibraryImportResolution {
     case useExisting(LibraryItem)
 }
 
+enum CommodoreDiskFileType: Int, Hashable {
+    case deleted = 0
+    case sequential = 1
+    case program = 2
+    case user = 3
+    case relative = 4
+    case partition = 5
+    case directory = 6
+
+    init(rawType: UInt8) {
+        self = CommodoreDiskFileType(rawValue: Int(rawType & 0x07)) ?? .deleted
+    }
+
+    var displayName: String {
+        switch self {
+        case .deleted: return "DEL"
+        case .sequential: return "SEQ"
+        case .program: return "PRG"
+        case .user: return "USR"
+        case .relative: return "REL"
+        case .partition: return "CBM"
+        case .directory: return "DIR"
+        }
+    }
+}
+
+struct CommodoreDiskDirectoryEntry: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let rawName: [UInt8]
+    let fileType: CommodoreDiskFileType
+    let blockCount: Int
+    let isClosed: Bool
+    let isLocked: Bool
+}
+
+struct CommodoreDiskImageInspection: Hashable {
+    let format: LibraryMediaType
+    let diskName: String
+    let rawDiskName: [UInt8]
+    let diskID: String
+    let rawDiskID: [UInt8]
+    let dosType: String
+    let rawDOSType: [UInt8]
+    let geometryDescription: String
+    let freeBlocks: Int?
+    let isFormatted: Bool
+    let isWritable: Bool
+    let directoryEntries: [CommodoreDiskDirectoryEntry]
+    let warning: String?
+}
+
+struct G64ImageInspection: Hashable {
+    let version: Int
+    let halfTrackSlots: Int
+    let populatedHalfTracks: Int
+    let maximumTrackSize: Int
+    let isWritable: Bool
+}
+
+enum LibraryMediaInspection: Hashable {
+    case commodoreDisk(CommodoreDiskImageInspection)
+    case g64(G64ImageInspection)
+}
+
 enum BlankDiskImageFormat: String, CaseIterable, Identifiable, Hashable {
     case d64
     case d71
@@ -327,6 +392,7 @@ enum LibraryStoreError: LocalizedError {
     case sourceIsNotAFile
     case itemMissing
     case storedFileMissing(String)
+    case invalidDiskImage(String)
 
     var errorDescription: String? {
         switch self {
@@ -339,6 +405,8 @@ enum LibraryStoreError: LocalizedError {
             return "The selected library item no longer exists."
         case .storedFileMissing(let filename):
             return "The stored media file is missing: \(filename)."
+        case .invalidDiskImage(let reason):
+            return "The disk image could not be inspected: \(reason)"
         }
     }
 }
@@ -660,6 +728,38 @@ final class LibraryStore: ObservableObject {
         return url
     }
 
+    func inspectMedia(_ item: LibraryItem) throws -> LibraryMediaInspection? {
+        let url = try mediaURL(for: item)
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        let isWritable = fileManager.isWritableFile(atPath: url.path)
+
+        switch item.mediaType {
+        case .d64, .d71, .d81:
+            guard let format = BlankDiskImageFormat(mediaType: item.mediaType) else {
+                return nil
+            }
+            return .commodoreDisk(
+                try CommodoreDiskImageInspector.inspect(
+                    data: data,
+                    format: format,
+                    mediaType: item.mediaType,
+                    isWritable: isWritable
+                )
+            )
+
+        case .g64:
+            return .g64(
+                try CommodoreDiskImageInspector.inspectG64(
+                    data: data,
+                    isWritable: isWritable
+                )
+            )
+
+        case .prg, .crt, .tap, .t64:
+            return nil
+        }
+    }
+
     func markOpened(_ item: LibraryItem) throws {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else {
             throw LibraryStoreError.itemMissing
@@ -793,6 +893,344 @@ final class LibraryStore: ObservableObject {
             return lhs.importedAt > rhs.importedAt
         }
         return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+    }
+}
+
+
+private enum CommodoreDiskImageInspector {
+    private static let bytesPerSector = 256
+    private static let petsciiPadding: UInt8 = 0xa0
+
+    static func inspect(
+        data: Data,
+        format: BlankDiskImageFormat,
+        mediaType: LibraryMediaType,
+        isWritable: Bool
+    ) throws -> CommodoreDiskImageInspection {
+        let bytes = [UInt8](data)
+        let requiredSize = imageSize(for: format)
+        guard bytes.count >= requiredSize else {
+            throw LibraryStoreError.invalidDiskImage(
+                "expected at least \(requiredSize) bytes for \(mediaType.displayName), found \(bytes.count)"
+            )
+        }
+
+        let headerTrack = directoryTrack(for: format)
+        let headerOffset = try sectorOffset(
+            track: headerTrack,
+            sector: 0,
+            format: format,
+            byteCount: bytes.count
+        )
+        let nameOffset = format == .d81 ? 0x04 : 0x90
+        let idOffset = format == .d81 ? 0x16 : 0xa2
+        let dosTypeOffset = format == .d81 ? 0x19 : 0xa5
+        let expectedDOSVersion: UInt8 = format == .d81 ? 0x44 : 0x41
+        let isFormatted = bytes[headerOffset + 2] == expectedDOSVersion
+
+        let rawDiskName = trimmedPETSCIIBytes(
+            bytes[(headerOffset + nameOffset)..<(headerOffset + nameOffset + 16)]
+        )
+        let rawDiskID = trimmedPETSCIIBytes(
+            bytes[(headerOffset + idOffset)..<(headerOffset + idOffset + 2)]
+        )
+        let rawDOSType = trimmedPETSCIIBytes(
+            bytes[(headerOffset + dosTypeOffset)..<(headerOffset + dosTypeOffset + 2)]
+        )
+        let diskName = decodePETSCII(rawDiskName[...])
+        let diskID = decodePETSCII(rawDiskID[...])
+        let dosType = decodePETSCII(rawDOSType[...])
+
+        let directoryResult = try readDirectory(
+            bytes: bytes,
+            format: format
+        )
+        let freeBlocks = isFormatted ? readFreeBlocks(bytes: bytes, format: format) : nil
+
+        let warning: String?
+        if !isFormatted {
+            warning = "No valid Commodore DOS header was found. The image may be unformatted or use a non-standard filesystem."
+        } else {
+            warning = directoryResult.warning
+        }
+
+        return CommodoreDiskImageInspection(
+            format: mediaType,
+            diskName: diskName.isEmpty ? "Untitled" : diskName,
+            rawDiskName: rawDiskName,
+            diskID: diskID.isEmpty ? "—" : diskID,
+            rawDiskID: rawDiskID,
+            dosType: dosType.isEmpty ? "—" : dosType,
+            rawDOSType: rawDOSType,
+            geometryDescription: geometryDescription(for: format),
+            freeBlocks: freeBlocks,
+            isFormatted: isFormatted,
+            isWritable: isWritable,
+            directoryEntries: directoryResult.entries,
+            warning: warning
+        )
+    }
+
+    static func inspectG64(
+        data: Data,
+        isWritable: Bool
+    ) throws -> G64ImageInspection {
+        let bytes = [UInt8](data)
+        guard bytes.count >= 12 else {
+            throw LibraryStoreError.invalidDiskImage("the G64 header is incomplete")
+        }
+
+        let signature = String(bytes: bytes[0..<8], encoding: .ascii)
+        guard signature == "GCR-1541" else {
+            throw LibraryStoreError.invalidDiskImage("the G64 signature is not GCR-1541")
+        }
+
+        let halfTrackSlots = Int(bytes[9])
+        let tableEnd = 12 + (halfTrackSlots * 4)
+        guard halfTrackSlots > 0, tableEnd <= bytes.count else {
+            throw LibraryStoreError.invalidDiskImage("the G64 track-offset table is invalid")
+        }
+
+        var populatedHalfTracks = 0
+        for index in 0..<halfTrackSlots {
+            let offset = littleEndianUInt32(bytes, at: 12 + (index * 4))
+            if offset != 0 { populatedHalfTracks += 1 }
+        }
+
+        return G64ImageInspection(
+            version: Int(bytes[8]),
+            halfTrackSlots: halfTrackSlots,
+            populatedHalfTracks: populatedHalfTracks,
+            maximumTrackSize: Int(UInt16(bytes[10]) | (UInt16(bytes[11]) << 8)),
+            isWritable: isWritable
+        )
+    }
+
+    private static func readDirectory(
+        bytes: [UInt8],
+        format: BlankDiskImageFormat
+    ) throws -> (entries: [CommodoreDiskDirectoryEntry], warning: String?) {
+        var track = directoryTrack(for: format)
+        var sector = format == .d81 ? 3 : 1
+        var entries: [CommodoreDiskDirectoryEntry] = []
+        var visited: Set<String> = []
+        var warning: String?
+
+        while track != 0 {
+            let key = "\(track):\(sector)"
+            guard visited.insert(key).inserted else {
+                warning = "The directory chain contains a loop and was stopped early."
+                break
+            }
+            guard visited.count <= 256 else {
+                warning = "The directory chain is unexpectedly long and was stopped early."
+                break
+            }
+
+            let offset: Int
+            do {
+                offset = try sectorOffset(
+                    track: track,
+                    sector: sector,
+                    format: format,
+                    byteCount: bytes.count
+                )
+            } catch {
+                warning = "The directory points to an invalid track or sector."
+                break
+            }
+
+            for slot in 0..<8 {
+                let base = offset + (slot * 32)
+                let rawType = bytes[base + 2]
+                guard rawType != 0 else { continue }
+
+                let rawName = trimmedPETSCIIBytes(bytes[(base + 5)..<(base + 21)])
+                let name = decodePETSCII(rawName[...])
+                let blockCount = Int(bytes[base + 30]) | (Int(bytes[base + 31]) << 8)
+                entries.append(
+                    CommodoreDiskDirectoryEntry(
+                        id: "\(track):\(sector):\(slot)",
+                        name: name.isEmpty ? "Untitled file" : name,
+                        rawName: rawName,
+                        fileType: CommodoreDiskFileType(rawType: rawType),
+                        blockCount: blockCount,
+                        isClosed: (rawType & 0x80) != 0,
+                        isLocked: (rawType & 0x40) != 0
+                    )
+                )
+            }
+
+            track = Int(bytes[offset])
+            sector = Int(bytes[offset + 1])
+        }
+
+        return (entries, warning)
+    }
+
+    private static func readFreeBlocks(
+        bytes: [UInt8],
+        format: BlankDiskImageFormat
+    ) -> Int {
+        var total = 0
+
+        switch format {
+        case .d64:
+            guard let bam = try? sectorOffset(
+                track: 18,
+                sector: 0,
+                format: format,
+                byteCount: bytes.count
+            ) else { return 0 }
+            for track in 1...35 where track != 18 {
+                total += Int(bytes[bam + (track * 4)])
+            }
+
+        case .d71:
+            guard let firstBAM = try? sectorOffset(
+                track: 18,
+                sector: 0,
+                format: format,
+                byteCount: bytes.count
+            ) else { return 0 }
+
+            for track in 1...35 where track != 18 {
+                total += Int(bytes[firstBAM + (track * 4)])
+            }
+            for track in 36...70 where track != 53 {
+                total += Int(bytes[firstBAM + 0xdd + (track - 36)])
+            }
+
+        case .d81:
+            guard let firstBAM = try? sectorOffset(
+                track: 40,
+                sector: 1,
+                format: format,
+                byteCount: bytes.count
+            ), let secondBAM = try? sectorOffset(
+                track: 40,
+                sector: 2,
+                format: format,
+                byteCount: bytes.count
+            ) else { return 0 }
+
+            for track in 1...80 where track != 40 {
+                let sideTrack = track <= 40 ? track : track - 40
+                let bam = track <= 40 ? firstBAM : secondBAM
+                total += Int(bytes[bam + (sideTrack * 6) + 10])
+            }
+        }
+
+        return total
+    }
+
+    private static func trimmedPETSCIIBytes(_ bytes: ArraySlice<UInt8>) -> [UInt8] {
+        var result = Array(bytes)
+        while let last = result.last, last == petsciiPadding || last == 0 {
+            result.removeLast()
+        }
+        return result
+    }
+
+    private static func decodePETSCII(_ bytes: ArraySlice<UInt8>) -> String {
+        var scalars: [UnicodeScalar] = []
+        scalars.reserveCapacity(bytes.count)
+
+        for byte in bytes {
+            if byte == petsciiPadding || byte == 0 { break }
+
+            let normalized: UInt8
+            switch byte {
+            case 0x20...0x7e:
+                normalized = byte
+            case 0xc1...0xda:
+                normalized = byte - 0x80
+            default:
+                normalized = 0x3f
+            }
+
+            if let scalar = UnicodeScalar(Int(normalized)) {
+                scalars.append(scalar)
+            }
+        }
+
+        return String(String.UnicodeScalarView(scalars))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func littleEndianUInt32(_ bytes: [UInt8], at offset: Int) -> UInt32 {
+        UInt32(bytes[offset])
+            | (UInt32(bytes[offset + 1]) << 8)
+            | (UInt32(bytes[offset + 2]) << 16)
+            | (UInt32(bytes[offset + 3]) << 24)
+    }
+
+    private static func geometryDescription(for format: BlankDiskImageFormat) -> String {
+        switch format {
+        case .d64: return "35 tracks · 683 sectors"
+        case .d71: return "70 tracks · 1,366 sectors"
+        case .d81: return "80 tracks · 3,200 sectors"
+        }
+    }
+
+    private static func imageSize(for format: BlankDiskImageFormat) -> Int {
+        switch format {
+        case .d64: return 174_848
+        case .d71: return 349_696
+        case .d81: return 819_200
+        }
+    }
+
+    private static func directoryTrack(for format: BlankDiskImageFormat) -> Int {
+        format == .d81 ? 40 : 18
+    }
+
+    private static func trackCount(for format: BlankDiskImageFormat) -> Int {
+        switch format {
+        case .d64: return 35
+        case .d71: return 70
+        case .d81: return 80
+        }
+    }
+
+    private static func sectors(
+        on track: Int,
+        format: BlankDiskImageFormat
+    ) -> Int {
+        if format == .d81 { return 40 }
+
+        let sideTrack = ((track - 1) % 35) + 1
+        switch sideTrack {
+        case 1...17: return 21
+        case 18...24: return 19
+        case 25...30: return 18
+        case 31...35: return 17
+        default: return 0
+        }
+    }
+
+    private static func sectorOffset(
+        track: Int,
+        sector: Int,
+        format: BlankDiskImageFormat,
+        byteCount: Int
+    ) throws -> Int {
+        guard (1...trackCount(for: format)).contains(track),
+              (0..<sectors(on: track, format: format)).contains(sector) else {
+            throw LibraryStoreError.invalidDiskImage("invalid track/sector \(track)/\(sector)")
+        }
+
+        var precedingSectors = 0
+        if track > 1 {
+            for priorTrack in 1..<track {
+                precedingSectors += sectors(on: priorTrack, format: format)
+            }
+        }
+        let offset = (precedingSectors + sector) * bytesPerSector
+        guard offset + bytesPerSector <= byteCount else {
+            throw LibraryStoreError.invalidDiskImage("track/sector \(track)/\(sector) lies outside the image")
+        }
+        return offset
     }
 }
 
@@ -1023,10 +1461,11 @@ private enum CommodoreDiskImageBuilder {
                 return (countOffset, countOffset + 1)
             }
 
+            let firstSideBAM = offset(track: 18, sector: 0, format: format)
             let secondSideBAM = offset(track: 53, sector: 0, format: format)
             let sideTrackIndex = track - 36
             return (
-                secondSideBAM + 0xdd + sideTrackIndex,
+                firstSideBAM + 0xdd + sideTrackIndex,
                 secondSideBAM + (sideTrackIndex * 3)
             )
 

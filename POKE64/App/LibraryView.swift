@@ -1,3 +1,4 @@
+import CoreGraphics
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -307,14 +308,17 @@ struct LibraryView: View {
                         filter = candidate
                         normalizeSelection()
                     } label: {
-                        HStack {
+                        HStack(spacing: 12) {
                             Label(candidate.title, systemImage: candidate.systemImage)
-                            Spacer()
+                            Spacer(minLength: 12)
                             Text(count(for: candidate), format: .number)
                                 .foregroundStyle(.secondary)
                         }
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .contentShape(Rectangle())
                     .listRowBackground(
                         filter == candidate
                             ? Color.accentColor.opacity(0.16)
@@ -394,6 +398,7 @@ struct LibraryView: View {
                 isActive: emulator.mountedLibraryItemIDs.contains(item.id),
                 availableDriveUnits: emulator.availableDriveUnits,
                 mediaSetItems: library.mediaSetMembers(for: item),
+                loadInspection: { try library.inspectMedia(item) },
                 onAction: { action in beginMediaRequest(for: item, preferredAction: action) },
                 onSelectMediaSetItem: { selectedItemID = $0.id },
                 onMediaSetAction: { member, action in
@@ -1291,6 +1296,7 @@ private struct LibraryDetailView: View {
     let isActive: Bool
     let availableDriveUnits: [Int]
     let mediaSetItems: [LibraryItem]
+    let loadInspection: () throws -> LibraryMediaInspection?
     let onAction: (MediaAction) -> Void
     let onSelectMediaSetItem: (LibraryItem) -> Void
     let onMediaSetAction: (LibraryItem, MediaAction) -> Void
@@ -1299,12 +1305,16 @@ private struct LibraryDetailView: View {
     let onDelete: () -> Void
 
     @State private var editedTitle: String
+    @State private var mediaInspection: LibraryMediaInspection?
+    @State private var mediaInspectionError: String?
+    @State private var isInspectingMedia = false
 
     init(
         item: LibraryItem,
         isActive: Bool,
         availableDriveUnits: [Int],
         mediaSetItems: [LibraryItem],
+        loadInspection: @escaping () throws -> LibraryMediaInspection?,
         onAction: @escaping (MediaAction) -> Void,
         onSelectMediaSetItem: @escaping (LibraryItem) -> Void,
         onMediaSetAction: @escaping (LibraryItem, MediaAction) -> Void,
@@ -1316,6 +1326,7 @@ private struct LibraryDetailView: View {
         self.isActive = isActive
         self.availableDriveUnits = availableDriveUnits
         self.mediaSetItems = mediaSetItems
+        self.loadInspection = loadInspection
         self.onAction = onAction
         self.onSelectMediaSetItem = onSelectMediaSetItem
         self.onMediaSetAction = onMediaSetAction
@@ -1367,6 +1378,8 @@ private struct LibraryDetailView: View {
                 )
             }
 
+            diskDirectoryPresentationSection
+
             Section("Media") {
                 LabeledContent("Original file", value: item.originalFilename)
                 LabeledContent("Format", value: item.mediaType.displayName)
@@ -1402,6 +1415,8 @@ private struct LibraryDetailView: View {
                     value: item.lastOpenedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Never"
                 )
             }
+
+            mediaTechnicalInspectionSections
 
             if mediaSetItems.count > 1 {
                 Section {
@@ -1485,9 +1500,175 @@ private struct LibraryDetailView: View {
             }
         }
         .navigationTitle("Media Details")
+        .task(id: item.id) {
+            await loadMediaInspectionIfNeeded()
+        }
         .onChange(of: item.title) { _, newValue in
             editedTitle = newValue
         }
+    }
+
+    @ViewBuilder
+    private var diskDirectoryPresentationSection: some View {
+        if item.mediaType == .d64 || item.mediaType == .d71 || item.mediaType == .d81 {
+            if isInspectingMedia {
+                Section("Disk Directory") {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Reading disk image…")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else if let mediaInspectionError {
+                Section("Disk Directory") {
+                    Label(mediaInspectionError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+
+                    Button("Retry Inspection") {
+                        Task { await loadMediaInspectionIfNeeded(force: true) }
+                    }
+                }
+            } else if case .commodoreDisk(let inspection) = mediaInspection {
+                commodoreDirectorySection(inspection)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var mediaTechnicalInspectionSections: some View {
+        if item.mediaType == .g64 {
+            if isInspectingMedia {
+                Section("G64 Image") {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Reading G64 image…")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else if let mediaInspectionError {
+                Section("G64 Image") {
+                    Label(mediaInspectionError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+
+                    Button("Retry Inspection") {
+                        Task { await loadMediaInspectionIfNeeded(force: true) }
+                    }
+                }
+            } else if case .g64(let inspection) = mediaInspection {
+                g64Sections(inspection)
+            }
+        } else if case .commodoreDisk(let inspection) = mediaInspection {
+            commodoreDiskInformationSection(inspection)
+        }
+    }
+
+    private func commodoreDirectorySection(
+        _ inspection: CommodoreDiskImageInspection
+    ) -> some View {
+        Section {
+            if inspection.directoryEntries.isEmpty && !inspection.isFormatted {
+                Label(
+                    "The image does not contain a readable Commodore DOS directory.",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .foregroundStyle(.orange)
+            } else {
+                C64DirectoryListingView(inspection: inspection)
+            }
+
+            Button {
+                Task { await loadMediaInspectionIfNeeded(force: true) }
+            } label: {
+                Label("Refresh Directory", systemImage: "arrow.clockwise")
+            }
+        } header: {
+            HStack {
+                Text("Disk Directory")
+                Spacer()
+                Text("LOAD \"$\",8")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+        } footer: {
+            Text("The listing is rendered with the active C64 character ROM, including PETSCII graphics stored in disk and file names.")
+        }
+    }
+
+    private func commodoreDiskInformationSection(
+        _ inspection: CommodoreDiskImageInspection
+    ) -> some View {
+        Section("Disk Information") {
+            LabeledContent("Disk name", value: inspection.diskName)
+            LabeledContent("Disk ID", value: inspection.diskID)
+            LabeledContent("DOS type", value: inspection.dosType)
+            LabeledContent("Geometry", value: inspection.geometryDescription)
+            LabeledContent(
+                "Free blocks",
+                value: inspection.freeBlocks.map { String($0) } ?? "Unavailable"
+            )
+            LabeledContent(
+                "Library copy",
+                value: inspection.isWritable ? "Writable" : "Read-only"
+            )
+
+            if let warning = inspection.warning {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func g64Sections(_ inspection: G64ImageInspection) -> some View {
+        Section("G64 Image") {
+            LabeledContent("Container version", value: String(inspection.version))
+            LabeledContent("Half-track slots", value: String(inspection.halfTrackSlots))
+            LabeledContent("Populated half-tracks", value: String(inspection.populatedHalfTracks))
+            LabeledContent(
+                "Maximum track size",
+                value: Self.fileSizeFormatter.string(
+                    fromByteCount: Int64(inspection.maximumTrackSize)
+                )
+            )
+            LabeledContent(
+                "Library copy",
+                value: inspection.isWritable ? "Writable" : "Read-only"
+            )
+
+            Button {
+                Task { await loadMediaInspectionIfNeeded(force: true) }
+            } label: {
+                Label("Refresh G64 Information", systemImage: "arrow.clockwise")
+            }
+        }
+
+        Section("Directory") {
+            Label(
+                "G64 stores raw GCR track data. Directory inspection requires GCR decoding and is not exposed by this Library inspector.",
+                systemImage: "info.circle"
+            )
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    @MainActor
+    private func loadMediaInspectionIfNeeded(force: Bool = false) async {
+        guard item.mediaType.isDiskImage else { return }
+        guard force || (mediaInspection == nil && mediaInspectionError == nil) else { return }
+
+        isInspectingMedia = true
+        mediaInspectionError = nil
+        await Task.yield()
+
+        do {
+            mediaInspection = try loadInspection()
+        } catch {
+            mediaInspection = nil
+            mediaInspectionError = error.localizedDescription
+        }
+        isInspectingMedia = false
     }
 
     @ViewBuilder
@@ -1547,4 +1728,240 @@ private struct LibraryDetailView: View {
         formatter.includesUnit = true
         return formatter
     }()
+}
+
+private struct C64DirectoryListingView: View {
+    let inspection: CommodoreDiskImageInspection
+
+    private var screenLines: [[UInt8]] {
+        C64DirectoryListingBuilder.lines(for: inspection)
+    }
+
+    var body: some View {
+        if let characterROM = FirmwareStore.characterROMData,
+           let bitmap = C64DirectoryBitmapRenderer.makeImage(
+               lines: screenLines,
+               characterROM: characterROM,
+               reverseColumnsByLine: [
+                   0: C64DirectoryListingBuilder.headerReverseColumns
+               ]
+           ) {
+            GeometryReader { proxy in
+                let imageHeight = proxy.size.width
+                    * CGFloat(bitmap.height)
+                    / CGFloat(bitmap.width)
+
+                ScrollView(.vertical) {
+                    Image(decorative: bitmap, scale: 1, orientation: .up)
+                        .resizable()
+                        .interpolation(.none)
+                        .frame(width: proxy.size.width, height: imageHeight)
+                        .accessibilityLabel(accessibilityListing)
+                }
+                .scrollIndicators(.visible)
+            }
+            .frame(height: previewHeight)
+            .background(C64DirectoryBitmapRenderer.backgroundColor)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(.white.opacity(0.08), lineWidth: 1)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(
+                    "The active C64 character ROM is unavailable, so PETSCII graphics cannot be rendered.",
+                    systemImage: "textformat.alt"
+                )
+                .font(.footnote)
+                .foregroundStyle(.orange)
+
+                Text(accessibilityListing)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private var previewHeight: CGFloat {
+        min(380, max(112, CGFloat(screenLines.count) * 15.5))
+    }
+
+    private var accessibilityListing: String {
+        var lines = [
+            "0 \"\(inspection.diskName)\" \(inspection.diskID) \(inspection.dosType)"
+        ]
+        lines.append(contentsOf: inspection.directoryEntries.map { entry in
+            let openMarker = entry.isClosed ? "" : "*"
+            let lockMarker = entry.isLocked ? "<" : ""
+            return "\(entry.blockCount) \"\(entry.name)\" \(openMarker)\(entry.fileType.displayName)\(lockMarker)"
+        })
+        if let freeBlocks = inspection.freeBlocks {
+            lines.append("\(freeBlocks) BLOCKS FREE.")
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
+private enum C64DirectoryListingBuilder {
+    static let columns = 40
+    static let headerReverseColumns = 5..<29
+
+    static func lines(for inspection: CommodoreDiskImageInspection) -> [[UInt8]] {
+        var result: [[UInt8]] = []
+
+        var header = screenCodes(forASCII: "   0 ")
+        header.append(screenCode(forPETSCII: 0x22))
+        header.append(contentsOf: paddedPETSCII(inspection.rawDiskName, width: 16))
+        header.append(screenCode(forPETSCII: 0x22))
+        header.append(screenCode(forPETSCII: 0x20))
+        header.append(contentsOf: paddedPETSCII(inspection.rawDiskID, width: 2))
+        header.append(screenCode(forPETSCII: 0x20))
+        header.append(contentsOf: paddedPETSCII(inspection.rawDOSType, width: 2))
+        result.append(fitted(header))
+
+        for entry in inspection.directoryEntries {
+            var line = screenCodes(
+                forASCII: String(format: "%4d ", entry.blockCount)
+            )
+            line.append(screenCode(forPETSCII: 0x22))
+            line.append(contentsOf: paddedPETSCII(entry.rawName, width: 16))
+            line.append(screenCode(forPETSCII: 0x22))
+            line.append(screenCode(forPETSCII: 0x20))
+
+            if !entry.isClosed {
+                line.append(contentsOf: screenCodes(forASCII: "*"))
+            }
+            line.append(contentsOf: screenCodes(forASCII: entry.fileType.displayName))
+            if entry.isLocked {
+                line.append(contentsOf: screenCodes(forASCII: "<"))
+            }
+            result.append(fitted(line))
+        }
+
+        if let freeBlocks = inspection.freeBlocks {
+            result.append(
+                fitted(screenCodes(forASCII: String(format: "%4d BLOCKS FREE.", freeBlocks)))
+            )
+        }
+
+        return result.isEmpty ? [Array(repeating: 0x20, count: columns)] : result
+    }
+
+    private static func paddedPETSCII(_ bytes: [UInt8], width: Int) -> [UInt8] {
+        var result = bytes.prefix(width).map(screenCode(forPETSCII:))
+        if result.count < width {
+            result.append(contentsOf: repeatElement(UInt8(0x20), count: width - result.count))
+        }
+        return result
+    }
+
+    private static func screenCodes(forASCII text: String) -> [UInt8] {
+        text.uppercased().utf8.map(screenCode(forPETSCII:))
+    }
+
+    private static func fitted(_ values: [UInt8]) -> [UInt8] {
+        var result = Array(values.prefix(columns))
+        if result.count < columns {
+            result.append(contentsOf: repeatElement(UInt8(0x20), count: columns - result.count))
+        }
+        return result
+    }
+
+    private static func screenCode(forPETSCII byte: UInt8) -> UInt8 {
+        switch byte {
+        case 0x00...0x1f:
+            return byte &+ 0x80
+        case 0x20...0x3f:
+            return byte
+        case 0x40...0x5f:
+            return byte &- 0x40
+        case 0x60...0x7f:
+            return byte &- 0x20
+        case 0x80...0x9f:
+            return byte &+ 0x40
+        case 0xa0...0xbf:
+            return byte &- 0x40
+        case 0xc0...0xfe:
+            return byte &- 0x80
+        case 0xff:
+            return 0x5e
+        default:
+            return 0x3f
+        }
+    }
+}
+
+private enum C64DirectoryBitmapRenderer {
+    static let backgroundColor = Color(
+        red: 0x40 / 255,
+        green: 0x34 / 255,
+        blue: 0xa2 / 255
+    )
+
+    private static let pixelWidth = C64DirectoryListingBuilder.columns * 8
+    private static let backgroundRGBA: (UInt8, UInt8, UInt8, UInt8) = (0x40, 0x34, 0xa2, 0xff)
+    private static let foregroundRGBA: (UInt8, UInt8, UInt8, UInt8) = (0xa7, 0x9b, 0xff, 0xff)
+
+    static func makeImage(
+        lines: [[UInt8]],
+        characterROM: Data,
+        reverseColumnsByLine: [Int: Range<Int>] = [:]
+    ) -> CGImage? {
+        guard characterROM.count >= 2_048 else { return nil }
+
+        let pixelHeight = max(8, lines.count * 8)
+        var pixels = [UInt8](repeating: 0, count: pixelWidth * pixelHeight * 4)
+
+        for offset in stride(from: 0, to: pixels.count, by: 4) {
+            pixels[offset] = backgroundRGBA.0
+            pixels[offset + 1] = backgroundRGBA.1
+            pixels[offset + 2] = backgroundRGBA.2
+            pixels[offset + 3] = backgroundRGBA.3
+        }
+
+        for (lineIndex, line) in lines.enumerated() {
+            let reverseColumns = reverseColumnsByLine[lineIndex]
+
+            for (column, screenCode) in line.prefix(C64DirectoryListingBuilder.columns).enumerated() {
+                let glyphOffset = Int(screenCode) * 8
+                guard glyphOffset + 7 < characterROM.count else { continue }
+                let isReversed = reverseColumns?.contains(column) == true
+
+                for glyphRow in 0..<8 {
+                    let bits = characterROM[glyphOffset + glyphRow]
+
+                    for glyphColumn in 0..<8 {
+                        let glyphPixelIsSet = (bits & (0x80 >> glyphColumn)) != 0
+                        let useForeground = glyphPixelIsSet != isReversed
+                        let color = useForeground ? foregroundRGBA : backgroundRGBA
+                        let x = (column * 8) + glyphColumn
+                        let y = (lineIndex * 8) + glyphRow
+                        let pixelOffset = ((y * pixelWidth) + x) * 4
+                        pixels[pixelOffset] = color.0
+                        pixels[pixelOffset + 1] = color.1
+                        pixels[pixelOffset + 2] = color.2
+                        pixels[pixelOffset + 3] = color.3
+                    }
+                }
+            }
+        }
+
+        let data = Data(pixels) as CFData
+        guard let provider = CGDataProvider(data: data) else { return nil }
+
+        return CGImage(
+            width: pixelWidth,
+            height: pixelHeight,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: pixelWidth * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        )
+    }
 }
