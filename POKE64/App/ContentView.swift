@@ -5,6 +5,8 @@ struct ContentView: View {
     @EnvironmentObject private var emulator: EmulatorModel
     @State private var showImporter = false
     @State private var showKeyboard = false
+    @State private var keyboardMode: C64KeyboardMode = .compact
+    @State private var keyboardShiftLockIsActive = false
     @State private var showLibrary = false
     @State private var showPorts = false
     @State private var mediaActionPrompt: MediaActionPromptState?
@@ -24,36 +26,24 @@ struct ContentView: View {
 
             VStack(spacing: 0) {
                 header
+                emulatorArea
 
-                ZStack(alignment: .bottom) {
-                    C64ScreenRepresentable()
-                        .environmentObject(emulator)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.black)
+                if showKeyboard {
+                    Divider()
+                        .overlay(.white.opacity(0.12))
 
-                    if emulator.mousePort != nil {
-                        C64MouseCaptureView(
-                            onMove: { deltaX, deltaY in
-                                emulator.moveMouse(deltaX: deltaX, deltaY: deltaY)
-                            },
-                            onButton: { button, pressed in
-                                emulator.setMouseButton(button, pressed: pressed)
+                    C64KeyboardView(
+                        mode: $keyboardMode,
+                        shiftLockIsActive: $keyboardShiftLockIsActive,
+                        onHide: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showKeyboard = false
                             }
-                        )
-                    }
-
-                    if !emulator.firmwareReady {
-                        firmwareRequiredOverlay
-                    }
-
-                    if emulator.virtualJoystickPort != nil {
-                        gameControlsOverlay
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    }
+                        }
+                    )
+                    .environmentObject(emulator)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
-                .ignoresSafeArea(edges: .bottom)
             }
 
             if emulator.isStarting {
@@ -63,16 +53,11 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: emulator.isStarting)
+        .animation(.easeInOut(duration: 0.2), value: showKeyboard)
         .task {
             await emulator.startAutomatically()
         }
-        .sheet(isPresented: $showKeyboard) {
-            C64KeyboardView()
-                .environmentObject(emulator)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $showSettings, onDismiss: {
+        .fullScreenCover(isPresented: $showSettings, onDismiss: {
             Task {
                 await emulator.settingsDidClose(
                     previousFirmwareFingerprint: settingsFirmwareFingerprint
@@ -80,8 +65,6 @@ struct ContentView: View {
             }
         }) {
             SettingsView(initialPanel: settingsInitialPanel)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
         }
         .fullScreenCover(isPresented: $showLibrary) {
             LibraryView(emulator: emulator)
@@ -115,6 +98,66 @@ struct ContentView: View {
                 emulator.presentedError = nil
             }
         }
+    }
+
+    private var emulatorArea: some View {
+        GeometryReader { proxy in
+            let displaySize = Self.fittedC64Size(in: proxy.size)
+
+            ZStack {
+                Color.black
+
+                ZStack(alignment: .bottom) {
+                    C64ScreenRepresentable()
+                        .environmentObject(emulator)
+                        .frame(width: displaySize.width, height: displaySize.height)
+                        .background(Color.black)
+
+                    if emulator.mousePort != nil {
+                        C64MouseCaptureView(
+                            onMove: { deltaX, deltaY in
+                                emulator.moveMouse(deltaX: deltaX, deltaY: deltaY)
+                            },
+                            onButton: { button, pressed in
+                                emulator.setMouseButton(button, pressed: pressed)
+                            }
+                        )
+                    }
+
+                    if !emulator.firmwareReady {
+                        firmwareRequiredOverlay
+                    }
+
+                    if emulator.virtualJoystickPort != nil {
+                        gameControlsOverlay
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+                }
+                .frame(width: displaySize.width, height: displaySize.height)
+                .clipped()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
+    }
+
+    private static func fittedC64Size(in availableSize: CGSize) -> CGSize {
+        guard availableSize.width > 0, availableSize.height > 0 else {
+            return .zero
+        }
+
+        let aspectRatio: CGFloat = 4.0 / 3.0
+        let widthFromHeight = availableSize.height * aspectRatio
+
+        if widthFromHeight <= availableSize.width {
+            return CGSize(width: widthFromHeight, height: availableSize.height)
+        }
+
+        return CGSize(
+            width: availableSize.width,
+            height: availableSize.width / aspectRatio
+        )
     }
 
     private var header: some View {
@@ -162,9 +205,14 @@ struct ContentView: View {
             .buttonStyle(.bordered)
 
             Button {
-                showKeyboard = true
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showKeyboard.toggle()
+                }
             } label: {
-                toolbarLabel("Keyboard", systemImage: "keyboard")
+                toolbarLabel(
+                    "Keyboard",
+                    systemImage: showKeyboard ? "keyboard.chevron.compact.down" : "keyboard"
+                )
             }
             .buttonStyle(.bordered)
             .disabled(!emulator.isRunning)
