@@ -2,47 +2,38 @@
 
 POKE64 is designed for **iPadOS first**, with landscape iPad use as the primary interface target. iPhone and macOS adaptations will be considered after the core iPad experience is stable.
 
-This document lists only work that is still pending.
+This document lists only work that is still pending. Completed Library, keyboard, Devices, video, audio and Drive 8/9 items have been removed.
 
-## 1. Core and firmware
+## 1. Core, firmware and diagnostics
 
-- Pin the exact VICE/libretro revision used by release builds.
-- Make the external-firmware-only core build fully reproducible.
-- Improve startup, firmware and media-loading diagnostics.
-- Add firmware profiles for standard ROMs, JiffyDOS, custom ROMs and redistributable open firmware.
-- Offer an optional open-firmware fallback for users without compatible ROM images.
-- Add drive firmware slots, known-ROM identification and compatible drive-model selection.
+- Pin the exact VICE/libretro revision used by every release build.
+- Make the external-firmware-only core build fully reproducible from a recorded revision and patch set.
+- Improve startup, firmware, drive-ROM and media-operation diagnostics.
+- Add known-ROM identification and clearly label standard, JiffyDOS and other recognized replacements.
+- Add explicit per-model firmware profiles while preserving the VICE limitation that a model's ROM is shared by every unit using it.
+- Verify pinned OpenROMs downloads with recorded hashes and surface upstream revision/license information in release material.
 
-## 2. Settings panels
+## 2. Remaining settings panels
 
-Complete the existing settings sections with persistent options and live application where supported:
+- Implement complete Tape and datasette settings, including transport behavior and autostart options.
+- Implement Printer settings and output management.
+- Add firmware profile selection, profile naming and known-ROM status.
+- Implement Networking and modem settings.
+- Add advanced options only where they can be applied safely without destabilizing the current core lifecycle.
 
-- System and machine profiles.
-- Graphics and VIC-II options.
-- Audio, SID model and filter options.
-- Tape and datasette options.
-- Disk drive configuration.
-- Printer configuration.
-- Firmware profile management.
-- Networking and modem options.
+## 3. Library and media management
 
-## 3. Library
-
-Expand the persistent D64, PRG, CRT, TAP and T64 library:
-
-- Add D71, D81, G64 and other formats after their drive requirements are handled reliably.
+- Add G64 and other disk formats after their drive and write-back requirements are handled reliably.
 - Add file replacement, duplicate detection and import-conflict handling.
 - Add screenshots, notes and optional cover artwork.
 - Add an optional cover/grid view while retaining the detailed list.
 - Display disk directories, free blocks and contained files.
 - Preview BASIC listings where practical.
 - Associate hardware profiles, joyports, firmware, save states and multidisk sets with library entries.
+- Add explicit export/share workflows for created or modified disk images.
 
 ## 4. Keyboard and input
 
-- Dock the complete C64 keyboard at the bottom instead of presenting it as a sheet.
-- Add adaptive iPad layouts and reliable held modifiers.
-- Display Shift and Commodore graphical legends dynamically.
 - Improve Apple Magic Keyboard and other hardware-keyboard mappings.
 - Add paddle support.
 - Validate Commodore 1351 mouse behavior with representative software and tune pointer sensitivity.
@@ -50,22 +41,19 @@ Expand the persistent D64, PRG, CRT, TAP and T64 library:
 
 ## 5. Media and expansion devices
 
-- Add a unified Devices control for Drive, Tape, Cartridge/REU and Printer functions without expanding the main toolbar.
-- Add per-device status, individual eject controls and direct access to the shared media-action workflow.
-- Support drive units 9–11 and selectable drive models in addition to the current Drive 8 workflow.
-- Add write protection, disk swapping and multidisk sets.
-- Add side-mounted drive activity LEDs beside the 4:3 display.
-- Add synchronized 1541 mechanical sounds when true drive emulation is available.
+- Add optional drive units 10 and 11.
+- Expose independent per-drive activity indicators by connecting to a VICE API that identifies the active unit; the current libretro LED is aggregate.
+- Add multidisk sets, disk-side navigation and disk-flip workflows.
 - Add complete datasette transport controls, counter and status.
-- Add dedicated cartridge status, individual cartridge eject and supported REU controls.
-- Add REU configuration and supported expansion options.
+- Add supported REU configuration, status and memory-size options.
+- Extend cartridge handling for supported expansion devices beyond basic CRT attachment.
 
 ## 6. Graphics and audio
 
 - Add Metal CRT shaders and presets based on compatible openly licensed shader projects.
 - Add scanlines, shadow mask, curvature, bloom, vignette and phosphor-persistence controls.
-- Add VIC-II palette, crop, aspect-ratio and scaling options.
-- Add SID model, emulation engine, filters, stereo and dual-SID settings.
+- Add reusable performance/quality presets for iPad hardware classes.
+- Add SID filter controls, stereo output and supported dual-SID configurations.
 
 ## 7. Printer
 
@@ -85,7 +73,7 @@ Expand the persistent D64, PRG, CRT, TAP and T64 library:
 Investigate integration with Ultimate 64 Elite-II and compatible current Commodore hardware exposing network APIs.
 
 - Discover supported hardware on the LAN.
-- Transfer PRG, D64, CRT and library items.
+- Transfer PRG, D64, D71, D81, CRT and library items where the target supports them.
 - Mount or eject media and remotely control reset or execution.
 - Exchange memory and program data.
 - Investigate audio/video streaming where supported by the hardware API.
@@ -94,8 +82,9 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 
 - Automate release builds and archive validation.
 - Document the exact source revision and patches corresponding to every distributed core binary.
-- Publish the required VICE/libretro source and license material for distributed builds.
-- Verify that release packages contain no proprietary Commodore firmware or commercial media.
+- Publish the complete corresponding VICE/libretro source and required license material for distributed builds.
+- Verify that release packages contain no proprietary Commodore firmware, JiffyDOS or commercial media.
+- Record third-party notices and OpenROMs revision/hash information in every release.
 - Prepare App Store metadata, privacy declarations and review documentation.
 
 ## 11. Long-term and experimental work
@@ -121,14 +110,12 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 ## Development order
 
 ```text
-Commodore mouse validation
-→ bottom C64 keyboard
-→ unified Devices control and per-device status
-→ additional drives, multidisk and datasette transport
-→ library duplicate detection, metadata and media inspection
-→ complete settings panels
-→ CRT graphics and advanced audio
+Tape/datasette transport and settings
+→ library inspection, duplicate handling and metadata
+→ firmware profiles and diagnostics
+→ advanced CRT graphics and SID options
 → printer and networking
+→ save states, multidisk and additional drives
 → release engineering and App Store preparation
 → hardware link and experimental features
 ```

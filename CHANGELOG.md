@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added functional System settings for C64 PAL, C64 NTSC, C64C PAL and C64C NTSC profiles.
+- Added Graphics settings for aspect ratio, crop, VIC-II palette, PAL filtering, crop delay and color adjustments.
+- Added Audio settings for FastSID, ReSID and ReSID-FP, SID model, ReSID sampling, sample rate, VIC-II audio leak and datasette sound.
+- Added an optional pinned MEGA65 OpenROMs profile with backup and restoration of an existing complete system-ROM set.
+- Added a unified Devices control for Drive 8, optional Drive 9, datasette and cartridge status and actions.
+- Added configurable 1541, 1541-II, 1571 and 1581 drive models with exact-size firmware slots.
+- Added global Fast Virtual Drive or True Drive Emulation for all enabled drives.
+- Added True Drive ROM initialization, compatible JiffyDOS configuration, write protection and mechanical drive sound.
+- Added Drive 8 and Drive 9 power indicators plus the aggregate floppy-activity LED exposed by libretro.
+- Added optional Drive 9 with independent model, mounted media, insert, replace, autostart and eject actions.
+- Added D71 and D81 import, temporary opening, Library actions and drive-model compatibility checks.
+- Added creation of formatted or completely blank D64, D71 and D81 images from Library and Devices.
+
+### Changed
+
+- Moved True Drive Emulation into a shared Drive Emulation section because the selected backend applies to every enabled unit.
+- Clarified that drive ROMs are shared by model rather than assigned separately to Drive 8 or Drive 9.
+- Extended configuration fingerprinting so System, Graphics, Audio and Disk Drives restart the core only when their saved values change.
+- Improved VICE runtime drive initialization so True Drive media insertion loads the selected ROM and activates the configured drive model before attachment.
+
 ## 0.5.5 — 2026-08-06
 
 - Changed Settings to a stable full-screen presentation with an always-visible Done button.

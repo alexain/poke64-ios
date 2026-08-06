@@ -51,7 +51,7 @@ VICE_REF=<verified-commit> ./Scripts/build_vice_core.sh
 ./Scripts/bootstrap.sh
 ```
 
-This generates `POKE64.xcodeproj` from `project.yml`.
+This generates `POKE64.xcodeproj` from `project.yml`. Run it after cloning or after changing `project.yml` or the source-file layout. Normal source edits do not require regeneration.
 
 ## Build on iPad
 
@@ -70,9 +70,29 @@ In Xcode:
 
 `Scripts/embed_core.sh` copies the local dylib into the app bundle and signs it with the application identity during the Xcode build.
 
-## First launch
+## First launch and firmware
 
-POKE64 opens Firmware / ROMs when the required system firmware is missing. Import BASIC, KERNAL and character ROM images; the 1541-II slot is optional.
+POKE64 opens Firmware / ROMs when the required system set is missing. Choose one of these paths:
+
+- install the pinned MEGA65 OpenROMs BASIC, KERNAL and character profile from the application; or
+- import legally obtained custom BASIC, KERNAL and character ROM files.
+
+Required sizes:
+
+```text
+BASIC ROM       8192 bytes
+KERNAL ROM      8192 bytes
+Character ROM   4096 bytes
+```
+
+Optional True Drive slots:
+
+```text
+1541 ROM       16384 bytes
+1541-II ROM    16384 bytes
+1571 ROM       32768 bytes
+1581 ROM       32768 bytes
+```
 
 Imported firmware is stored under:
 
@@ -88,17 +108,26 @@ Application Support/System/vice/vicerc
 
 The `x64sc` resources are written under `[C64SC]`.
 
-## Current drive compatibility mode
+OpenROMs supplies only the C64 system set. True Drive Emulation still requires an appropriate user-supplied drive ROM for every enabled drive model.
 
-The development build currently forces:
+## Drive modes
+
+Drive 8 is always enabled. Drive 9 is optional and can use a different model.
+
+**Fast Virtual Drive** applies to all enabled units and uses VICE virtual-device traps. It does not execute drive firmware.
+
+**True Drive Emulation** also applies to all enabled units. It requires a valid ROM for every selected model and enables hardware-level drive timing, compatible drive-side replacement firmware and mechanical sound.
+
+Available model slots:
 
 ```text
-Virtual Device Traps: enabled
-True Drive Emulation: disabled
-Drive sound: disabled
+1541      D64
+1541-II   D64
+1571      D64 and D71
+1581      D81
 ```
 
-This avoids libretro core defaults overriding the generated `vicerc` and leaving device 8 unavailable during D64 autostart. Imported 1541-II firmware is retained for the future Disk Drives implementation.
+Drive ROMs are shared by model. Drive 8 and Drive 9 cannot use different ROM variants when both are configured as the same model.
 
 ## Repository checks
 
@@ -106,6 +135,7 @@ Before committing:
 
 ```bash
 ./Scripts/check_integrated_sources.sh
+git diff --check
 git status --short
 ```
 
@@ -121,13 +151,18 @@ xcuserdata/
 *.xcuserstate
 ```
 
-Do not add firmware images, games, media images, provisioning profiles or signing certificates.
+Do not add proprietary firmware images, JiffyDOS, games, media images, provisioning profiles or signing certificates.
 
 ## Basic test checklist
 
-1. Start the app with valid BASIC, KERNAL and character ROMs.
-2. Confirm that the C64 reaches the BASIC screen.
-3. Load a D64 and verify that device 8 is available.
-4. Load a CRT and verify that Soft and Hard Reset keep the cartridge inserted.
-5. Use **Eject Cartridge and Reset** and verify that the app returns to BASIC.
-6. Open and close Settings without modifying firmware and confirm that the C64 session is not restarted.
+1. Start with valid BASIC, KERNAL and character ROMs and confirm that the C64 reaches BASIC.
+2. Change between C64/C64C and PAL/NTSC profiles and confirm that closing Settings restarts the core.
+3. Open and close Settings without changing a value and confirm that the current session is not restarted.
+4. Import or open D64, D71, D81, PRG, CRT, TAP and T64 media and verify the expected media-specific actions.
+5. Create formatted and completely blank D64, D71 and D81 images and confirm that they are added to the Library.
+6. In Fast Virtual Drive mode, load a compatible disk in Drive 8 and verify directory access.
+7. Install the matching drive ROM, enable True Drive and verify disk access, mechanical sound and the activity indicator.
+8. Enable Drive 9, mount different compatible images in units 8 and 9 and verify independent load and eject operations.
+9. Verify that incompatible combinations such as D71 with a 1541-II or D81 with a 1571 are rejected before mount.
+10. Load a CRT and verify that Soft and Hard Reset keep it inserted.
+11. Use **Eject All Media and Reset** and verify that every mounted device returns to an empty state.
