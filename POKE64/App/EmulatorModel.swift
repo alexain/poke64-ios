@@ -9,9 +9,105 @@ enum JoyportAssignment: Equatable {
     case physicalController(UUID)
 }
 
+enum DatasetteTransportCommand: Int, CaseIterable {
+    case stop = 0
+    case play = 1
+    case fastForward = 2
+    case rewind = 3
+    case reset = 5
+    case resetCounter = 6
+
+    var coreCommand: C64DatasetteCommand {
+        C64DatasetteCommand(rawValue: rawValue)!
+    }
+
+    var statusTitle: String {
+        switch self {
+        case .stop:
+            return "Tape stopped"
+        case .play:
+            return "Tape playing"
+        case .fastForward:
+            return "Tape fast-forwarding"
+        case .rewind:
+            return "Tape rewinding"
+        case .reset:
+            return "Tape rewound"
+        case .resetCounter:
+            return "Tape counter reset"
+        }
+    }
+}
+
+enum DatasetteTransportState: Equatable {
+    case stopped
+    case playing
+    case fastForwarding
+    case rewinding
+    case recording
+    case unknown(Int)
+
+    init(control: Int) {
+        switch control {
+        case 0:
+            self = .stopped
+        case 1:
+            self = .playing
+        case 2:
+            self = .fastForwarding
+        case 3:
+            self = .rewinding
+        case 4:
+            self = .recording
+        default:
+            self = .unknown(control)
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .stopped:
+            return "Stopped"
+        case .playing:
+            return "Playing"
+        case .fastForwarding:
+            return "Fast Forward"
+        case .rewinding:
+            return "Rewind"
+        case .recording:
+            return "Recording"
+        case .unknown:
+            return "Unknown"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .stopped:
+            return "stop.fill"
+        case .playing:
+            return "play.fill"
+        case .fastForwarding:
+            return "forward.fill"
+        case .rewinding:
+            return "backward.fill"
+        case .recording:
+            return "record.circle.fill"
+        case .unknown:
+            return "questionmark"
+        }
+    }
+}
+
 struct PhysicalControllerInfo: Identifiable, Equatable {
     let id: UUID
     let name: String
+}
+
+struct MouseResetRecommendation: Identifiable, Equatable {
+    let id = UUID()
+    let port: Int
+    let cartridgeTitle: String
 }
 
 enum MediaAction: Hashable, Identifiable {
@@ -120,7 +216,9 @@ final class EmulatorModel: ObservableObject {
     @Published var presentedError: String?
     @Published private(set) var joyport1Assignment: JoyportAssignment = .none
     @Published private(set) var joyport2Assignment: JoyportAssignment = .none
+    @Published private(set) var mouseResetRecommendation: MouseResetRecommendation?
     @Published private(set) var physicalControllers: [PhysicalControllerInfo] = []
+    @Published private(set) var hasPhysicalMouse = false
     @Published private(set) var mountedDisks: [Int: MediaReference] = [:]
     @Published private(set) var mountedTape: MediaReference?
     @Published private(set) var mountedCartridge: MediaReference?
@@ -128,6 +226,12 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var trueDriveEmulationConfigured = false
     @Published private(set) var drive9Configured = false
     @Published private(set) var drive8ActivityLEDOn = false
+    @Published private(set) var datasetteTelemetryAvailable = false
+    @Published private(set) var datasetteEnabled = false
+    @Published private(set) var datasetteTransportState: DatasetteTransportState = .stopped
+    @Published private(set) var datasetteCounter = 0
+    @Published private(set) var datasetteMotorOn = false
+    @Published private(set) var datasetteActivityLEDOn = false
 
     var drive8PowerLEDOn: Bool {
         isRunning && trueDriveEmulationConfigured
@@ -139,6 +243,29 @@ final class EmulatorModel: ObservableObject {
 
     var driveActivityLEDOn: Bool {
         drive8ActivityLEDOn
+    }
+
+    var mountedTapeSupportsPhysicalTransport: Bool {
+        mountedTape?.mediaType == .tap
+    }
+
+    var datasetteCounterDisplay: String {
+        guard let tape = mountedTape else { return "---" }
+        guard tape.mediaType == .tap else { return "T64" }
+        guard datasetteTelemetryAvailable else { return "---" }
+        return String(format: "%03d", min(999, max(0, datasetteCounter)))
+    }
+
+    var datasetteFormatSummary: String {
+        guard let tape = mountedTape else { return "No tape" }
+        switch tape.mediaType {
+        case .tap:
+            return "TAP · physical tape image"
+        case .t64:
+            return "T64 · read-only container"
+        default:
+            return tape.mediaType.displayName
+        }
     }
 
     let session = LibretroSession()
@@ -187,6 +314,21 @@ final class EmulatorModel: ObservableObject {
                     self.drive8ActivityLEDOn = false
                     self.driveLEDOffTask = nil
                 }
+            }
+        }
+        session.datasetteLEDStateDidChange = { [weak self] active in
+            Task { @MainActor in
+                self?.datasetteActivityLEDOn = active
+            }
+        }
+        session.datasetteStateDidChange = { [weak self] available, enabled, control, counter, motorOn in
+            Task { @MainActor in
+                guard let self else { return }
+                self.datasetteTelemetryAvailable = available
+                self.datasetteEnabled = enabled
+                self.datasetteTransportState = DatasetteTransportState(control: control)
+                self.datasetteCounter = min(999, max(0, counter))
+                self.datasetteMotorOn = motorOn
             }
         }
 
@@ -356,10 +498,18 @@ final class EmulatorModel: ObservableObject {
         guard isRunning else {
             throw EmulatorModelError.coreNotRunning
         }
-        try validateDiskCompatibility(for: action, media: media)
+
+        let effectiveAction: MediaAction
+        if action == .insertTape, media.mediaType == .t64 {
+            effectiveAction = .autostartTape
+        } else {
+            effectiveAction = action
+        }
+
+        try validateDiskCompatibility(for: effectiveAction, media: media)
 
         if !replacingExisting,
-           let replacement = replacementInfo(for: action, media: media) {
+           let replacement = replacementInfo(for: effectiveAction, media: media) {
             throw EmulatorModelError.replacementRequired(
                 replacement.existingTitle,
                 replacement.destination
@@ -370,7 +520,7 @@ final class EmulatorModel: ObservableObject {
         let programReleasedByReset: MediaReference?
         let success: Bool
 
-        switch action {
+        switch effectiveAction {
         case .runProgram:
             replacedMedia = activeProgram
             programReleasedByReset = nil
@@ -408,7 +558,7 @@ final class EmulatorModel: ObservableObject {
             )
         }
 
-        switch action {
+        switch effectiveAction {
         case .runProgram:
             activeProgram = media
             status = "Running program: \(media.title)"
@@ -429,12 +579,18 @@ final class EmulatorModel: ObservableObject {
 
         case .insertTape:
             mountedTape = media
+            resetDatasettePresentation(for: media)
+            resetTapeCounterAfterInsertionIfNeeded(media)
             status = "Tape inserted: \(media.title)"
 
         case .autostartTape:
             activeProgram = nil
             mountedTape = media
-            status = "Autostarting tape: \(media.title)"
+            resetDatasettePresentation(for: media)
+            resetTapeCounterAfterInsertionIfNeeded(media)
+            status = media.mediaType == .t64
+                ? "Autostarting T64: \(media.title)"
+                : "Autostarting tape: \(media.title)"
         }
 
         if let itemID = media.libraryItemID,
@@ -568,6 +724,23 @@ final class EmulatorModel: ObservableObject {
         status = "Drive \(unit) ejected"
     }
 
+    func controlDatasette(_ command: DatasetteTransportCommand) throws {
+        guard let tape = mountedTape else {
+            throw EmulatorModelError.coreFailure("No tape is inserted")
+        }
+        guard tape.mediaType == .tap else {
+            throw EmulatorModelError.coreFailure(
+                "T64 containers are launched through autostart and do not expose datasette transport controls"
+            )
+        }
+        guard session.controlDatasette(command.coreCommand) else {
+            throw EmulatorModelError.coreFailure(
+                session.lastErrorMessage ?? "Unable to control the datasette"
+            )
+        }
+        status = command.statusTitle
+    }
+
     func ejectTape() throws {
         guard let media = mountedTape else { return }
         guard session.ejectTape() else {
@@ -576,6 +749,7 @@ final class EmulatorModel: ObservableObject {
             )
         }
         mountedTape = nil
+        resetDatasettePresentation(for: nil)
         removeTemporaryFileIfUnused(media)
         status = "Tape ejected"
     }
@@ -588,6 +762,7 @@ final class EmulatorModel: ObservableObject {
             )
         }
         mountedCartridge = nil
+        mouseResetRecommendation = nil
         removeTemporaryFileIfUnused(media)
         status = "Cartridge ejected"
     }
@@ -619,6 +794,10 @@ final class EmulatorModel: ObservableObject {
         return nil
     }
 
+    var externalMouseCaptureActive: Bool {
+        isRunning && hasPhysicalMouse && mousePort != nil
+    }
+
     func joyportAssignment(for port: Int) -> JoyportAssignment {
         port == 1 ? joyport1Assignment : joyport2Assignment
     }
@@ -636,6 +815,7 @@ final class EmulatorModel: ObservableObject {
         joyport1Assignment = joyport2Assignment
         joyport2Assignment = previousPort1
         syncInputConfiguration()
+        recommendMouseResetIfNeeded()
         status = "Joystick ports swapped"
     }
 
@@ -667,7 +847,23 @@ final class EmulatorModel: ObservableObject {
         }
 
         syncInputConfiguration()
+        if assignment == .commodoreMouse {
+            recommendMouseResetIfNeeded()
+        } else if mousePort == nil {
+            mouseResetRecommendation = nil
+        }
         status = "Port \(port): \(assignmentTitle(assignment))"
+    }
+
+    func dismissMouseResetRecommendation() {
+        mouseResetRecommendation = nil
+    }
+
+    func hardResetForMouseDetection() {
+        guard mouseResetRecommendation != nil else { return }
+        mouseResetRecommendation = nil
+        hardReset()
+        status = "Hard reset requested for Commodore 1351 mouse"
     }
 
     func setJoypad(_ button: C64JoypadButton, pressed: Bool) {
@@ -735,7 +931,7 @@ final class EmulatorModel: ObservableObject {
         case .virtualJoystick:
             return "Virtual Joystick"
         case .commodoreMouse:
-            return "Commodore Mouse"
+            return "Commodore 1351 Mouse"
         case .physicalController(let controllerID):
             return physicalControllers.first(where: { $0.id == controllerID })?.name
                 ?? "Disconnected Controller"
@@ -763,6 +959,20 @@ final class EmulatorModel: ObservableObject {
             session.setMousePort(selectedMousePort)
         }
         syncJoypadMasks()
+    }
+
+    private func recommendMouseResetIfNeeded() {
+        guard isRunning,
+              let port = mousePort,
+              let cartridge = mountedCartridge else {
+            mouseResetRecommendation = nil
+            return
+        }
+
+        mouseResetRecommendation = MouseResetRecommendation(
+            port: port,
+            cartridgeTitle: cartridge.title
+        )
     }
 
     private func syncJoypadMasks() {
@@ -920,6 +1130,7 @@ final class EmulatorModel: ObservableObject {
 
     private func refreshPhysicalMice() {
         let mice = GCMouse.mice()
+        hasPhysicalMouse = !mice.isEmpty
         let connectedIDs = Set(mice.map(ObjectIdentifier.init))
         configuredMouseIDs.formIntersection(connectedIDs)
 
@@ -1003,8 +1214,10 @@ final class EmulatorModel: ObservableObject {
             actions = availableDriveUnits.flatMap { unit in
                 [.insertDisk(unit), .autostartDisk(unit)]
             }
-        case .tap, .t64:
+        case .tap:
             actions = [.insertTape, .autostartTape]
+        case .t64:
+            actions = [.autostartTape]
         }
         return MediaActionRequest(media: media, actions: actions)
     }
@@ -1045,10 +1258,31 @@ final class EmulatorModel: ObservableObject {
         }
     }
 
+    private func resetTapeCounterAfterInsertionIfNeeded(_ media: MediaReference) {
+        guard media.mediaType == .tap,
+              C64TapeSettings.resetCounterOnInsert else {
+            return
+        }
+        if !session.controlDatasette(DatasetteTransportCommand.resetCounter.coreCommand) {
+            print(session.lastErrorMessage ?? "Unable to reset the tape counter")
+        }
+    }
+
+    private func resetDatasettePresentation(for media: MediaReference?) {
+        datasetteTelemetryAvailable = false
+        datasetteEnabled = media != nil
+        datasetteTransportState = .stopped
+        datasetteCounter = 0
+        datasetteMotorOn = false
+        datasetteActivityLEDOn = false
+    }
+
     private func clearMediaState(removeTemporaryFiles: Bool) {
         activeProgram = nil
         mountedCartridge = nil
+        mouseResetRecommendation = nil
         mountedTape = nil
+        resetDatasettePresentation(for: nil)
         mountedDisks = [:]
         if removeTemporaryFiles {
             Self.cleanTemporaryMediaDirectory()

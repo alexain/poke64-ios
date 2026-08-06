@@ -55,6 +55,167 @@ enum C64MachineModel: String, CaseIterable, Identifiable {
 }
 
 
+enum C64REUSize: String, CaseIterable, Identifiable {
+    case disabled = "none"
+    case kb128 = "128kB"
+    case kb256 = "256kB"
+    case kb512 = "512kB"
+    case mb1 = "1024kB"
+    case mb2 = "2048kB"
+    case mb4 = "4096kB"
+    case mb8 = "8192kB"
+    case mb16 = "16384kB"
+
+    static let defaultsKey = "poke64.system.reuSize"
+    static let defaultValue: C64REUSize = .disabled
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .disabled:
+            return "Disabled"
+        case .kb128:
+            return "128 KB — Commodore 1700"
+        case .kb256:
+            return "256 KB — Commodore 1764"
+        case .kb512:
+            return "512 KB — Commodore 1750"
+        case .mb1:
+            return "1 MB"
+        case .mb2:
+            return "2 MB"
+        case .mb4:
+            return "4 MB"
+        case .mb8:
+            return "8 MB"
+        case .mb16:
+            return "16 MB"
+        }
+    }
+
+    var capacityTitle: String {
+        switch self {
+        case .disabled:
+            return "Disabled"
+        case .kb128:
+            return "128 KB"
+        case .kb256:
+            return "256 KB"
+        case .kb512:
+            return "512 KB"
+        case .mb1:
+            return "1 MB"
+        case .mb2:
+            return "2 MB"
+        case .mb4:
+            return "4 MB"
+        case .mb8:
+            return "8 MB"
+        case .mb16:
+            return "16 MB"
+        }
+    }
+
+    var sizeInKilobytes: Int? {
+        switch self {
+        case .disabled:
+            return nil
+        case .kb128:
+            return 128
+        case .kb256:
+            return 256
+        case .kb512:
+            return 512
+        case .mb1:
+            return 1024
+        case .mb2:
+            return 2048
+        case .mb4:
+            return 4096
+        case .mb8:
+            return 8192
+        case .mb16:
+            return 16384
+        }
+    }
+
+    static var selected: C64REUSize {
+        guard let value = UserDefaults.standard.string(forKey: defaultsKey),
+              let size = C64REUSize(rawValue: value) else {
+            return defaultValue
+        }
+        return size
+    }
+}
+
+enum C64REUSettings {
+    static let persistentMemoryKey = "poke64.system.reuPersistentMemory"
+    static let defaultPersistentMemory = false
+
+    static var persistentMemoryEnabled: Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: persistentMemoryKey) == nil
+            ? defaultPersistentMemory
+            : defaults.bool(forKey: persistentMemoryKey)
+    }
+
+    static var configurationFingerprint: String {
+        [
+            C64REUSize.selected.rawValue,
+            String(persistentMemoryEnabled)
+        ].joined(separator: ":")
+    }
+}
+
+enum C64TapeSettings {
+    static let autoShowControlsKey = "poke64.tape.autoShowControls"
+    static let resetCounterOnInsertKey = "poke64.tape.resetCounterOnInsert"
+    static let resetWithCPUKey = "poke64.tape.resetWithCPU"
+    static let autostartBasicLoadKey = "poke64.tape.autostartBasicLoad"
+
+    static let defaultAutoShowControls = true
+    static let defaultResetCounterOnInsert = true
+    static let defaultResetWithCPU = false
+    static let defaultAutostartBasicLoad = true
+
+    private static func boolValue(forKey key: String, defaultValue: Bool) -> Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: key) == nil
+            ? defaultValue
+            : defaults.bool(forKey: key)
+    }
+
+    static var autoShowControls: Bool {
+        boolValue(forKey: autoShowControlsKey, defaultValue: defaultAutoShowControls)
+    }
+
+    static var resetCounterOnInsert: Bool {
+        boolValue(
+            forKey: resetCounterOnInsertKey,
+            defaultValue: defaultResetCounterOnInsert
+        )
+    }
+
+    static var resetWithCPU: Bool {
+        boolValue(forKey: resetWithCPUKey, defaultValue: defaultResetWithCPU)
+    }
+
+    static var autostartBasicLoad: Bool {
+        boolValue(
+            forKey: autostartBasicLoadKey,
+            defaultValue: defaultAutostartBasicLoad
+        )
+    }
+
+    static var configurationFingerprint: String {
+        [
+            String(resetWithCPU),
+            String(autostartBasicLoad)
+        ].joined(separator: ":")
+    }
+}
+
 enum C64VideoAspectRatio: String, CaseIterable, Identifiable {
     case automatic = "auto"
     case pal
@@ -326,7 +487,7 @@ enum C64AudioSettings {
     static let datasetteSoundLevelKey = "poke64.audio.datasetteSoundLevel"
 
     static let defaultAudioLeakLevel = 0
-    static let defaultDatasetteSoundLevel = 0
+    static let defaultDatasetteSoundLevel = 20
 
     static var configurationFingerprint: String {
         let defaults = UserDefaults.standard
@@ -504,7 +665,7 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
     var summary: String {
         switch self {
         case .system:
-            "C64 model, timing and machine hardware."
+            "C64 model, timing and memory expansion."
         case .graphics:
             "Display geometry, palette and VIC-II filtering."
         case .audio:
@@ -606,14 +767,7 @@ private struct SettingsPanelDetail: View {
             case .audio:
                 AudioSettingsView()
             case .tape:
-                SettingsPlaceholderView(
-                    panel: panel,
-                    plannedFeatures: [
-                        "Datasette configuration",
-                        "Tape counter and transport behavior",
-                        "Autostart and loading options"
-                    ]
-                )
+                TapeSettingsView()
             case .diskDrives:
                 DiskDriveSettingsView()
             case .printer:
@@ -649,8 +803,24 @@ private struct SystemSettingsView: View {
     @AppStorage(C64MachineModel.defaultsKey)
     private var selectedModelRawValue = C64MachineModel.defaultModel.rawValue
 
+    @AppStorage(C64REUSize.defaultsKey)
+    private var selectedREUSizeRawValue = C64REUSize.defaultValue.rawValue
+
+    @AppStorage(C64REUSettings.persistentMemoryKey)
+    private var persistentREUMemory = C64REUSettings.defaultPersistentMemory
+
     private var selectedModel: C64MachineModel {
         C64MachineModel(rawValue: selectedModelRawValue) ?? .defaultModel
+    }
+
+    private var selectedREUSize: C64REUSize {
+        C64REUSize(rawValue: selectedREUSizeRawValue) ?? .defaultValue
+    }
+
+    private var systemDefaultsAreSelected: Bool {
+        selectedModel == .defaultModel
+            && selectedREUSize == .defaultValue
+            && persistentREUMemory == C64REUSettings.defaultPersistentMemory
     }
 
     var body: some View {
@@ -672,20 +842,43 @@ private struct SystemSettingsView: View {
                 Text("Changing the machine model restarts the C64 when Settings is closed. PAL and NTSC also change the core timing and video geometry.")
             }
 
+            Section {
+                Picker("RAM Expansion Unit", selection: $selectedREUSizeRawValue) {
+                    ForEach(C64REUSize.allCases) { size in
+                        Text(size.title).tag(size.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Toggle("Persistent REU memory", isOn: $persistentREUMemory)
+                    .disabled(selectedREUSize == .disabled)
+            } header: {
+                Text("Memory Expansion")
+            } footer: {
+                Text("REU changes restart the C64 when Settings is closed. Persistent memory restores the REU image at startup and writes it when the core closes.")
+            }
+
             Section("Compatibility") {
                 Label(
                     "Start with C64 PAL unless software specifically requires NTSC or the later C64C profile.",
                     systemImage: "info.circle"
                 )
-                .font(.callout)
-                .foregroundStyle(.secondary)
+
+                Label(
+                    "The REU shares the expansion port address space. Some CRT cartridges may conflict with it or require it to be disabled.",
+                    systemImage: "exclamationmark.triangle"
+                )
             }
+            .font(.callout)
+            .foregroundStyle(.secondary)
 
             Section {
                 Button("Restore System Defaults") {
                     selectedModelRawValue = C64MachineModel.defaultModel.rawValue
+                    selectedREUSizeRawValue = C64REUSize.defaultValue.rawValue
+                    persistentREUMemory = C64REUSettings.defaultPersistentMemory
                 }
-                .disabled(selectedModel == .defaultModel)
+                .disabled(systemDefaultsAreSelected)
             }
         }
     }
@@ -1046,6 +1239,78 @@ private struct AudioLevelSlider: View {
             )
         }
         .padding(.vertical, 2)
+    }
+}
+
+private struct TapeSettingsView: View {
+    @AppStorage(C64TapeSettings.autoShowControlsKey)
+    private var autoShowControls = C64TapeSettings.defaultAutoShowControls
+
+    @AppStorage(C64TapeSettings.resetCounterOnInsertKey)
+    private var resetCounterOnInsert = C64TapeSettings.defaultResetCounterOnInsert
+
+    @AppStorage(C64TapeSettings.resetWithCPUKey)
+    private var resetWithCPU = C64TapeSettings.defaultResetWithCPU
+
+    @AppStorage(C64TapeSettings.autostartBasicLoadKey)
+    private var autostartBasicLoad = C64TapeSettings.defaultAutostartBasicLoad
+
+    private var isUsingDefaults: Bool {
+        autoShowControls == C64TapeSettings.defaultAutoShowControls
+            && resetCounterOnInsert == C64TapeSettings.defaultResetCounterOnInsert
+            && resetWithCPU == C64TapeSettings.defaultResetWithCPU
+            && autostartBasicLoad == C64TapeSettings.defaultAutostartBasicLoad
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(
+                    "Show controls when a TAP image is inserted",
+                    isOn: $autoShowControls
+                )
+                Toggle(
+                    "Reset TAP counter on insertion",
+                    isOn: $resetCounterOnInsert
+                )
+            } header: {
+                Text("Interface")
+            } footer: {
+                Text("TAP controls can always be shown or hidden by tapping the counter/status panel beside the emulator. T64 containers do not display datasette controls.")
+            }
+
+            Section {
+                Toggle("Rewind datasette with C64 reset", isOn: $resetWithCPU)
+                Toggle("Autostart tape at BASIC start", isOn: $autostartBasicLoad)
+            } header: {
+                Text("VICE Behavior")
+            } footer: {
+                Text("These options are applied when Settings is closed and restart the C64 core. BASIC start changes the load address used by tape autostart.")
+            }
+
+            Section("Format Compatibility") {
+                Label(
+                    "TAP images expose the physical transport, motor and three-digit counter.",
+                    systemImage: "recordingtape"
+                )
+                Label(
+                    "T64 is a read-only logical container. It is always launched through autostart and does not display physical datasette controls.",
+                    systemImage: "info.circle"
+                )
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+            Section {
+                Button("Restore Tape Defaults") {
+                    autoShowControls = C64TapeSettings.defaultAutoShowControls
+                    resetCounterOnInsert = C64TapeSettings.defaultResetCounterOnInsert
+                    resetWithCPU = C64TapeSettings.defaultResetWithCPU
+                    autostartBasicLoad = C64TapeSettings.defaultAutostartBasicLoad
+                }
+                .disabled(isUsingDefaults)
+            }
+        }
     }
 }
 

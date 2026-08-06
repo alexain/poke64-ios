@@ -4,8 +4,11 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var emulator: EmulatorModel
+    @AppStorage(C64TapeSettings.autoShowControlsKey)
+    private var autoShowDatasetteControls = C64TapeSettings.defaultAutoShowControls
     @State private var showImporter = false
     @State private var showKeyboard = false
+    @State private var showDatasetteControls = false
     @State private var keyboardMode: C64KeyboardMode = .compact
     @State private var keyboardShiftLockIsActive = false
     @State private var showLibrary = false
@@ -48,7 +51,27 @@ struct ContentView: View {
                     )
                     .environmentObject(emulator)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+                } else if showDatasetteControls,
+                          emulator.mountedTapeSupportsPhysicalTransport {
+                    Divider()
+                        .overlay(.white.opacity(0.12))
+
+                    DatasetteControlDock(
+                        emulator: emulator,
+                        onHide: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showDatasetteControls = false
+                            }
+                        }
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
+            }
+
+            if emulator.externalMouseCaptureActive {
+                ExternalMouseCaptureShield()
+                    .ignoresSafeArea()
+                    .zIndex(90)
             }
 
             if emulator.isStarting {
@@ -59,6 +82,16 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: emulator.isStarting)
         .animation(.easeInOut(duration: 0.2), value: showKeyboard)
+        .animation(.easeInOut(duration: 0.2), value: showDatasetteControls)
+        .onChange(of: emulator.mountedTape?.id) { previousID, currentID in
+            guard previousID != currentID else { return }
+            if currentID == nil || !emulator.mountedTapeSupportsPhysicalTransport {
+                showDatasetteControls = false
+            } else if autoShowDatasetteControls {
+                showKeyboard = false
+                showDatasetteControls = true
+            }
+        }
         .task {
             await emulator.startAutomatically()
         }
@@ -138,6 +171,7 @@ struct ContentView: View {
                 aspectRatio: emulator.videoAspectRatio
             )
             let sideMargin = max(0, (proxy.size.width - displaySize.width) / 2)
+            let sideStatusPanelWidth = min(sideMargin, 104)
 
             ZStack {
                 Color.black
@@ -171,19 +205,39 @@ struct ContentView: View {
                 .frame(width: displaySize.width, height: displaySize.height)
                 .clipped()
 
-                if emulator.trueDriveEmulationConfigured, sideMargin >= 72 {
+                if sideMargin >= 72,
+                   emulator.trueDriveEmulationConfigured
+                    || emulator.mountedTapeSupportsPhysicalTransport {
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        DriveStatusPanel(
-                            drive8PowerOn: emulator.drive8PowerLEDOn,
-                            drive9Enabled: emulator.drive9Configured,
-                            drive9PowerOn: emulator.drive9PowerLEDOn,
-                            activityOn: emulator.driveActivityLEDOn
-                        )
+                        VStack(spacing: 12) {
+                            if emulator.trueDriveEmulationConfigured {
+                                DriveStatusPanel(
+                                    drive8PowerOn: emulator.drive8PowerLEDOn,
+                                    drive9Enabled: emulator.drive9Configured,
+                                    drive9PowerOn: emulator.drive9PowerLEDOn,
+                                    activityOn: emulator.driveActivityLEDOn
+                                )
+                                .allowsHitTesting(false)
+                            }
+
+                            if emulator.mountedTapeSupportsPhysicalTransport {
+                                DatasetteStatusPanel(
+                                    emulator: emulator,
+                                    controlsVisible: showDatasetteControls,
+                                    onToggleControls: {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            showKeyboard = false
+                                            showDatasetteControls.toggle()
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                        .frame(width: sideStatusPanelWidth)
                         .frame(width: sideMargin)
                     }
                     .frame(width: proxy.size.width, height: proxy.size.height)
-                    .allowsHitTesting(false)
                     .transition(.opacity)
                 }
             }
@@ -281,6 +335,7 @@ struct ContentView: View {
 
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
+                    showDatasetteControls = false
                     showKeyboard.toggle()
                 }
             } label: {
@@ -536,7 +591,9 @@ private enum DeviceImportTarget {
                     destination: "the datasette"
                 )
             }
-            actions = [.insertTape, .autostartTape]
+            actions = media.mediaType == .t64
+                ? [.autostartTape]
+                : [.insertTape, .autostartTape]
 
         case .cartridge:
             guard media.mediaType == .crt else {
@@ -614,6 +671,31 @@ private struct PortsConfigurationView: View {
                     }
                 }
             }
+            .alert(
+                "Restart cartridge for mouse?",
+                isPresented: Binding(
+                    get: { emulator.mouseResetRecommendation != nil },
+                    set: { presented in
+                        if !presented {
+                            emulator.dismissMouseResetRecommendation()
+                        }
+                    }
+                )
+            ) {
+                Button("Hard Reset") {
+                    emulator.hardResetForMouseDetection()
+                }
+                Button("Not Now", role: .cancel) {
+                    emulator.dismissMouseResetRecommendation()
+                }
+            } message: {
+                if let recommendation = emulator.mouseResetRecommendation {
+                    Text(
+                        "\(recommendation.cartridgeTitle) may detect the Commodore 1351 mouse only during startup. "
+                        + "Hard reset now with the mouse connected to Port \(recommendation.port)."
+                    )
+                }
+            }
         }
     }
 
@@ -639,7 +721,7 @@ private struct PortsConfigurationView: View {
             )
 
             assignmentButton(
-                title: "Commodore Mouse",
+                title: "Commodore 1351 Mouse",
                 systemImage: "computermouse",
                 assignment: .commodoreMouse,
                 selectedAssignment: assignment,
@@ -766,6 +848,7 @@ private struct DevicesConfigurationView: View {
                 }
                 tapeSection
                 cartridgeSection
+                reuSection
 
                 Section {
                     Button(role: .destructive) {
@@ -861,10 +944,26 @@ private struct DevicesConfigurationView: View {
             )
 
             if let media = emulator.mountedTape {
+                if media.mediaType == .tap {
+                    LabeledContent(
+                        "Transport",
+                        value: emulator.datasetteTransportState.title
+                    )
+                    LabeledContent("Counter", value: emulator.datasetteCounterDisplay)
+                } else if media.mediaType == .t64 {
+                    LabeledContent("Launch mode", value: "Autostart")
+                }
+                LabeledContent("Format", value: emulator.datasetteFormatSummary)
+            }
+
+            if let media = emulator.mountedTape {
                 Button {
                     perform(.autostartTape, media: media)
                 } label: {
-                    Label("Autostart Tape", systemImage: "play.circle.fill")
+                    Label(
+                        media.mediaType == .t64 ? "Run T64" : "Autostart Tape",
+                        systemImage: "play.circle.fill"
+                    )
                 }
 
                 Button {
@@ -926,6 +1025,50 @@ private struct DevicesConfigurationView: View {
         }
     }
 
+    private var reuSection: some View {
+        let size = C64REUSize.selected
+        let persistentMemory = C64REUSettings.persistentMemoryEnabled
+
+        return Section {
+            HStack(spacing: 12) {
+                Image(systemName: "memorychip")
+                    .font(.title3)
+                    .foregroundStyle(size == .disabled ? Color.secondary : Color.accentColor)
+                    .frame(width: 30)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("REU")
+                        .font(.body.weight(.medium))
+
+                    if size == .disabled {
+                        Text("Disabled")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("\(size.capacityTitle) · Active")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text(persistentMemory ? "Persistent memory enabled" : "Volatile memory")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: size == .disabled ? "circle" : "checkmark.circle.fill")
+                    .foregroundStyle(size == .disabled ? Color.secondary : Color.green)
+            }
+        } header: {
+            Text("RAM Expansion Unit")
+        } footer: {
+            if size != .disabled {
+                Text("Some cartridges use the same expansion-port address space and may require the REU to be disabled in Settings → System.")
+            }
+        }
+    }
+
     private var hasMountedMedia: Bool {
         !emulator.mountedDisks.isEmpty
             || emulator.mountedTape != nil
@@ -977,6 +1120,242 @@ private struct DevicesConfigurationView: View {
             try emulator.performMediaAction(action, media: media)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct DatasetteControlDock: View {
+    @ObservedObject var emulator: EmulatorModel
+    let onHide: () -> Void
+
+    @State private var errorMessage: String?
+
+    private var physicalTransportAvailable: Bool {
+        emulator.mountedTapeSupportsPhysicalTransport
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "recordingtape")
+                    .font(.title2)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(emulator.mountedTape?.title ?? "Datasette")
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(emulator.datasetteFormatSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(emulator.datasetteCounterDisplay)
+                        .font(.system(.title2, design: .monospaced, weight: .bold))
+                    Text(emulator.datasetteTransportState.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button("Hide", action: onHide)
+                    .buttonStyle(.bordered)
+            }
+
+            HStack(spacing: 10) {
+                transportButton(
+                    "REW",
+                    systemImage: "backward.fill",
+                    command: .rewind,
+                    enabled: physicalTransportAvailable
+                )
+                transportButton(
+                    "STOP",
+                    systemImage: "stop.fill",
+                    command: .stop,
+                    enabled: true
+                )
+                transportButton(
+                    "PLAY",
+                    systemImage: "play.fill",
+                    command: .play,
+                    enabled: true
+                )
+                transportButton(
+                    "F.FWD",
+                    systemImage: "forward.fill",
+                    command: .fastForward,
+                    enabled: physicalTransportAvailable
+                )
+                transportButton(
+                    "COUNTER",
+                    systemImage: "gobackward",
+                    command: .resetCounter,
+                    enabled: physicalTransportAvailable
+                )
+            }
+
+            if !physicalTransportAvailable {
+                Text("T64 containers do not provide a physical reel position; fast transport and counter reset are unavailable.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(.regularMaterial)
+        .alert(
+            "Datasette error",
+            isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )
+        ) {
+            Button("OK") {
+                errorMessage = nil
+            }
+        } message: {
+            Text(errorMessage ?? "Unknown error")
+        }
+    }
+
+    private func transportButton(
+        _ title: String,
+        systemImage: String,
+        command: DatasetteTransportCommand,
+        enabled: Bool
+    ) -> some View {
+        Button {
+            do {
+                try emulator.controlDatasette(command)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.title3.weight(.bold))
+                Text(title)
+                    .font(.caption.weight(.bold))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, minHeight: 52)
+        }
+        .buttonStyle(.bordered)
+        .tint(isActive(command) ? Color.accentColor : Color.gray)
+        .disabled(!enabled)
+    }
+
+    private func isActive(_ command: DatasetteTransportCommand) -> Bool {
+        switch (command, emulator.datasetteTransportState) {
+        case (.stop, .stopped),
+             (.play, .playing),
+             (.fastForward, .fastForwarding),
+             (.rewind, .rewinding):
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+private struct DatasetteStatusPanel: View {
+    @ObservedObject var emulator: EmulatorModel
+    let controlsVisible: Bool
+    let onToggleControls: () -> Void
+
+    var body: some View {
+        Button(action: onToggleControls) {
+            VStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    Text("TAPE")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.55))
+
+                    Spacer(minLength: 2)
+
+                    Image(systemName: controlsVisible
+                        ? "chevron.down.circle.fill"
+                        : "chevron.up.circle")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.58))
+                }
+
+                Text(emulator.datasetteCounterDisplay)
+                    .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .minimumScaleFactor(0.6)
+
+                Image(systemName: emulator.datasetteTransportState.systemImage)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.72))
+
+                Text(emulator.datasetteTransportState.title.uppercased())
+                    .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+
+                HStack(spacing: 8) {
+                    smallIndicator(
+                        title: "MOTOR",
+                        isOn: emulator.datasetteMotorOn,
+                        activeColor: .green
+                    )
+                    smallIndicator(
+                        title: "READ",
+                        isOn: emulator.datasetteActivityLEDOn,
+                        activeColor: .red
+                    )
+                }
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 7)
+            .frame(maxWidth: .infinity)
+            .background(
+                .white.opacity(controlsVisible ? 0.075 : 0.045),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(
+                        .white.opacity(controlsVisible ? 0.18 : 0.08),
+                        lineWidth: 1
+                    )
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!emulator.isRunning)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "Datasette, counter \(emulator.datasetteCounterDisplay), \(emulator.datasetteTransportState.title)"
+        )
+        .accessibilityHint(
+            controlsVisible
+                ? "Hides the datasette controls"
+                : "Shows the datasette controls"
+        )
+    }
+
+    private func smallIndicator(
+        title: String,
+        isOn: Bool,
+        activeColor: Color
+    ) -> some View {
+        VStack(spacing: 3) {
+            Circle()
+                .fill(isOn ? activeColor : activeColor.opacity(0.16))
+                .frame(width: 10, height: 10)
+                .shadow(
+                    color: isOn ? activeColor.opacity(0.85) : .clear,
+                    radius: isOn ? 4 : 0
+                )
+            Text(title)
+                .font(.system(size: 7, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.45))
         }
     }
 }
@@ -1259,8 +1638,10 @@ private struct MediaActionPromptModifier: ViewModifier {
         switch prompt.request.media.mediaType {
         case .d64, .d71, .d81:
             return "Choose whether to insert the disk without resetting the C64 or autostart it."
-        case .tap, .t64:
-            return "Choose whether to insert the tape without resetting the C64 or autostart it."
+        case .tap:
+            return "Choose whether to insert the TAP image without resetting the C64 or autostart it."
+        case .t64:
+            return nil
         case .prg, .crt:
             return nil
         }

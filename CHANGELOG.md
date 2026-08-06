@@ -1,5 +1,54 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added docked datasette controls with Play, Stop, Rewind, Fast Forward and counter reset.
+- Added native VICE tape transport telemetry, motor/activity status and a three-digit TAP counter in the emulator side margin and Devices panel.
+- Added Tape settings for automatic control presentation, counter reset on insertion, CPU-reset behavior and tape autostart load mode.
+
+### Changed
+
+- Moved datasette control access from the main toolbar to the tappable tape counter/status panel beside the emulator.
+- Kept the tappable datasette status panel compact when the keyboard or control dock reduces the emulator display size.
+- Set the default datasette sound level to 20%, matching the default mechanical drive-noise level.
+- Limited T64 controls to operations that do not imply a physical reel position; T64 fast transport and counter reset are disabled.
+- Updated the roadmap to mark datasette transport as complete and retain writable TAP recording/export as future work.
+
+## 0.6.5 — 2026-08-06
+
+### Added
+
+- Added complete datasette support for TAP and T64 media.
+- Added native Play, Stop, Rewind, Fast Forward and tape-counter controls where supported.
+- Added datasette motor, read activity and transport status indicators.
+- Added a collapsible datasette control panel below the emulator.
+
+### Changed
+
+- Changed T64 handling to always use autostart and reserved the on-screen datasette transport, counter and status controls exclusively for TAP images.
+- Moved datasette control access from the top toolbar to the side tape-status panel.
+- Kept the side tape-status panel compact when the keyboard or datasette controls are visible.
+- Set the default datasette audio volume to 20%.
+- Updated the roadmap to reflect the completed datasette implementation.
+
+## 0.6.2 — 2026-08-06
+
+### Added
+
+- Added configurable Commodore REU support from 128 KB through 16 MB in Settings → System.
+- Added optional persistent REU memory backed by an app-managed image file.
+- Added REU size, activity and persistence status to the Devices interface.
+
+### Fixed
+
+- Improved Commodore 1351 mouse handling, including compatibility with Final Cartridge III.
+
+### Documentation
+
+- Added planned iCloud Drive and Google Drive backup/synchronization for the library, imported media and user-supplied firmware/ROM files.
+
 ## 0.6.0 — 2026-08-06
 
 ### Added

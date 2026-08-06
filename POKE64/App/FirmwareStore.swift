@@ -191,6 +191,8 @@ enum FirmwareStore {
             firmware,
             "profile:\(activeProfileName)",
             "machine:\(C64MachineModel.selected.rawValue)",
+            "reu:\(C64REUSettings.configurationFingerprint)",
+            "tape:\(C64TapeSettings.configurationFingerprint)",
             "video:\(C64VideoSettings.configurationFingerprint)",
             "audio:\(C64AudioSettings.configurationFingerprint)",
             "drive:\(C64DriveSettings.configurationFingerprint)"
@@ -426,6 +428,25 @@ enum FirmwareStore {
             ? C64DriveSettings.defaultWriteProtection
             : defaults.bool(forKey: C64DriveSettings.writeProtectionKey)
 
+        let reuSize = C64REUSize.selected
+        if let sizeInKilobytes = reuSize.sizeInKilobytes {
+            let persistentMemory = C64REUSettings.persistentMemoryEnabled
+            let reuFilename = persistentMemory
+                ? escapedVicercPath(try reuImageURL().path)
+                : ""
+            lines.append("REUfilename=\"\(reuFilename)\"")
+            lines.append("REUImageWrite=\(persistentMemory ? 1 : 0)")
+            lines.append("REUsize=\(sizeInKilobytes)")
+            lines.append("REU=1")
+        } else {
+            lines.append("REUfilename=\"\"")
+            lines.append("REUImageWrite=0")
+            lines.append("REU=0")
+        }
+
+        lines.append("DatasetteResetWithCPU=\(C64TapeSettings.resetWithCPU ? 1 : 0)")
+        lines.append("AutostartTapeBasicLoad=\(C64TapeSettings.autostartBasicLoad ? 1 : 0)")
+
         // VICE validates a drive model against its configured ROM. Write the
         // ROM resources before drive types so configuration loading never tries
         // to enable a model while it still points at a missing default ROM.
@@ -496,6 +517,17 @@ enum FirmwareStore {
             .appendingPathComponent("Firmware", isDirectory: true)
         try FileManager.default.createDirectory(at: firmware, withIntermediateDirectories: true)
         return firmware
+    }
+
+    private static func reuImageURL() throws -> URL {
+        let directory = try viceDirectory()
+            .appendingPathComponent("POKE64", isDirectory: true)
+            .appendingPathComponent("REU", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        return directory.appendingPathComponent("persistent-memory.reu", isDirectory: false)
     }
 
     private static func fileURL(for slot: FirmwareSlot) throws -> URL {

@@ -110,6 +110,11 @@ struct CoreAPI {
     int (*tape_image_attach)(unsigned int, const char *) = nullptr;
     int (*tape_image_detach)(unsigned int) = nullptr;
     void (*tape_image_detach_all)(void) = nullptr;
+    void (*datasette_control)(int, int) = nullptr;
+    int *tape_enabled = nullptr;
+    int *tape_control = nullptr;
+    int *tape_counter = nullptr;
+    int *tape_motor = nullptr;
     int (*cartridge_attach_image)(int, const char *) = nullptr;
     void (*cartridge_detach_image)(int) = nullptr;
     int (*autostart_disk)(int, int, const char *, const char *, unsigned int, unsigned int) = nullptr;
@@ -133,6 +138,7 @@ enum class MediaCommandType {
     AttachCartridge,
     EjectDisk,
     EjectTape,
+    DatasetteControl,
     EjectCartridge,
     EjectAllAndReset
 };
@@ -203,6 +209,13 @@ struct SessionImpl {
     std::condition_variable startupCondition;
     bool firstRunCompleted = false;
     std::atomic<bool> driveActivityLED{false};
+    std::atomic<bool> datasetteActivityLED{false};
+    bool datasetteStateInitialized = false;
+    bool lastDatasetteTelemetryAvailable = false;
+    int lastDatasetteEnabled = 0;
+    int lastDatasetteControl = 0;
+    int lastDatasetteCounter = 0;
+    int lastDatasetteMotor = 0;
 
     SessionImpl() {
         clearInputState();
@@ -211,6 +224,27 @@ struct SessionImpl {
     unsigned retroPortForC64Port(unsigned c64Port) const {
         const unsigned current = currentJoyport.load(std::memory_order_acquire);
         return c64Port == current ? 0u : 1u;
+    }
+
+    void applyControllerPortDevices() {
+        if (!coreHandle || !api.retro_set_controller_port_device) return;
+
+        // VICE-libretro maps frontend port 0 to the C64 joyport selected by
+        // vice_joyport. When a 1351 is enabled, that selected frontend port
+        // must be declared as a libretro mouse rather than a RetroPad.
+        const bool mouseEnabled = mousePort.load(std::memory_order_acquire) != 0;
+        api.retro_set_controller_port_device(
+            0,
+            mouseEnabled ? RETRO_DEVICE_MOUSE : RETRO_DEVICE_JOYPAD
+        );
+        api.retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
+
+        std::fprintf(
+            stderr,
+            "[POKE64/INFO] Input devices: port0=%s port1=joypad C64MousePort=%u\n",
+            mouseEnabled ? "mouse" : "joypad",
+            mousePort.load(std::memory_order_acquire)
+        );
     }
 
     void updateVideoGeometry(const retro_game_geometry &geometry) {
@@ -251,6 +285,87 @@ struct SessionImpl {
 
     void clearDriveLED() {
         updateDriveLED(0);
+    }
+
+    void updateDatasetteLED(int state) {
+        const bool active = state != 0;
+        const bool previous = datasetteActivityLED.exchange(
+            active,
+            std::memory_order_acq_rel
+        );
+        if (previous == active) return;
+
+        LibretroSession *session = owner;
+        void (^callback)(BOOL) = session.datasetteLEDStateDidChange;
+        if (!callback) return;
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            callback(active);
+        });
+    }
+
+    void updateDatasetteState(bool force = false) {
+        const bool telemetryAvailable = api.tape_enabled
+            && api.tape_control
+            && api.tape_counter
+            && api.tape_motor;
+        const int enabled = telemetryAvailable ? *api.tape_enabled : 0;
+        const int control = telemetryAvailable ? *api.tape_control : 0;
+        const int counter = telemetryAvailable
+            ? std::clamp(*api.tape_counter, 0, 999)
+            : 0;
+        const int motor = telemetryAvailable ? *api.tape_motor : 0;
+
+        if (!force
+            && datasetteStateInitialized
+            && telemetryAvailable == lastDatasetteTelemetryAvailable
+            && enabled == lastDatasetteEnabled
+            && control == lastDatasetteControl
+            && counter == lastDatasetteCounter
+            && motor == lastDatasetteMotor) {
+            return;
+        }
+
+        datasetteStateInitialized = true;
+        lastDatasetteTelemetryAvailable = telemetryAvailable;
+        lastDatasetteEnabled = enabled;
+        lastDatasetteControl = control;
+        lastDatasetteCounter = counter;
+        lastDatasetteMotor = motor;
+
+        LibretroSession *session = owner;
+        void (^callback)(BOOL, BOOL, NSInteger, NSInteger, BOOL) =
+            session.datasetteStateDidChange;
+        if (!callback) return;
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            callback(
+                telemetryAvailable,
+                enabled != 0,
+                static_cast<NSInteger>(control),
+                static_cast<NSInteger>(counter),
+                motor != 0
+            );
+        });
+    }
+
+    void clearDatasetteState() {
+        updateDatasetteLED(0);
+        datasetteStateInitialized = false;
+        lastDatasetteTelemetryAvailable = false;
+        lastDatasetteEnabled = 0;
+        lastDatasetteControl = 0;
+        lastDatasetteCounter = 0;
+        lastDatasetteMotor = 0;
+
+        LibretroSession *session = owner;
+        void (^callback)(BOOL, BOOL, NSInteger, NSInteger, BOOL) =
+            session.datasetteStateDidChange;
+        if (!callback) return;
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            callback(NO, NO, 0, 0, NO);
+        });
     }
 
     void clearInputState() {
@@ -410,6 +525,13 @@ struct SessionImpl {
         api.tape_image_detach_all = reinterpret_cast<void (*)(void)>(
             dlsym(coreHandle, "tape_image_detach_all")
         );
+        api.datasette_control = reinterpret_cast<void (*)(int, int)>(
+            dlsym(coreHandle, "datasette_control")
+        );
+        api.tape_enabled = reinterpret_cast<int *>(dlsym(coreHandle, "tape_enabled"));
+        api.tape_control = reinterpret_cast<int *>(dlsym(coreHandle, "tape_control"));
+        api.tape_counter = reinterpret_cast<int *>(dlsym(coreHandle, "tape_counter"));
+        api.tape_motor = reinterpret_cast<int *>(dlsym(coreHandle, "tape_motor"));
         api.cartridge_attach_image = reinterpret_cast<int (*)(int, const char *)>(
             dlsym(coreHandle, "cartridge_attach_image")
         );
@@ -689,7 +811,10 @@ struct SessionImpl {
     }
 
     bool executeMediaCommand(const std::shared_ptr<MediaCommand> &command, std::string &error) {
-        constexpr unsigned int kTapePort = 1;
+        // VICE uses a 1-based tape image unit for attach/detach, but a
+        // 0-based tape-port index for autostart and datasette transport.
+        constexpr unsigned int kTapeUnit = 1;
+        constexpr unsigned int kTapePort = 0;
         constexpr unsigned int kAutostartModeRun = 0;
         constexpr int kCartridgeCRT = 0;
 
@@ -750,7 +875,7 @@ struct SessionImpl {
                     error = "The VICE core does not expose runtime tape attachment";
                     return false;
                 }
-                if (api.tape_image_attach(kTapePort, command->path.c_str()) != 0) {
+                if (api.tape_image_attach(kTapeUnit, command->path.c_str()) != 0) {
                     error = "VICE could not insert the selected tape";
                     return false;
                 }
@@ -823,10 +948,26 @@ struct SessionImpl {
                     error = "The VICE core does not expose runtime tape ejection";
                     return false;
                 }
-                if (api.tape_image_detach(kTapePort) != 0) {
+                if (api.tape_image_detach(kTapeUnit) != 0) {
                     error = "VICE could not eject the current tape";
                     return false;
                 }
+                updateDatasetteState(true);
+                return true;
+
+            case MediaCommandType::DatasetteControl:
+                if (!api.datasette_control) {
+                    error = "The VICE core does not expose datasette transport control";
+                    return false;
+                }
+                if (command->unit < C64DatasetteCommandStop
+                    || command->unit > C64DatasetteCommandResetCounter
+                    || command->unit == 4) {
+                    error = "Unsupported datasette command";
+                    return false;
+                }
+                api.datasette_control(static_cast<int>(kTapePort), command->unit);
+                updateDatasetteState(true);
                 return true;
 
             case MediaCommandType::EjectCartridge:
@@ -944,6 +1085,7 @@ struct SessionImpl {
             coreThread.join();
         }
         clearDriveLED();
+        clearDatasetteState();
         stopAudio();
     }
 
@@ -1230,6 +1372,21 @@ static std::string storedDriveROMPath(unsigned int unit) {
     return std::string(url.fileSystemRepresentation);
 }
 
+static void applyStoredREUOptions(SessionImpl *session) {
+    assignCoreOption(
+        session,
+        "vice_ram_expansion_unit",
+        validatedDefaultString(
+            @"poke64.system.reuSize",
+            @[
+                @"none", @"128kB", @"256kB", @"512kB", @"1024kB",
+                @"2048kB", @"4096kB", @"8192kB", @"16384kB"
+            ],
+            @"none"
+        )
+    );
+}
+
 static void applyStoredDriveOptions(SessionImpl *session) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     const bool trueDrive = storedTrueDriveEmulationEnabled();
@@ -1370,8 +1527,11 @@ static void applyStoredAudioOptions(SessionImpl *session) {
 static void ledStateCallback(int led, int state) {
     // VICE-libretro LED mapping: 0 = machine power, 1 = floppy,
     // 2 = datasette. VICE exposes a single aggregate floppy activity LED.
-    if (gSession && led == 1) {
+    if (!gSession) return;
+    if (led == 1) {
         gSession->updateDriveLED(state);
+    } else if (led == 2) {
+        gSession->updateDatasetteLED(state);
     }
 }
 
@@ -1454,6 +1614,7 @@ static bool environmentCallback(unsigned command, void *data) {
                 ? storedModel
                 : @"C64 PAL";
             session->variables["vice_c64_model"] = selectedModel.UTF8String;
+            applyStoredREUOptions(session);
             applyStoredVideoOptions(session);
             applyStoredAudioOptions(session);
             applyStoredDriveOptions(session);
@@ -1699,8 +1860,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
         gSession = nullptr;
         return false;
     }
-    api.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
-    api.retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
+    applyControllerPortDevices();
 
     retro_game_info game{};
     const retro_game_info *gamePointer = nullptr;
@@ -1755,6 +1915,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
             }
             drainKeyEvents();
             api.retro_run();
+            updateDatasetteState(firstIteration);
 
             if (firstIteration) {
                 if (storedTrueDriveEmulationEnabled()) {
@@ -1937,6 +2098,28 @@ bool SessionImpl::start(const char *path, std::string &error) {
     return [self performMediaCommand:MediaCommandType::EjectTape URL:nil driveUnit:0];
 }
 
+- (BOOL)controlDatasette:(C64DatasetteCommand)command {
+    self.lastErrorMessage = nil;
+    if (command < C64DatasetteCommandStop
+        || command > C64DatasetteCommandResetCounter
+        || command == 4) {
+        self.lastErrorMessage = @"Unsupported datasette command";
+        return NO;
+    }
+
+    std::string message;
+    const bool success = _impl->performMediaCommand(
+        MediaCommandType::DatasetteControl,
+        nullptr,
+        static_cast<int>(command),
+        message
+    );
+    if (!success) {
+        self.lastErrorMessage = [NSString stringWithUTF8String:message.c_str()];
+    }
+    return success;
+}
+
 - (BOOL)ejectCartridge {
     return [self performMediaCommand:MediaCommandType::EjectCartridge URL:nil driveUnit:0];
 }
@@ -1970,6 +2153,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
     _impl->mousePort.store(selectedPort, std::memory_order_release);
     _impl->currentJoyport.store(selectedPort == 0 ? 1u : selectedPort, std::memory_order_release);
     _impl->clearInputState();
+    _impl->applyControllerPortDevices();
     _impl->variablesUpdated.store(true, std::memory_order_release);
 }
 

@@ -2,7 +2,7 @@
 
 POKE64 is designed for **iPadOS first**, with landscape iPad use as the primary interface target. iPhone and macOS adaptations will be considered after the core iPad experience is stable.
 
-This document lists only work that is still pending. Completed Library, keyboard, Devices, video, audio and Drive 8/9 items have been removed.
+This document lists only work that is still pending. Completed Library, keyboard, Devices, video, audio, Drive 8/9, REU and datasette transport items have been removed.
 
 ## 1. Core, firmware and diagnostics
 
@@ -15,7 +15,6 @@ This document lists only work that is still pending. Completed Library, keyboard
 
 ## 2. Remaining settings panels
 
-- Implement complete Tape and datasette settings, including transport behavior and autostart options.
 - Implement Printer settings and output management.
 - Add firmware profile selection, profile naming and known-ROM status.
 - Implement Networking and modem settings.
@@ -31,12 +30,13 @@ This document lists only work that is still pending. Completed Library, keyboard
 - Preview BASIC listings where practical.
 - Associate hardware profiles, joyports, firmware, save states and multidisk sets with library entries.
 - Add explicit export/share workflows for created or modified disk images.
+- Add optional iCloud Drive and Google Drive backup/synchronization for the library, imported media and user-supplied firmware/ROM files, supporting recovery after app reinstallation and synchronization across multiple devices.
 
 ## 4. Keyboard and input
 
 - Improve Apple Magic Keyboard and other hardware-keyboard mappings.
 - Add paddle support.
-- Validate Commodore 1351 mouse behavior with representative software and tune pointer sensitivity.
+- Test additional Commodore 1351 software and refine pointer sensitivity where needed.
 - Investigate Apple Pencil as a Commodore mouse, light pen or graphics pointer.
 
 ## 5. Media and expansion devices
@@ -44,8 +44,7 @@ This document lists only work that is still pending. Completed Library, keyboard
 - Add optional drive units 10 and 11.
 - Expose independent per-drive activity indicators by connecting to a VICE API that identifies the active unit; the current libretro LED is aggregate.
 - Add multidisk sets, disk-side navigation and disk-flip workflows.
-- Add complete datasette transport controls, counter and status.
-- Add supported REU configuration, status and memory-size options.
+- Add safe writable TAP recording, explicit write-back and export before exposing the datasette RECORD control.
 - Extend cartridge handling for supported expansion devices beyond basic CRT attachment.
 
 ## 6. Graphics and audio
@@ -110,8 +109,7 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 ## Development order
 
 ```text
-Tape/datasette transport and settings
-→ library inspection, duplicate handling and metadata
+Library inspection, duplicate handling and metadata
 → firmware profiles and diagnostics
 → advanced CRT graphics and SID options
 → printer and networking
