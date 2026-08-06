@@ -192,6 +192,7 @@ enum FirmwareStore {
             "profile:\(activeProfileName)",
             "machine:\(C64MachineModel.selected.rawValue)",
             "reu:\(C64REUSettings.configurationFingerprint)",
+            "tape:\(C64TapeSettings.configurationFingerprint)",
             "video:\(C64VideoSettings.configurationFingerprint)",
             "audio:\(C64AudioSettings.configurationFingerprint)",
             "drive:\(C64DriveSettings.configurationFingerprint)"
@@ -442,6 +443,9 @@ enum FirmwareStore {
             lines.append("REUImageWrite=0")
             lines.append("REU=0")
         }
+
+        lines.append("DatasetteResetWithCPU=\(C64TapeSettings.resetWithCPU ? 1 : 0)")
+        lines.append("AutostartTapeBasicLoad=\(C64TapeSettings.autostartBasicLoad ? 1 : 0)")
 
         // VICE validates a drive model against its configured ROM. Write the
         // ROM resources before drive types so configuration loading never tries

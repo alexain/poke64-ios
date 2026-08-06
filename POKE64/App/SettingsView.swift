@@ -168,6 +168,54 @@ enum C64REUSettings {
     }
 }
 
+enum C64TapeSettings {
+    static let autoShowControlsKey = "poke64.tape.autoShowControls"
+    static let resetCounterOnInsertKey = "poke64.tape.resetCounterOnInsert"
+    static let resetWithCPUKey = "poke64.tape.resetWithCPU"
+    static let autostartBasicLoadKey = "poke64.tape.autostartBasicLoad"
+
+    static let defaultAutoShowControls = true
+    static let defaultResetCounterOnInsert = true
+    static let defaultResetWithCPU = false
+    static let defaultAutostartBasicLoad = false
+
+    private static func boolValue(forKey key: String, defaultValue: Bool) -> Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: key) == nil
+            ? defaultValue
+            : defaults.bool(forKey: key)
+    }
+
+    static var autoShowControls: Bool {
+        boolValue(forKey: autoShowControlsKey, defaultValue: defaultAutoShowControls)
+    }
+
+    static var resetCounterOnInsert: Bool {
+        boolValue(
+            forKey: resetCounterOnInsertKey,
+            defaultValue: defaultResetCounterOnInsert
+        )
+    }
+
+    static var resetWithCPU: Bool {
+        boolValue(forKey: resetWithCPUKey, defaultValue: defaultResetWithCPU)
+    }
+
+    static var autostartBasicLoad: Bool {
+        boolValue(
+            forKey: autostartBasicLoadKey,
+            defaultValue: defaultAutostartBasicLoad
+        )
+    }
+
+    static var configurationFingerprint: String {
+        [
+            String(resetWithCPU),
+            String(autostartBasicLoad)
+        ].joined(separator: ":")
+    }
+}
+
 enum C64VideoAspectRatio: String, CaseIterable, Identifiable {
     case automatic = "auto"
     case pal
@@ -439,7 +487,7 @@ enum C64AudioSettings {
     static let datasetteSoundLevelKey = "poke64.audio.datasetteSoundLevel"
 
     static let defaultAudioLeakLevel = 0
-    static let defaultDatasetteSoundLevel = 0
+    static let defaultDatasetteSoundLevel = 20
 
     static var configurationFingerprint: String {
         let defaults = UserDefaults.standard
@@ -719,14 +767,7 @@ private struct SettingsPanelDetail: View {
             case .audio:
                 AudioSettingsView()
             case .tape:
-                SettingsPlaceholderView(
-                    panel: panel,
-                    plannedFeatures: [
-                        "Datasette configuration",
-                        "Tape counter and transport behavior",
-                        "Autostart and loading options"
-                    ]
-                )
+                TapeSettingsView()
             case .diskDrives:
                 DiskDriveSettingsView()
             case .printer:
@@ -1198,6 +1239,78 @@ private struct AudioLevelSlider: View {
             )
         }
         .padding(.vertical, 2)
+    }
+}
+
+private struct TapeSettingsView: View {
+    @AppStorage(C64TapeSettings.autoShowControlsKey)
+    private var autoShowControls = C64TapeSettings.defaultAutoShowControls
+
+    @AppStorage(C64TapeSettings.resetCounterOnInsertKey)
+    private var resetCounterOnInsert = C64TapeSettings.defaultResetCounterOnInsert
+
+    @AppStorage(C64TapeSettings.resetWithCPUKey)
+    private var resetWithCPU = C64TapeSettings.defaultResetWithCPU
+
+    @AppStorage(C64TapeSettings.autostartBasicLoadKey)
+    private var autostartBasicLoad = C64TapeSettings.defaultAutostartBasicLoad
+
+    private var isUsingDefaults: Bool {
+        autoShowControls == C64TapeSettings.defaultAutoShowControls
+            && resetCounterOnInsert == C64TapeSettings.defaultResetCounterOnInsert
+            && resetWithCPU == C64TapeSettings.defaultResetWithCPU
+            && autostartBasicLoad == C64TapeSettings.defaultAutostartBasicLoad
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(
+                    "Show controls when a tape is inserted",
+                    isOn: $autoShowControls
+                )
+                Toggle(
+                    "Reset TAP counter on insertion",
+                    isOn: $resetCounterOnInsert
+                )
+            } header: {
+                Text("Interface")
+            } footer: {
+                Text("The docked datasette controls can always be shown or hidden from the main toolbar while a tape is inserted.")
+            }
+
+            Section {
+                Toggle("Rewind datasette with C64 reset", isOn: $resetWithCPU)
+                Toggle("Autostart tape at BASIC start", isOn: $autostartBasicLoad)
+            } header: {
+                Text("VICE Behavior")
+            } footer: {
+                Text("These options are applied when Settings is closed and restart the C64 core. BASIC start changes the load address used by tape autostart.")
+            }
+
+            Section("Format Compatibility") {
+                Label(
+                    "TAP images expose the physical transport, motor and three-digit counter.",
+                    systemImage: "recordingtape"
+                )
+                Label(
+                    "T64 is a read-only logical container. Play and Stop remain available, but fast transport and the physical counter are disabled.",
+                    systemImage: "info.circle"
+                )
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+            Section {
+                Button("Restore Tape Defaults") {
+                    autoShowControls = C64TapeSettings.defaultAutoShowControls
+                    resetCounterOnInsert = C64TapeSettings.defaultResetCounterOnInsert
+                    resetWithCPU = C64TapeSettings.defaultResetWithCPU
+                    autostartBasicLoad = C64TapeSettings.defaultAutostartBasicLoad
+                }
+                .disabled(isUsingDefaults)
+            }
+        }
     }
 }
 

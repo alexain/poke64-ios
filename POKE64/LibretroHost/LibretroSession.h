@@ -27,11 +27,28 @@ typedef NS_ENUM(NSInteger, C64KeyCode) {
     C64KeyCodeFunction7 = 288
 };
 
+typedef NS_ENUM(NSInteger, C64DatasetteCommand) {
+    C64DatasetteCommandStop = 0,
+    C64DatasetteCommandPlay = 1,
+    C64DatasetteCommandFastForward = 2,
+    C64DatasetteCommandRewind = 3,
+    C64DatasetteCommandReset = 5,
+    C64DatasetteCommandResetCounter = 6
+};
+
 @interface LibretroSession : NSObject
 
 @property (nonatomic, weak, nullable) C64MetalView *videoView;
 @property (nonatomic, copy, nullable) void (^videoGeometryDidChange)(double aspectRatio);
 @property (nonatomic, copy, nullable) void (^driveLEDStateDidChange)(BOOL active);
+@property (nonatomic, copy, nullable) void (^datasetteLEDStateDidChange)(BOOL active);
+@property (nonatomic, copy, nullable) void (^datasetteStateDidChange)(
+    BOOL telemetryAvailable,
+    BOOL enabled,
+    NSInteger control,
+    NSInteger counter,
+    BOOL motorOn
+);
 @property (nonatomic, copy, readonly, nullable) NSString *lastErrorMessage;
 
 - (BOOL)startWithoutContent;
@@ -46,6 +63,7 @@ typedef NS_ENUM(NSInteger, C64KeyCode) {
 - (BOOL)attachCartridgeAtURL:(NSURL *)url NS_SWIFT_NAME(attachCartridge(at:));
 - (BOOL)ejectDiskFromDriveUnit:(NSInteger)unit NS_SWIFT_NAME(ejectDisk(fromDriveUnit:));
 - (BOOL)ejectTape;
+- (BOOL)controlDatasette:(C64DatasetteCommand)command;
 - (BOOL)ejectCartridge;
 - (BOOL)ejectAllMediaAndReset;
 - (void)stop;
