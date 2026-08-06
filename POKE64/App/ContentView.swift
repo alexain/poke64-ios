@@ -126,8 +126,11 @@ struct ContentView: View {
             LibraryView(emulator: emulator)
         }
         .sheet(isPresented: $showPrinterControls) {
-            PrinterCaptureSheet(capturedBytes: $printerCapturedBytes)
-                .environmentObject(emulator)
+            PrinterCaptureSheet(
+                capturedBytes: $printerCapturedBytes,
+                isPrinting: printerActivityPulse
+            )
+            .environmentObject(emulator)
         }
         .sheet(isPresented: $showNewDisk) {
             NewDiskView(
@@ -594,7 +597,7 @@ struct ContentView: View {
 
         while printerEnabled, !Task.isCancelled {
             do {
-                try await Task.sleep(for: .milliseconds(750))
+                try await Task.sleep(for: .milliseconds(300))
             } catch {
                 return
             }
@@ -616,7 +619,7 @@ struct ContentView: View {
         printerActivityPulse = true
 
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(900))
+            try? await Task.sleep(for: .milliseconds(1_250))
             guard sequence == printerActivitySequence else { return }
             printerActivityPulse = false
         }
@@ -1367,18 +1370,11 @@ private struct PrinterStatusPanel: View {
                         .foregroundStyle(.white.opacity(0.58))
                 }
 
-                Circle()
-                    .fill(.green)
-                    .frame(width: 13, height: 13)
-                    .shadow(
-                        color: .green.opacity(activityPulse ? 1 : 0.72),
-                        radius: activityPulse ? 8 : 4
-                    )
-                    .scaleEffect(activityPulse ? 1.12 : 1)
+                printerActivityLED
 
-                Text(activityPulse ? "PRINT" : format.rawValue.uppercased())
+                Text(activityPulse ? "PRINTING" : format.rawValue.uppercased())
                     .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(activityPulse ? .orange : .white.opacity(0.55))
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
 
@@ -1392,22 +1388,50 @@ private struct PrinterStatusPanel: View {
             .padding(.horizontal, 7)
             .frame(maxWidth: .infinity)
             .background(
-                .white.opacity(0.045),
+                .white.opacity(activityPulse ? 0.075 : 0.045),
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(.white.opacity(0.08), lineWidth: 1)
+                    .stroke(
+                        activityPulse ? .orange.opacity(0.32) : .white.opacity(0.08),
+                        lineWidth: 1
+                    )
             }
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "IEC printer \(device), ready, captured data \(capturedSizeDescription)"
+            "IEC printer \(device), \(activityPulse ? "printing" : "ready"), captured data \(capturedSizeDescription)"
         )
         .accessibilityHint("Opens the virtual printer controls")
-        .animation(.easeOut(duration: 0.12), value: activityPulse)
+        .animation(.easeOut(duration: 0.15), value: activityPulse)
+    }
+
+    @ViewBuilder
+    private var printerActivityLED: some View {
+        if activityPulse {
+            TimelineView(.periodic(from: .now, by: 0.32)) { context in
+                let phase = Int(context.date.timeIntervalSinceReferenceDate / 0.32)
+                let illuminated = phase.isMultiple(of: 2)
+
+                Circle()
+                    .fill(.orange)
+                    .frame(width: 13, height: 13)
+                    .opacity(illuminated ? 1 : 0.42)
+                    .shadow(
+                        color: .orange.opacity(illuminated ? 0.95 : 0.3),
+                        radius: illuminated ? 8 : 3
+                    )
+                    .scaleEffect(illuminated ? 1.14 : 0.96)
+            }
+        } else {
+            Circle()
+                .fill(.green)
+                .frame(width: 13, height: 13)
+                .shadow(color: .green.opacity(0.72), radius: 4)
+        }
     }
 }
 

@@ -1920,6 +1920,7 @@ struct PrinterCaptureSheet: View {
     @EnvironmentObject private var emulator: EmulatorModel
 
     @Binding var capturedBytes: Int?
+    let isPrinting: Bool
 
     @State private var errorMessage: String?
     @State private var statusMessage: String?
@@ -1931,6 +1932,7 @@ struct PrinterCaptureSheet: View {
     @State private var isPerformingFileOperation = false
     @State private var pendingBufferAction: PrinterBufferAction?
     @State private var lastRefreshDate: Date?
+    @State private var showExpandedPreview = false
 
     private var printerDevice: Int { C64PrinterSettings.device }
     private var exportFormat: C64PrinterExportFormat {
@@ -2013,6 +2015,15 @@ struct PrinterCaptureSheet: View {
         .sheet(item: $shareItem, onDismiss: cleanupShareSnapshots) { item in
             PrinterActivityView(activityItems: item.urls)
         }
+        .fullScreenCover(isPresented: $showExpandedPreview) {
+            if let previewImage {
+                PrinterExpandedPreview(image: previewImage)
+            }
+        }
+        .task(id: isPrinting) {
+            guard isPrinting, exportFormat.usesRasterRenderer else { return }
+            await refreshPreviewWhilePrinting()
+        }
         .confirmationDialog(
             pendingBufferAction?.title ?? "Printer paper",
             isPresented: Binding(
@@ -2052,17 +2063,16 @@ struct PrinterCaptureSheet: View {
     private var printerStatusCard: some View {
         VStack(spacing: 14) {
             HStack(spacing: 10) {
-                Circle()
-                    .fill(.green)
-                    .frame(width: 14, height: 14)
-                    .shadow(color: .green.opacity(0.8), radius: 5)
+                statusActivityLED
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("IEC PRINTER \(printerDevice)")
                         .font(.headline)
-                    Text(emulator.isRunning ? "Connected" : "Core stopped")
+                    Text(emulator.isRunning
+                        ? (isPrinting ? "Printing…" : "Connected")
+                        : "Core stopped")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(isPrinting ? .orange : .secondary)
                 }
 
                 Spacer()
@@ -2110,19 +2120,41 @@ struct PrinterCaptureSheet: View {
     @ViewBuilder
     private var printerPreview: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("PAPER PREVIEW")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+            HStack {
+                Text("PAPER PREVIEW")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                if previewImage != nil {
+                    Button {
+                        showExpandedPreview = true
+                    } label: {
+                        Label("Expand", systemImage: "arrow.up.left.and.arrow.down.right")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
 
             if let previewImage {
                 Image(uiImage: previewImage)
                     .resizable()
                     .interpolation(.none)
                     .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: 390)
+                    .frame(maxWidth: .infinity)
                     .background(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        showExpandedPreview = true
+                    }
+
+                Text("Tap the page to open a full-screen preview with pinch-to-zoom. The preview refreshes periodically while data is being printed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } else {
                 ContentUnavailableView(
                     "No Printed Dots Yet",
@@ -2137,6 +2169,31 @@ struct PrinterCaptureSheet: View {
             .secondary.opacity(0.06),
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
+    }
+
+    @ViewBuilder
+    private var statusActivityLED: some View {
+        if isPrinting {
+            TimelineView(.periodic(from: .now, by: 0.32)) { context in
+                let phase = Int(context.date.timeIntervalSinceReferenceDate / 0.32)
+                let illuminated = phase.isMultiple(of: 2)
+
+                Circle()
+                    .fill(.orange)
+                    .frame(width: 14, height: 14)
+                    .opacity(illuminated ? 1 : 0.42)
+                    .shadow(
+                        color: .orange.opacity(illuminated ? 0.9 : 0.28),
+                        radius: illuminated ? 7 : 3
+                    )
+                    .scaleEffect(illuminated ? 1.12 : 0.96)
+            }
+        } else {
+            Circle()
+                .fill(.green)
+                .frame(width: 14, height: 14)
+                .shadow(color: .green.opacity(0.8), radius: 5)
+        }
     }
 
     private var captureActions: some View {
@@ -2229,6 +2286,27 @@ struct PrinterCaptureSheet: View {
     }
 
     @MainActor
+    private func refreshPreviewWhilePrinting() async {
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(for: .milliseconds(1_200))
+            } catch {
+                return
+            }
+
+            guard !isRefreshing, !isPerformingFileOperation else { continue }
+
+            do {
+                try emulator.snapshotPrinterOutput()
+                refreshOutputStatus()
+            } catch {
+                // A manual refresh still reports errors. Background preview
+                // updates remain silent so they do not interrupt printing.
+            }
+        }
+    }
+
+    @MainActor
     private func refreshOutputStatusWithFeedback() async {
         guard !isRefreshing else { return }
         isRefreshing = true
@@ -2299,6 +2377,75 @@ struct PrinterCaptureSheet: View {
         } catch {
             errorMessage = error.localizedDescription
             refreshOutputStatus()
+        }
+    }
+}
+
+
+private struct PrinterExpandedPreview: View {
+    @Environment(\.dismiss) private var dismiss
+    let image: UIImage
+
+    @State private var zoom: CGFloat = 1
+    @State private var settledZoom: CGFloat = 1
+
+    var body: some View {
+        NavigationStack {
+            GeometryReader { proxy in
+                ScrollView([.horizontal, .vertical]) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .interpolation(.none)
+                        .scaledToFit()
+                        .frame(width: max(proxy.size.width, 1) * zoom)
+                        .background(.white)
+                        .gesture(
+                            MagnifyGesture()
+                                .onChanged { value in
+                                    zoom = min(8, max(1, settledZoom * value.magnification))
+                                }
+                                .onEnded { _ in
+                                    settledZoom = zoom
+                                }
+                        )
+                        .onTapGesture(count: 2) {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                zoom = zoom > 1.05 ? 1 : 2.5
+                                settledZoom = zoom
+                            }
+                        }
+                }
+                .background(Color(uiColor: .systemGroupedBackground))
+            }
+            .navigationTitle("Printer Preview")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    Button {
+                        zoom = max(1, zoom - 0.5)
+                        settledZoom = zoom
+                    } label: {
+                        Image(systemName: "minus.magnifyingglass")
+                    }
+                    .disabled(zoom <= 1)
+
+                    Button {
+                        zoom = min(8, zoom + 0.5)
+                        settledZoom = zoom
+                    } label: {
+                        Image(systemName: "plus.magnifyingglass")
+                    }
+
+                    Button("Fit") {
+                        zoom = 1
+                        settledZoom = 1
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
     }
 }
