@@ -14,6 +14,12 @@ struct PhysicalControllerInfo: Identifiable, Equatable {
     let name: String
 }
 
+struct MouseResetRecommendation: Identifiable, Equatable {
+    let id = UUID()
+    let port: Int
+    let cartridgeTitle: String
+}
+
 enum MediaAction: Hashable, Identifiable {
     case runProgram
     case insertCartridgeAndReset
@@ -120,7 +126,9 @@ final class EmulatorModel: ObservableObject {
     @Published var presentedError: String?
     @Published private(set) var joyport1Assignment: JoyportAssignment = .none
     @Published private(set) var joyport2Assignment: JoyportAssignment = .none
+    @Published private(set) var mouseResetRecommendation: MouseResetRecommendation?
     @Published private(set) var physicalControllers: [PhysicalControllerInfo] = []
+    @Published private(set) var hasPhysicalMouse = false
     @Published private(set) var mountedDisks: [Int: MediaReference] = [:]
     @Published private(set) var mountedTape: MediaReference?
     @Published private(set) var mountedCartridge: MediaReference?
@@ -588,6 +596,7 @@ final class EmulatorModel: ObservableObject {
             )
         }
         mountedCartridge = nil
+        mouseResetRecommendation = nil
         removeTemporaryFileIfUnused(media)
         status = "Cartridge ejected"
     }
@@ -619,6 +628,10 @@ final class EmulatorModel: ObservableObject {
         return nil
     }
 
+    var externalMouseCaptureActive: Bool {
+        isRunning && hasPhysicalMouse && mousePort != nil
+    }
+
     func joyportAssignment(for port: Int) -> JoyportAssignment {
         port == 1 ? joyport1Assignment : joyport2Assignment
     }
@@ -636,6 +649,7 @@ final class EmulatorModel: ObservableObject {
         joyport1Assignment = joyport2Assignment
         joyport2Assignment = previousPort1
         syncInputConfiguration()
+        recommendMouseResetIfNeeded()
         status = "Joystick ports swapped"
     }
 
@@ -667,7 +681,23 @@ final class EmulatorModel: ObservableObject {
         }
 
         syncInputConfiguration()
+        if assignment == .commodoreMouse {
+            recommendMouseResetIfNeeded()
+        } else if mousePort == nil {
+            mouseResetRecommendation = nil
+        }
         status = "Port \(port): \(assignmentTitle(assignment))"
+    }
+
+    func dismissMouseResetRecommendation() {
+        mouseResetRecommendation = nil
+    }
+
+    func hardResetForMouseDetection() {
+        guard mouseResetRecommendation != nil else { return }
+        mouseResetRecommendation = nil
+        hardReset()
+        status = "Hard reset requested for Commodore 1351 mouse"
     }
 
     func setJoypad(_ button: C64JoypadButton, pressed: Bool) {
@@ -735,7 +765,7 @@ final class EmulatorModel: ObservableObject {
         case .virtualJoystick:
             return "Virtual Joystick"
         case .commodoreMouse:
-            return "Commodore Mouse"
+            return "Commodore 1351 Mouse"
         case .physicalController(let controllerID):
             return physicalControllers.first(where: { $0.id == controllerID })?.name
                 ?? "Disconnected Controller"
@@ -763,6 +793,20 @@ final class EmulatorModel: ObservableObject {
             session.setMousePort(selectedMousePort)
         }
         syncJoypadMasks()
+    }
+
+    private func recommendMouseResetIfNeeded() {
+        guard isRunning,
+              let port = mousePort,
+              let cartridge = mountedCartridge else {
+            mouseResetRecommendation = nil
+            return
+        }
+
+        mouseResetRecommendation = MouseResetRecommendation(
+            port: port,
+            cartridgeTitle: cartridge.title
+        )
     }
 
     private func syncJoypadMasks() {
@@ -920,6 +964,7 @@ final class EmulatorModel: ObservableObject {
 
     private func refreshPhysicalMice() {
         let mice = GCMouse.mice()
+        hasPhysicalMouse = !mice.isEmpty
         let connectedIDs = Set(mice.map(ObjectIdentifier.init))
         configuredMouseIDs.formIntersection(connectedIDs)
 
@@ -1048,6 +1093,7 @@ final class EmulatorModel: ObservableObject {
     private func clearMediaState(removeTemporaryFiles: Bool) {
         activeProgram = nil
         mountedCartridge = nil
+        mouseResetRecommendation = nil
         mountedTape = nil
         mountedDisks = [:]
         if removeTemporaryFiles {

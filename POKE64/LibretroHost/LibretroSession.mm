@@ -213,6 +213,27 @@ struct SessionImpl {
         return c64Port == current ? 0u : 1u;
     }
 
+    void applyControllerPortDevices() {
+        if (!coreHandle || !api.retro_set_controller_port_device) return;
+
+        // VICE-libretro maps frontend port 0 to the C64 joyport selected by
+        // vice_joyport. When a 1351 is enabled, that selected frontend port
+        // must be declared as a libretro mouse rather than a RetroPad.
+        const bool mouseEnabled = mousePort.load(std::memory_order_acquire) != 0;
+        api.retro_set_controller_port_device(
+            0,
+            mouseEnabled ? RETRO_DEVICE_MOUSE : RETRO_DEVICE_JOYPAD
+        );
+        api.retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
+
+        std::fprintf(
+            stderr,
+            "[POKE64/INFO] Input devices: port0=%s port1=joypad C64MousePort=%u\n",
+            mouseEnabled ? "mouse" : "joypad",
+            mousePort.load(std::memory_order_acquire)
+        );
+    }
+
     void updateVideoGeometry(const retro_game_geometry &geometry) {
         double aspectRatio = geometry.aspect_ratio;
         if (!(aspectRatio > 0.0) && geometry.base_height > 0) {
@@ -1699,8 +1720,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
         gSession = nullptr;
         return false;
     }
-    api.retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
-    api.retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
+    applyControllerPortDevices();
 
     retro_game_info game{};
     const retro_game_info *gamePointer = nullptr;
@@ -1970,6 +1990,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
     _impl->mousePort.store(selectedPort, std::memory_order_release);
     _impl->currentJoyport.store(selectedPort == 0 ? 1u : selectedPort, std::memory_order_release);
     _impl->clearInputState();
+    _impl->applyControllerPortDevices();
     _impl->variablesUpdated.store(true, std::memory_order_release);
 }
 

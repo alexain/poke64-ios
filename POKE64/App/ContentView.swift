@@ -51,6 +51,12 @@ struct ContentView: View {
                 }
             }
 
+            if emulator.externalMouseCaptureActive {
+                ExternalMouseCaptureShield()
+                    .ignoresSafeArea()
+                    .zIndex(90)
+            }
+
             if emulator.isStarting {
                 bootOverlay
                     .transition(.opacity)
@@ -614,6 +620,31 @@ private struct PortsConfigurationView: View {
                     }
                 }
             }
+            .alert(
+                "Restart cartridge for mouse?",
+                isPresented: Binding(
+                    get: { emulator.mouseResetRecommendation != nil },
+                    set: { presented in
+                        if !presented {
+                            emulator.dismissMouseResetRecommendation()
+                        }
+                    }
+                )
+            ) {
+                Button("Hard Reset") {
+                    emulator.hardResetForMouseDetection()
+                }
+                Button("Not Now", role: .cancel) {
+                    emulator.dismissMouseResetRecommendation()
+                }
+            } message: {
+                if let recommendation = emulator.mouseResetRecommendation {
+                    Text(
+                        "\(recommendation.cartridgeTitle) may detect the Commodore 1351 mouse only during startup. "
+                        + "Hard reset now with the mouse connected to Port \(recommendation.port)."
+                    )
+                }
+            }
         }
     }
 
@@ -639,7 +670,7 @@ private struct PortsConfigurationView: View {
             )
 
             assignmentButton(
-                title: "Commodore Mouse",
+                title: "Commodore 1351 Mouse",
                 systemImage: "computermouse",
                 assignment: .commodoreMouse,
                 selectedAssignment: assignment,
