@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.5 — 2026-08-06
+
+- Changed Settings to a stable full-screen presentation with an always-visible Done button.
+- Replaced the modal C64 keyboard with a docked Compact/Full keyboard that keeps the emulator display visible.
+- Added dynamic Shift and Commodore legends, including color labels for Commodore plus number combinations.
+- Changed Shift and Commodore to momentary touch modifiers.
+- Added persistent Shift Lock behavior, including shifted function keys.
+- Improved adaptive keyboard sizing and removed keyboard scrolling.
+
 ## 0.5.1 — 2026-08-06
 
 - Added media-specific actions shared by Open and Library: direct PRG execution, CRT insertion with reset, D64 insertion or autostart in Drive 8, and TAP/T64 insertion or autostart in the datasette.

@@ -74,46 +74,62 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            List(SettingsPanel.allCases) { panel in
-                Button {
-                    selection = panel
-                } label: {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(panel.title)
-                            Text(panel.summary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
+        VStack(spacing: 0) {
+            settingsHeader
+
+            Divider()
+
+            NavigationSplitView {
+                List(SettingsPanel.allCases) { panel in
+                    Button {
+                        selection = panel
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(panel.title)
+                                Text(panel.summary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        } icon: {
+                            Image(systemName: panel.icon)
                         }
-                    } icon: {
-                        Image(systemName: panel.icon)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .listRowBackground(
+                        selection == panel
+                            ? Color.accentColor.opacity(0.16)
+                            : Color.clear
+                    )
+                    .padding(.vertical, 3)
                 }
-                .buttonStyle(.plain)
-                .listRowBackground(
-                    selection == panel
-                        ? Color.accentColor.opacity(0.16)
-                        : Color.clear
-                )
-                .padding(.vertical, 3)
+                .navigationTitle("Settings")
+                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 340)
+            } detail: {
+                SettingsPanelDetail(panel: selection)
             }
-            .navigationTitle("Settings")
-            .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 340)
-        } detail: {
-            SettingsPanelDetail(panel: selection)
+            .navigationSplitViewStyle(.balanced)
         }
-        .navigationSplitViewStyle(.balanced)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Done") {
-                    dismiss()
-                }
+    }
+
+    private var settingsHeader: some View {
+        HStack(spacing: 14) {
+            Text("Settings")
+                .font(.headline)
+
+            Spacer()
+
+            Button("Done") {
+                dismiss()
             }
+            .fontWeight(.semibold)
         }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.bar)
     }
 }
 
