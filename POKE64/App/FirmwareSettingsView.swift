@@ -6,6 +6,8 @@ struct FirmwareSettingsView: View {
     @State private var pendingSlot: FirmwareSlot?
     @State private var showImporter = false
     @State private var errorMessage: String?
+    @State private var showOpenROMsConfirmation = false
+    @State private var isInstallingOpenROMs = false
 
     var body: some View {
         Form {
@@ -18,8 +20,76 @@ struct FirmwareSettingsView: View {
                         systemImage: FirmwareStore.isBootReady ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
                     )
                     .foregroundStyle(FirmwareStore.isBootReady ? .green : .orange)
+
+                    LabeledContent("Active profile", value: FirmwareStore.activeProfileName)
                 } header: {
                     Text("Firmware")
+                }
+
+                Section {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("MEGA65 OpenROMs")
+                                .font(.body.weight(.medium))
+                            Text("Open-source BASIC, KERNAL and character ROM replacements")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        if FirmwareStore.isOpenROMsInstalled {
+                            Label("Active", systemImage: "checkmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                        }
+                    }
+
+                    Text("OpenROMs is experimental and does not yet provide complete C64 compatibility. Installation requires an internet connection and replaces the active system ROM files.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Button {
+                        if FirmwareStore.hasInstalledSystemFirmware {
+                            showOpenROMsConfirmation = true
+                        } else {
+                            installOpenROMs()
+                        }
+                    } label: {
+                        HStack {
+                            if isInstallingOpenROMs {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Label(
+                                FirmwareStore.isOpenROMsInstalled ? "Reinstall OpenROMs" : "Install OpenROMs",
+                                systemImage: "arrow.down.circle"
+                            )
+                        }
+                    }
+                    .disabled(isInstallingOpenROMs)
+
+                    if FirmwareStore.canRestorePreviousFirmware {
+                        Button("Restore Previous Firmware") {
+                            do {
+                                try FirmwareStore.restorePreviousFirmware()
+                                refresh()
+                            } catch {
+                                errorMessage = error.localizedDescription
+                            }
+                        }
+                        .disabled(isInstallingOpenROMs)
+                    }
+
+                    Link(
+                        "OpenROMs project and license information",
+                        destination: URL(string: "https://github.com/MEGA65/open-roms")!
+                    )
+                    .font(.footnote)
+                } header: {
+                    Text("Open-source firmware")
+                } footer: {
+                    Text("POKE64 downloads the generic OpenROMs set pinned to upstream revision \(FirmwareStore.openROMsDisplayRevision). The three matching ROMs are installed together.")
                 }
 
                 Section("C64 system ROMs") {
@@ -29,11 +99,21 @@ struct FirmwareSettingsView: View {
                 }
 
                 Section {
+                    Label(
+                        "Each ROM slot is shared by every enabled drive using that model.",
+                        systemImage: "square.stack.3d.up"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                    firmwareRow(for: .drive1541)
                     firmwareRow(for: .drive1541II)
+                    firmwareRow(for: .drive1571)
+                    firmwareRow(for: .drive1581)
                 } header: {
-                    Text("Drive ROM")
+                    Text("Drive ROMs")
                 } footer: {
-                    Text("The drive ROM is optional. When installed, POKE64 enables VICE True Drive Emulation. A matching replacement ROM can be used together with a custom KERNAL such as JiffyDOS.")
+                    Text("Drive firmware is optional for the fast virtual backend. Import the ROM matching each model selected in Disk Drives before enabling True Drive Emulation. Units 8 and 9 cannot use different ROMs when configured with the same model. Compatible replacement ROMs such as JiffyDOS are accepted.")
                 }
 
                 Section("Storage") {
@@ -61,6 +141,14 @@ struct FirmwareSettingsView: View {
             } catch {
                 errorMessage = error.localizedDescription
             }
+        }
+        .alert("Install OpenROMs?", isPresented: $showOpenROMsConfirmation) {
+            Button("Install", role: .destructive) {
+                installOpenROMs()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("OpenROMs will replace the active BASIC, KERNAL and character ROMs. If the current system ROM set is complete, POKE64 will preserve it so it can be restored later.")
         }
         .alert("Firmware import failed", isPresented: Binding(
             get: { errorMessage != nil },
@@ -144,6 +232,26 @@ struct FirmwareSettingsView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private func installOpenROMs() {
+        guard !isInstallingOpenROMs else { return }
+        isInstallingOpenROMs = true
+
+        Task {
+            do {
+                try await FirmwareStore.installOpenROMs()
+                await MainActor.run {
+                    refresh()
+                    isInstallingOpenROMs = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    isInstallingOpenROMs = false
+                }
+            }
+        }
     }
 
     private func refresh() {

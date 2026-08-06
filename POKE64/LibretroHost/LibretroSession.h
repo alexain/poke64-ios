@@ -30,6 +30,8 @@ typedef NS_ENUM(NSInteger, C64KeyCode) {
 @interface LibretroSession : NSObject
 
 @property (nonatomic, weak, nullable) C64MetalView *videoView;
+@property (nonatomic, copy, nullable) void (^videoGeometryDidChange)(double aspectRatio);
+@property (nonatomic, copy, nullable) void (^driveLEDStateDidChange)(BOOL active);
 @property (nonatomic, copy, readonly, nullable) NSString *lastErrorMessage;
 
 - (BOOL)startWithoutContent;

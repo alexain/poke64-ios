@@ -3,12 +3,14 @@
 #import "LibretroMinimal.h"
 
 #import <AVFoundation/AVFoundation.h>
+#import <dispatch/dispatch.h>
 #import <dlfcn.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <climits>
 #include <cstdarg>
@@ -113,6 +115,13 @@ struct CoreAPI {
     int (*autostart_disk)(int, int, const char *, const char *, unsigned int, unsigned int) = nullptr;
     int (*autostart_tape)(const char *, const char *, unsigned int, unsigned int, unsigned int) = nullptr;
     int (*autostart_prg)(const char *, unsigned int) = nullptr;
+    int (*resources_set_int)(const char *, int) = nullptr;
+    int (*resources_get_int)(const char *, int *) = nullptr;
+    int (*resources_set_string)(const char *, const char *) = nullptr;
+    int (*iecrom_load_1541)(void) = nullptr;
+    int (*iecrom_load_1541ii)(void) = nullptr;
+    int (*iecrom_load_1571)(void) = nullptr;
+    int (*iecrom_load_1581)(void) = nullptr;
 };
 
 enum class MediaCommandType {
@@ -144,9 +153,17 @@ struct KeyEvent {
     unsigned key;
 };
 
+static bool storedDriveEnabled(unsigned int unit);
+static bool storedTrueDriveEmulationEnabled();
+static int storedDriveTypeResourceValue(unsigned int unit);
+static int storedDriveSoundVolumeResourceValue();
+static const char *storedDriveROMResourceName(unsigned int unit);
+static std::string storedDriveROMPath(unsigned int unit);
+
 struct SessionImpl {
     void *coreHandle = nullptr;
     CoreAPI api;
+    __weak LibretroSession *owner = nil;
     __weak C64MetalView *videoView = nil;
     std::atomic<bool> running{false};
     std::atomic<int> resetModeRequested{-1};
@@ -185,6 +202,7 @@ struct SessionImpl {
     std::mutex startupMutex;
     std::condition_variable startupCondition;
     bool firstRunCompleted = false;
+    std::atomic<bool> driveActivityLED{false};
 
     SessionImpl() {
         clearInputState();
@@ -193,6 +211,46 @@ struct SessionImpl {
     unsigned retroPortForC64Port(unsigned c64Port) const {
         const unsigned current = currentJoyport.load(std::memory_order_acquire);
         return c64Port == current ? 0u : 1u;
+    }
+
+    void updateVideoGeometry(const retro_game_geometry &geometry) {
+        double aspectRatio = geometry.aspect_ratio;
+        if (!(aspectRatio > 0.0) && geometry.base_height > 0) {
+            aspectRatio = static_cast<double>(geometry.base_width)
+                / static_cast<double>(geometry.base_height);
+        }
+        if (!std::isfinite(aspectRatio) || aspectRatio < 0.5 || aspectRatio > 3.0) {
+            return;
+        }
+
+        LibretroSession *session = owner;
+        void (^callback)(double) = session.videoGeometryDidChange;
+        if (!callback) return;
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            callback(aspectRatio);
+        });
+    }
+
+    void updateDriveLED(int state) {
+        const bool active = state != 0;
+        const bool previous = driveActivityLED.exchange(
+            active,
+            std::memory_order_acq_rel
+        );
+        if (previous == active) return;
+
+        LibretroSession *session = owner;
+        void (^callback)(BOOL) = session.driveLEDStateDidChange;
+        if (!callback) return;
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            callback(active);
+        });
+    }
+
+    void clearDriveLED() {
+        updateDriveLED(0);
     }
 
     void clearInputState() {
@@ -367,6 +425,27 @@ struct SessionImpl {
         api.autostart_prg = reinterpret_cast<int (*)(const char *, unsigned int)>(
             dlsym(coreHandle, "autostart_prg")
         );
+        api.resources_set_int = reinterpret_cast<int (*)(const char *, int)>(
+            dlsym(coreHandle, "resources_set_int")
+        );
+        api.resources_get_int = reinterpret_cast<int (*)(const char *, int *)>(
+            dlsym(coreHandle, "resources_get_int")
+        );
+        api.resources_set_string = reinterpret_cast<int (*)(const char *, const char *)>(
+            dlsym(coreHandle, "resources_set_string")
+        );
+        api.iecrom_load_1541 = reinterpret_cast<int (*)(void)>(
+            dlsym(coreHandle, "iecrom_load_1541")
+        );
+        api.iecrom_load_1541ii = reinterpret_cast<int (*)(void)>(
+            dlsym(coreHandle, "iecrom_load_1541ii")
+        );
+        api.iecrom_load_1571 = reinterpret_cast<int (*)(void)>(
+            dlsym(coreHandle, "iecrom_load_1571")
+        );
+        api.iecrom_load_1581 = reinterpret_cast<int (*)(void)>(
+            dlsym(coreHandle, "iecrom_load_1581")
+        );
 
         if (api.retro_api_version() != RETRO_API_VERSION) {
             error = "Incompatible libretro API version";
@@ -411,6 +490,204 @@ struct SessionImpl {
         }
     }
 
+    bool setRuntimeIntegerResource(
+        const char *name,
+        int value,
+        std::string &error
+    ) {
+        if (!api.resources_set_int) {
+            error = "The VICE core does not expose runtime resource updates";
+            return false;
+        }
+
+        int currentValue = 0;
+        if (api.resources_get_int &&
+            api.resources_get_int(name, &currentValue) == 0 &&
+            currentValue == value) {
+            return true;
+        }
+
+        if (api.resources_set_int(name, value) < 0) {
+            error = std::string("VICE could not set the runtime resource ") + name;
+            return false;
+        }
+        return true;
+    }
+
+    bool loadSelectedDriveROM(unsigned int unit, std::string &error) {
+        if (!api.resources_set_string) {
+            error = "The VICE core does not expose runtime drive-ROM configuration";
+            return false;
+        }
+
+        const char *resourceName = storedDriveROMResourceName(unit);
+        const std::string romPath = storedDriveROMPath(unit);
+        if (!resourceName || romPath.empty()) {
+            error = "The selected drive ROM is not available";
+            return false;
+        }
+
+        if (api.resources_set_string(resourceName, romPath.c_str()) < 0) {
+            error = std::string("VICE could not select the drive ROM at ") + romPath;
+            return false;
+        }
+
+        int result = -1;
+        switch (storedDriveTypeResourceValue(unit)) {
+            case 1541:
+                if (api.iecrom_load_1541) result = api.iecrom_load_1541();
+                break;
+            case 1542:
+                if (api.iecrom_load_1541ii) result = api.iecrom_load_1541ii();
+                break;
+            case 1571:
+                if (api.iecrom_load_1571) result = api.iecrom_load_1571();
+                break;
+            case 1581:
+                if (api.iecrom_load_1581) result = api.iecrom_load_1581();
+                break;
+            default:
+                break;
+        }
+
+        if (result < 0) {
+            error = std::string("VICE could not load the selected drive ROM at ") + romPath;
+            return false;
+        }
+        return true;
+    }
+
+    bool applyRuntimeDriveConfiguration(unsigned int unit, std::string &error) {
+        if (unit < 8 || unit > 9) {
+            return true;
+        }
+        if (!storedDriveEnabled(unit)) {
+            error = std::string("Drive ") + std::to_string(unit) + " is disabled";
+            return false;
+        }
+        if (!storedTrueDriveEmulationEnabled()) {
+            return true;
+        }
+
+        if (!api.resources_get_int) {
+            error = "The VICE core does not expose runtime drive-state inspection";
+            return false;
+        }
+
+        const int expectedDriveType = storedDriveTypeResourceValue(unit);
+        const std::string prefix = std::string("Drive") + std::to_string(unit);
+        const std::string typeResource = prefix + "Type";
+        int currentDriveType = 0;
+        if (api.resources_get_int(typeResource.c_str(), &currentDriveType) < 0) {
+            error = std::string("VICE could not read the Drive ")
+                + std::to_string(unit) + " model";
+            return false;
+        }
+
+        if (currentDriveType != expectedDriveType) {
+            if (!loadSelectedDriveROM(unit, error)) {
+                return false;
+            }
+            if (!setRuntimeIntegerResource(
+                    typeResource.c_str(),
+                    expectedDriveType,
+                    error
+                )) {
+                return false;
+            }
+        }
+
+        const std::string trueDriveResource = prefix + "TrueEmulation";
+        const std::string trapResource = std::string("TrapDevice") + std::to_string(unit);
+        const std::string filesystemResource = std::string("FileSystemDevice") + std::to_string(unit);
+        const std::pair<std::string, int> resources[] = {
+            {trueDriveResource, 1},
+            {trapResource, 0},
+            {filesystemResource, 0}
+        };
+
+        for (const auto &resource : resources) {
+            if (!setRuntimeIntegerResource(
+                    resource.first.c_str(),
+                    resource.second,
+                    error
+                )) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool applyRuntimeDriveSoundConfiguration(std::string &error) {
+        const int volume = storedDriveSoundVolumeResourceValue();
+        const bool enabled = storedTrueDriveEmulationEnabled()
+            && ((storedDriveEnabled(8) && storedDriveTypeResourceValue(8) != 1581)
+                || (storedDriveEnabled(9) && storedDriveTypeResourceValue(9) != 1581))
+            && volume > 0;
+
+        if (!setRuntimeIntegerResource(
+                "DriveSoundEmulation",
+                enabled ? 1 : 0,
+                error
+            )) {
+            return false;
+        }
+        if (!setRuntimeIntegerResource(
+                "DriveSoundEmulationVolume",
+                enabled ? volume : 0,
+                error
+            )) {
+            return false;
+        }
+
+        int actualEnabled = 0;
+        int actualVolume = 0;
+        if (api.resources_get_int) {
+            api.resources_get_int("DriveSoundEmulation", &actualEnabled);
+            api.resources_get_int("DriveSoundEmulationVolume", &actualVolume);
+        }
+        std::fprintf(
+            stderr,
+            "[POKE64/INFO] Drive sound: requested=%d%% enabled=%d volume=%d\n",
+            volume / 20,
+            actualEnabled,
+            actualVolume
+        );
+        return true;
+    }
+
+    bool finalizeDiskAttachment(unsigned int unit, std::string &error) {
+        if (!storedTrueDriveEmulationEnabled()) {
+            return true;
+        }
+
+        const std::string typeResource = std::string("Drive")
+            + std::to_string(unit) + "Type";
+        int driveType = 0;
+        if (!api.resources_get_int ||
+            api.resources_get_int(typeResource.c_str(), &driveType) < 0) {
+            error = std::string("VICE could not verify the Drive ")
+                + std::to_string(unit) + " model after insertion";
+            return false;
+        }
+
+        if (driveType != storedDriveTypeResourceValue(unit)) {
+            error = std::string("VICE inserted the disk but the selected Drive ")
+                + std::to_string(unit) + " hardware is not active";
+            return false;
+        }
+
+        std::string soundError;
+        if (!applyRuntimeDriveSoundConfiguration(soundError)) {
+            std::fprintf(
+                stderr,
+                "[POKE64/WARN] %s\n",
+                soundError.c_str()
+            );
+        }
+        return true;
+    }
+
     bool executeMediaCommand(const std::shared_ptr<MediaCommand> &command, std::string &error) {
         constexpr unsigned int kTapePort = 1;
         constexpr unsigned int kAutostartModeRun = 0;
@@ -422,6 +699,12 @@ struct SessionImpl {
                     error = "The VICE core does not expose runtime disk attachment";
                     return false;
                 }
+                if (!applyRuntimeDriveConfiguration(
+                        static_cast<unsigned int>(command->unit),
+                        error
+                    )) {
+                    return false;
+                }
                 if (api.file_system_attach_disk(
                         static_cast<unsigned int>(command->unit),
                         0,
@@ -430,11 +713,20 @@ struct SessionImpl {
                     error = "VICE could not insert the selected disk";
                     return false;
                 }
-                return true;
+                return finalizeDiskAttachment(
+                    static_cast<unsigned int>(command->unit),
+                    error
+                );
 
             case MediaCommandType::AutostartDisk:
                 if (!api.autostart_disk) {
                     error = "The VICE core does not expose disk autostart";
+                    return false;
+                }
+                if (!applyRuntimeDriveConfiguration(
+                        static_cast<unsigned int>(command->unit),
+                        error
+                    )) {
                     return false;
                 }
                 if (api.autostart_disk(
@@ -448,7 +740,10 @@ struct SessionImpl {
                     error = "VICE could not autostart the selected disk";
                     return false;
                 }
-                return true;
+                return finalizeDiskAttachment(
+                    static_cast<unsigned int>(command->unit),
+                    error
+                );
 
             case MediaCommandType::AttachTape:
                 if (!api.tape_image_attach) {
@@ -511,14 +806,16 @@ struct SessionImpl {
                     return false;
                 }
                 api.file_system_detach_disk(static_cast<unsigned int>(command->unit), 0);
-                // VICE restores its host-filesystem backend after detaching an
-                // image. Remove those serial hooks so an empty drive reports
-                // DEVICE NOT PRESENT instead of listing the app sandbox.
-                if (api.machine_bus_device_detach) {
+                // In fast virtual-drive mode VICE restores its host-filesystem
+                // backend after detaching an image. Remove those serial hooks so
+                // an empty unit reports DEVICE NOT PRESENT. With True Drive
+                // Emulation the hardware drive remains present without a disk.
+                if (!storedTrueDriveEmulationEnabled() && api.machine_bus_device_detach) {
                     api.machine_bus_device_detach(
                         static_cast<unsigned int>(command->unit)
                     );
                 }
+                clearDriveLED();
                 return true;
 
             case MediaCommandType::EjectTape:
@@ -548,7 +845,7 @@ struct SessionImpl {
                     return false;
                 }
                 api.file_system_detach_disk_all();
-                if (api.machine_bus_device_detach) {
+                if (!storedTrueDriveEmulationEnabled() && api.machine_bus_device_detach) {
                     for (unsigned int unit = 8; unit <= 11; ++unit) {
                         api.machine_bus_device_detach(unit);
                     }
@@ -646,6 +943,7 @@ struct SessionImpl {
         if (coreThread.joinable() && coreThread.get_id() != std::this_thread::get_id()) {
             coreThread.join();
         }
+        clearDriveLED();
         stopAudio();
     }
 
@@ -726,6 +1024,258 @@ struct SessionImpl {
 
 static SessionImpl *gSession = nullptr;
 
+static NSString *validatedDefaultString(
+    NSString *key,
+    NSArray<NSString *> *allowedValues,
+    NSString *fallback
+) {
+    NSString *stored = [NSUserDefaults.standardUserDefaults stringForKey:key];
+    return [allowedValues containsObject:stored] ? stored : fallback;
+}
+
+static NSInteger validatedDefaultInteger(
+    NSString *key,
+    NSInteger fallback,
+    NSInteger minimum,
+    NSInteger maximum
+) {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![defaults objectForKey:key]) return fallback;
+    return std::clamp([defaults integerForKey:key], minimum, maximum);
+}
+
+static void assignCoreOption(
+    SessionImpl *session,
+    const char *coreKey,
+    NSString *value
+) {
+    auto found = session->variables.find(coreKey);
+    if (found == session->variables.end() || !value) return;
+    found->second = value.UTF8String;
+}
+
+static void applyStoredVideoOptions(SessionImpl *session) {
+    assignCoreOption(
+        session,
+        "vice_aspect_ratio",
+        validatedDefaultString(
+            @"poke64.video.aspectRatio",
+            @[@"auto", @"pal", @"ntsc", @"raw"],
+            @"auto"
+        )
+    );
+    assignCoreOption(
+        session,
+        "vice_crop",
+        validatedDefaultString(
+            @"poke64.video.crop",
+            @[@"disabled", @"small", @"medium", @"maximum", @"auto"],
+            @"disabled"
+        )
+    );
+    assignCoreOption(
+        session,
+        "vice_crop_delay",
+        [NSUserDefaults.standardUserDefaults objectForKey:@"poke64.video.cropDelay"] == nil
+            || [NSUserDefaults.standardUserDefaults boolForKey:@"poke64.video.cropDelay"]
+            ? @"enabled"
+            : @"disabled"
+    );
+    assignCoreOption(
+        session,
+        "vice_external_palette",
+        validatedDefaultString(
+            @"poke64.video.palette",
+            @[
+                @"default", @"vice", @"colodore", @"community-colors",
+                @"pepto-pal", @"pepto-ntsc", @"the64", @"rgb"
+            ],
+            @"default"
+        )
+    );
+    assignCoreOption(
+        session,
+        "vice_vicii_filter",
+        validatedDefaultString(
+            @"poke64.video.filter",
+            @[
+                @"disabled", @"enabled_noblur", @"enabled_lowblur",
+                @"enabled_medblur", @"enabled"
+            ],
+            @"disabled"
+        )
+    );
+
+    const struct {
+        NSString *defaultsKey;
+        const char *coreKey;
+        NSInteger fallback;
+        NSInteger minimum;
+        NSInteger maximum;
+    } integerOptions[] = {
+        {@"poke64.video.brightness", "vice_vicii_color_brightness", 1000, 20, 2000},
+        {@"poke64.video.contrast", "vice_vicii_color_contrast", 1000, 20, 2000},
+        {@"poke64.video.saturation", "vice_vicii_color_saturation", 1000, 20, 2000},
+        {@"poke64.video.gamma", "vice_vicii_color_gamma", 2800, 1000, 4000},
+        {@"poke64.video.tint", "vice_vicii_color_tint", 1000, 20, 2000}
+    };
+
+    for (const auto &option : integerOptions) {
+        const NSInteger value = validatedDefaultInteger(
+            option.defaultsKey,
+            option.fallback,
+            option.minimum,
+            option.maximum
+        );
+        assignCoreOption(
+            session,
+            option.coreKey,
+            [NSString stringWithFormat:@"%ld", static_cast<long>(value)]
+        );
+    }
+}
+
+static bool storedDriveEnabled(unsigned int unit) {
+    if (unit == 8) return true;
+    if (unit != 9) return false;
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    return [defaults objectForKey:@"poke64.drive9.enabled"] != nil
+        ? [defaults boolForKey:@"poke64.drive9.enabled"]
+        : false;
+}
+
+static bool storedTrueDriveEmulationEnabled() {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    return [defaults objectForKey:@"poke64.drive.trueEmulation"] != nil
+        ? [defaults boolForKey:@"poke64.drive.trueEmulation"]
+        : false;
+}
+
+static NSString *storedDriveModel(unsigned int unit) {
+    NSString *key = unit == 9 ? @"poke64.drive9.model" : @"poke64.drive.model";
+    return validatedDefaultString(
+        key,
+        @[@"1541", @"1541-II", @"1571", @"1581"],
+        @"1541-II"
+    );
+}
+
+static int storedDriveTypeResourceValue(unsigned int unit) {
+    NSString *model = storedDriveModel(unit);
+    if ([model isEqualToString:@"1541"]) return 1541;
+    if ([model isEqualToString:@"1571"]) return 1571;
+    if ([model isEqualToString:@"1581"]) return 1581;
+    return 1542;
+}
+
+static const char *storedDriveROMResourceName(unsigned int unit) {
+    switch (storedDriveTypeResourceValue(unit)) {
+        case 1541: return "DosName1541";
+        case 1571: return "DosName1571";
+        case 1581: return "DosName1581";
+        default: return "DosName1541ii";
+    }
+}
+
+static int storedDriveSoundVolumeResourceValue() {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSInteger level = [defaults objectForKey:@"poke64.drive.soundLevel"] == nil
+        ? 20
+        : [defaults integerForKey:@"poke64.drive.soundLevel"];
+    level = std::clamp(
+        static_cast<NSInteger>((level + 2) / 5 * 5),
+        static_cast<NSInteger>(0),
+        static_cast<NSInteger>(100)
+    );
+    return static_cast<int>(level * 20);
+}
+
+static NSString *storedDriveROMFilename(unsigned int unit) {
+    switch (storedDriveTypeResourceValue(unit)) {
+        case 1541: return @"poke64-dos1541.bin";
+        case 1571: return @"poke64-dos1571.bin";
+        case 1581: return @"poke64-dos1581.bin";
+        default: return @"poke64-dos1541ii.bin";
+    }
+}
+
+static std::string storedDriveROMPath(unsigned int unit) {
+    NSFileManager *manager = NSFileManager.defaultManager;
+    NSURL *base = [manager URLForDirectory:NSApplicationSupportDirectory
+                                  inDomain:NSUserDomainMask
+                         appropriateForURL:nil
+                                    create:YES
+                                     error:nil];
+    NSURL *url = [[[[base URLByAppendingPathComponent:@"System" isDirectory:YES]
+        URLByAppendingPathComponent:@"vice" isDirectory:YES]
+        URLByAppendingPathComponent:@"POKE64" isDirectory:YES]
+        URLByAppendingPathComponent:@"Firmware" isDirectory:YES];
+    url = [url URLByAppendingPathComponent:storedDriveROMFilename(unit) isDirectory:NO];
+
+    NSDictionary<NSURLResourceKey, id> *values = [url resourceValuesForKeys:@[
+        NSURLIsRegularFileKey,
+        NSURLFileSizeKey
+    ] error:nil];
+    if (![values[NSURLIsRegularFileKey] boolValue]) {
+        return {};
+    }
+
+    const long long expectedSize =
+        storedDriveTypeResourceValue(unit) == 1571 || storedDriveTypeResourceValue(unit) == 1581
+            ? 32768
+            : 16384;
+    if ([values[NSURLFileSizeKey] longLongValue] != expectedSize) {
+        return {};
+    }
+    return std::string(url.fileSystemRepresentation);
+}
+
+static void applyStoredDriveOptions(SessionImpl *session) {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    const bool trueDrive = storedTrueDriveEmulationEnabled();
+
+    assignCoreOption(
+        session,
+        "vice_drive_true_emulation",
+        trueDrive ? @"enabled" : @"disabled"
+    );
+    assignCoreOption(
+        session,
+        "vice_virtual_device_traps",
+        trueDrive ? @"disabled" : @"enabled"
+    );
+    assignCoreOption(
+        session,
+        "vice_floppy_write_protection",
+        [defaults objectForKey:@"poke64.drive.writeProtection"] != nil
+            && [defaults boolForKey:@"poke64.drive.writeProtection"]
+            ? @"enabled"
+            : @"disabled"
+    );
+
+    NSInteger soundLevel = validatedDefaultInteger(
+        @"poke64.drive.soundLevel",
+        20,
+        0,
+        100
+    );
+    soundLevel = std::clamp(
+        static_cast<NSInteger>((soundLevel + 2) / 5 * 5),
+        static_cast<NSInteger>(0),
+        static_cast<NSInteger>(100)
+    );
+    const bool supportsSound =
+        (storedDriveEnabled(8) && storedDriveTypeResourceValue(8) != 1581)
+        || (storedDriveEnabled(9) && storedDriveTypeResourceValue(9) != 1581);
+    assignCoreOption(
+        session,
+        "vice_drive_sound_emulation",
+        !trueDrive || !supportsSound || soundLevel == 0
+            ? @"disabled"
+            : [NSString stringWithFormat:@"%ld%%", static_cast<long>(soundLevel)]
+    );
+}
+
 static void frontendLog(enum retro_log_level level, const char *format, ...) {
     const char *prefix = "INFO";
     if (level == RETRO_LOG_DEBUG) prefix = "DEBUG";
@@ -741,6 +1291,87 @@ static void frontendLog(enum retro_log_level level, const char *format, ...) {
     std::fprintf(stderr, "[VICE/%s] %s", prefix, buffer);
     if (gSession) {
         gSession->recordCoreMessage(buffer, level == RETRO_LOG_WARN || level == RETRO_LOG_ERROR);
+    }
+}
+
+static void applyStoredAudioOptions(SessionImpl *session) {
+    assignCoreOption(
+        session,
+        "vice_sid_engine",
+        validatedDefaultString(
+            @"poke64.audio.sidEngine",
+            @[@"FastSID", @"ReSID", @"ReSID-FP"],
+            @"ReSID"
+        )
+    );
+    assignCoreOption(
+        session,
+        "vice_sid_model",
+        validatedDefaultString(
+            @"poke64.audio.sidModel",
+            @[@"default", @"6581", @"8580", @"8580RD"],
+            @"default"
+        )
+    );
+    assignCoreOption(
+        session,
+        "vice_resid_sampling",
+        validatedDefaultString(
+            @"poke64.audio.residSampling",
+            @[@"fast", @"interpolation", @"fast resampling", @"resampling"],
+            @"resampling"
+        )
+    );
+    assignCoreOption(
+        session,
+        "vice_sound_sample_rate",
+        validatedDefaultString(
+            @"poke64.audio.sampleRate",
+            @[@"44100", @"48000", @"96000"],
+            @"48000"
+        )
+    );
+
+    const NSInteger leakLevel = validatedDefaultInteger(
+        @"poke64.audio.leakLevel",
+        0,
+        0,
+        10
+    );
+    assignCoreOption(
+        session,
+        "vice_audio_leak_emulation",
+        leakLevel == 0
+            ? @"disabled"
+            : [NSString stringWithFormat:@"%ld", static_cast<long>(leakLevel)]
+    );
+
+    NSInteger datasetteSoundLevel = validatedDefaultInteger(
+        @"poke64.audio.datasetteSoundLevel",
+        0,
+        0,
+        100
+    );
+    datasetteSoundLevel = std::clamp(
+        static_cast<NSInteger>((datasetteSoundLevel + 2) / 5 * 5),
+        static_cast<NSInteger>(0),
+        static_cast<NSInteger>(100)
+    );
+    assignCoreOption(
+        session,
+        "vice_datasette_sound",
+        datasetteSoundLevel == 0
+            ? @"disabled"
+            : [NSString stringWithFormat:@"%ld%%", static_cast<long>(datasetteSoundLevel)]
+    );
+}
+
+
+static void ledStateCallback(int led, int state) {
+    // VICE-libretro LED mapping: 0 = machine power, 1 = floppy,
+    // 2 = datasette. VICE exposes a single aggregate floppy activity LED.
+    if (gSession && led == 1) {
+        gSession->updateDriveLED(state);
     }
 }
 
@@ -807,14 +1438,25 @@ static bool environmentCallback(unsigned command, void *data) {
             }
 
             // POKE64 uses a generated system/vice/vicerc for user-imported
-            // firmware. Keep drive behavior aligned with the temporary
-            // compatibility mode used by FirmwareStore: virtual-device traps
-            // enabled, True Drive Emulation disabled. This prevents the core's
-            // defaults from overriding vicerc and leaving device 8 unavailable.
+            // firmware and applies the matching libretro options here so the
+            // core cannot replace the selected drive backend with defaults.
             session->variables["vice_read_vicerc"] = "enabled";
-            session->variables["vice_drive_true_emulation"] = "disabled";
-            session->variables["vice_virtual_device_traps"] = "enabled";
-            session->variables["vice_drive_sound_emulation"] = "disabled";
+
+            NSString *storedModel = [NSUserDefaults.standardUserDefaults
+                stringForKey:@"poke64.machineModel"];
+            static NSSet<NSString *> *supportedModels = [NSSet setWithArray:@[
+                @"C64 PAL",
+                @"C64 NTSC",
+                @"C64C PAL",
+                @"C64C NTSC"
+            ]];
+            NSString *selectedModel = [supportedModels containsObject:storedModel]
+                ? storedModel
+                : @"C64 PAL";
+            session->variables["vice_c64_model"] = selectedModel.UTF8String;
+            applyStoredVideoOptions(session);
+            applyStoredAudioOptions(session);
+            applyStoredDriveOptions(session);
             return true;
         }
 
@@ -888,11 +1530,19 @@ static bool environmentCallback(unsigned command, void *data) {
             if (info) {
                 session->fps = info->timing.fps;
                 session->sampleRate = info->timing.sample_rate;
+                session->updateVideoGeometry(info->geometry);
             }
             return true;
         }
 
-        case RETRO_ENVIRONMENT_SET_GEOMETRY:
+        case RETRO_ENVIRONMENT_SET_GEOMETRY: {
+            const retro_game_geometry *geometry = static_cast<const retro_game_geometry *>(data);
+            if (geometry) {
+                session->updateVideoGeometry(*geometry);
+            }
+            return true;
+        }
+
         case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS:
         case RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL:
         case RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME:
@@ -926,7 +1576,14 @@ static bool environmentCallback(unsigned command, void *data) {
             *static_cast<const char **>(data) = nullptr;
             return true;
 
-        case RETRO_ENVIRONMENT_GET_LED_INTERFACE:
+        case RETRO_ENVIRONMENT_GET_LED_INTERFACE: {
+            if (!data) return true;
+            retro_led_interface *interface = static_cast<retro_led_interface *>(data);
+            interface->set_led_state = ledStateCallback;
+            std::fprintf(stderr, "[POKE64/INFO] Libretro LED interface registered\n");
+            return true;
+        }
+
         default:
             return false;
     }
@@ -1073,6 +1730,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
     api.retro_get_system_av_info(&avInfo);
     fps = avInfo.timing.fps > 1.0 ? avInfo.timing.fps : 50.0;
     sampleRate = avInfo.timing.sample_rate > 1000.0 ? avInfo.timing.sample_rate : 48000.0;
+    updateVideoGeometry(avInfo.geometry);
     startAudio();
 
     running.store(true, std::memory_order_release);
@@ -1099,6 +1757,24 @@ bool SessionImpl::start(const char *path, std::string &error) {
             api.retro_run();
 
             if (firstIteration) {
+                if (storedTrueDriveEmulationEnabled()) {
+                    std::string driveError;
+                    if (!applyRuntimeDriveConfiguration(8, driveError)) {
+                        recordCoreMessage(driveError.c_str(), true);
+                    } else if (storedDriveEnabled(9)
+                               && !applyRuntimeDriveConfiguration(9, driveError)) {
+                        recordCoreMessage(driveError.c_str(), true);
+                    } else {
+                        std::string soundError;
+                        if (!applyRuntimeDriveSoundConfiguration(soundError)) {
+                            std::fprintf(
+                                stderr,
+                                "[POKE64/WARN] %s\n",
+                                soundError.c_str()
+                            );
+                        }
+                    }
+                }
                 {
                     std::lock_guard<std::mutex> lock(startupMutex);
                     firstRunCompleted = true;
@@ -1161,6 +1837,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
     self = [super init];
     if (self) {
         _impl = std::make_unique<SessionImpl>();
+        _impl->owner = self;
     }
     return self;
 }

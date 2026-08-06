@@ -11,6 +11,8 @@ struct ContentView: View {
     @State private var showLibrary = false
     @State private var showPorts = false
     @State private var showDevices = false
+    @State private var showNewDisk = false
+    @State private var newDiskTargetUnit = 8
     @State private var deviceImportTarget: DeviceImportTarget?
     @State private var mediaActionPrompt: MediaActionPromptState?
     @State private var showSettings = false
@@ -72,6 +74,20 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showLibrary) {
             LibraryView(emulator: emulator)
         }
+        .sheet(isPresented: $showNewDisk) {
+            NewDiskView(
+                targetDriveUnit: newDiskTargetUnit,
+                currentDriveModel: C64DriveModel.selected(for: newDiskTargetUnit),
+                defaultInsertAfterCreation: emulator.mountedDisks[newDiskTargetUnit] == nil
+            ) { title, format, initialization, insertAfterCreation in
+                createDiskFromDevices(
+                    title: title,
+                    format: format,
+                    initialization: initialization,
+                    insertAfterCreation: insertAfterCreation
+                )
+            }
+        }
         .fileImporter(
             isPresented: $showImporter,
             allowedContentTypes: [.data, .archive],
@@ -117,7 +133,11 @@ struct ContentView: View {
 
     private var emulatorArea: some View {
         GeometryReader { proxy in
-            let displaySize = Self.fittedC64Size(in: proxy.size)
+            let displaySize = Self.fittedC64Size(
+                in: proxy.size,
+                aspectRatio: emulator.videoAspectRatio
+            )
+            let sideMargin = max(0, (proxy.size.width - displaySize.width) / 2)
 
             ZStack {
                 Color.black
@@ -150,6 +170,22 @@ struct ContentView: View {
                 }
                 .frame(width: displaySize.width, height: displaySize.height)
                 .clipped()
+
+                if emulator.trueDriveEmulationConfigured, sideMargin >= 72 {
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        DriveStatusPanel(
+                            drive8PowerOn: emulator.drive8PowerLEDOn,
+                            drive9Enabled: emulator.drive9Configured,
+                            drive9PowerOn: emulator.drive9PowerLEDOn,
+                            activityOn: emulator.driveActivityLEDOn
+                        )
+                        .frame(width: sideMargin)
+                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -157,12 +193,17 @@ struct ContentView: View {
         .background(Color.black)
     }
 
-    private static func fittedC64Size(in availableSize: CGSize) -> CGSize {
-        guard availableSize.width > 0, availableSize.height > 0 else {
+    private static func fittedC64Size(
+        in availableSize: CGSize,
+        aspectRatio: CGFloat
+    ) -> CGSize {
+        guard availableSize.width > 0,
+              availableSize.height > 0,
+              aspectRatio.isFinite,
+              aspectRatio > 0 else {
             return .zero
         }
 
-        let aspectRatio: CGFloat = 4.0 / 3.0
         let widthFromHeight = availableSize.height * aspectRatio
 
         if widthFromHeight <= availableSize.width {
@@ -204,6 +245,9 @@ struct ContentView: View {
                 emulator: emulator,
                 onChooseMedia: { target in
                     chooseMedia(for: target)
+                },
+                onCreateDisk: { unit in
+                    createDiskFromDevices(unit: unit)
                 }
             )
             .frame(
@@ -266,6 +310,8 @@ struct ContentView: View {
             } label: {
                 DevicesToolbarLabel(
                     drive8Mounted: emulator.mountedDisks[8] != nil,
+                    drive9Enabled: emulator.drive9Configured,
+                    drive9Mounted: emulator.mountedDisks[9] != nil,
                     tapeMounted: emulator.mountedTape != nil,
                     cartridgeMounted: emulator.mountedCartridge != nil
                 )
@@ -310,6 +356,41 @@ struct ContentView: View {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             showImporter = true
+        }
+    }
+
+    private func createDiskFromDevices(unit: Int) {
+        newDiskTargetUnit = unit
+        showDevices = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            showNewDisk = true
+        }
+    }
+
+    private func createDiskFromDevices(
+        title: String,
+        format: BlankDiskImageFormat,
+        initialization: BlankDiskInitialization,
+        insertAfterCreation: Bool
+    ) {
+        do {
+            let item = try emulator.library.createBlankDisk(
+                title: title,
+                format: format,
+                initialization: initialization
+            )
+            emulator.reportCreatedDisk(item)
+            guard insertAfterCreation else { return }
+            let originalRequest = try emulator.actionRequest(for: item)
+            let request = MediaActionRequest(
+                media: originalRequest.media,
+                actions: [.insertDisk(newDiskTargetUnit)]
+            )
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                beginMediaRequest(request)
+            }
+        } catch {
+            emulator.presentMediaError(error)
         }
     }
 
@@ -440,9 +521,9 @@ private enum DeviceImportTarget {
 
         switch self {
         case .drive(let unit):
-            guard media.mediaType == .d64 else {
+            guard BlankDiskImageFormat(mediaType: media.mediaType) != nil else {
                 throw DeviceMediaSelectionError.unsupported(
-                    expected: "a D64 disk image",
+                    expected: "a D64, D71 or D81 disk image",
                     destination: "Drive \(unit)"
                 )
             }
@@ -628,6 +709,8 @@ private struct PortsConfigurationView: View {
 
 private struct DevicesToolbarLabel: View {
     let drive8Mounted: Bool
+    let drive9Enabled: Bool
+    let drive9Mounted: Bool
     let tapeMounted: Bool
     let cartridgeMounted: Bool
 
@@ -650,20 +733,27 @@ private struct DevicesToolbarLabel: View {
     }
 
     private var summary: String {
-        "8 \(drive8Mounted ? "Disk" : "Empty") · T \(tapeMounted ? "Tape" : "Empty") · C \(cartridgeMounted ? "CRT" : "Empty")"
+        let drive9 = drive9Enabled
+            ? " · 9 \(drive9Mounted ? "Disk" : "Empty")"
+            : ""
+        return "8 \(drive8Mounted ? "Disk" : "Empty")\(drive9) · T \(tapeMounted ? "Tape" : "Empty") · C \(cartridgeMounted ? "CRT" : "Empty")"
     }
 
     private var accessibilitySummary: String {
-        let drive = drive8Mounted ? "Drive 8 loaded" : "Drive 8 empty"
+        let drive8 = drive8Mounted ? "Drive 8 loaded" : "Drive 8 empty"
+        let drive9 = drive9Enabled
+            ? (drive9Mounted ? ", Drive 9 loaded" : ", Drive 9 empty")
+            : ""
         let tape = tapeMounted ? "tape loaded" : "tape empty"
         let cartridge = cartridgeMounted ? "cartridge loaded" : "cartridge empty"
-        return "Devices, \(drive), \(tape), \(cartridge)"
+        return "Devices, \(drive8)\(drive9), \(tape), \(cartridge)"
     }
 }
 
 private struct DevicesConfigurationView: View {
     @ObservedObject var emulator: EmulatorModel
     let onChooseMedia: (DeviceImportTarget) -> Void
+    let onCreateDisk: (Int) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var errorMessage: String?
@@ -671,7 +761,9 @@ private struct DevicesConfigurationView: View {
     var body: some View {
         NavigationStack {
             Form {
-                driveSection(unit: 8)
+                ForEach(emulator.availableDriveUnits, id: \.self) { unit in
+                    driveSection(unit: unit)
+                }
                 tapeSection
                 cartridgeSection
 
@@ -720,6 +812,13 @@ private struct DevicesConfigurationView: View {
                 emptyTitle: "No disk inserted",
                 systemImage: "externaldrive.fill"
             )
+
+            Button {
+                dismiss()
+                onCreateDisk(unit)
+            } label: {
+                Label("Create New Disk…", systemImage: "plus.square.on.square")
+            }
 
             if let media {
                 Button {
@@ -879,6 +978,74 @@ private struct DevicesConfigurationView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+private struct DriveStatusPanel: View {
+    let drive8PowerOn: Bool
+    let drive9Enabled: Bool
+    let drive9PowerOn: Bool
+    let activityOn: Bool
+
+    var body: some View {
+        VStack(spacing: 9) {
+            Text(drive9Enabled ? "DRIVES" : "DRIVE 8")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.55))
+
+            if drive9Enabled {
+                powerIndicator(unit: 8, isOn: drive8PowerOn)
+                powerIndicator(unit: 9, isOn: drive9PowerOn)
+                indicator(title: "ACT", isOn: activityOn, activeColor: .red)
+            } else {
+                indicator(title: "PWR", isOn: drive8PowerOn, activeColor: .green)
+                indicator(title: "ACT", isOn: activityOn, activeColor: .red)
+            }
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 8)
+        .background(
+            .white.opacity(0.045),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        if drive9Enabled {
+            return "Drive 8 power \(drive8PowerOn ? "on" : "off"), Drive 9 power \(drive9PowerOn ? "on" : "off"), disk activity \(activityOn ? "active" : "idle")"
+        }
+        return "Drive 8, power \(drive8PowerOn ? "on" : "off"), activity \(activityOn ? "active" : "idle")"
+    }
+
+    private func powerIndicator(unit: Int, isOn: Bool) -> some View {
+        indicator(title: "\(unit) PWR", isOn: isOn, activeColor: .green)
+    }
+
+    private func indicator(
+        title: String,
+        isOn: Bool,
+        activeColor: Color
+    ) -> some View {
+        VStack(spacing: 4) {
+            Circle()
+                .fill(isOn ? activeColor : activeColor.opacity(0.16))
+                .frame(width: 13, height: 13)
+                .shadow(
+                    color: isOn ? activeColor.opacity(0.85) : .clear,
+                    radius: isOn ? 5 : 0
+                )
+
+            Text(title)
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.5))
+        }
+        .animation(.easeOut(duration: 0.08), value: isOn)
     }
 }
 
@@ -1090,7 +1257,7 @@ private struct MediaActionPromptModifier: ViewModifier {
     private var chooseDialogMessage: String? {
         guard let prompt, case .choose = prompt.mode else { return nil }
         switch prompt.request.media.mediaType {
-        case .d64:
+        case .d64, .d71, .d81:
             return "Choose whether to insert the disk without resetting the C64 or autostart it."
         case .tap, .t64:
             return "Choose whether to insert the tape without resetting the C64 or autostart it."

@@ -40,6 +40,7 @@ struct LibraryView: View {
     @State private var selectedItemID: UUID?
     @State private var searchText = ""
     @State private var showImporter = false
+    @State private var showNewDisk = false
     @State private var errorMessage: String?
     @State private var deletionCandidate: LibraryItem?
     @State private var mediaActionPrompt: MediaActionPromptState?
@@ -69,6 +70,20 @@ struct LibraryView: View {
             emulator: emulator,
             onComplete: { dismiss() }
         )
+        .sheet(isPresented: $showNewDisk) {
+            NewDiskView(
+                targetDriveUnit: 8,
+                currentDriveModel: C64DriveModel.selected(for: 8),
+                defaultInsertAfterCreation: false
+            ) { title, format, initialization, insertAfterCreation in
+                createBlankDisk(
+                    title: title,
+                    format: format,
+                    initialization: initialization,
+                    insertAfterCreation: insertAfterCreation
+                )
+            }
+        }
         .fileImporter(
             isPresented: $showImporter,
             allowedContentTypes: [.data],
@@ -119,6 +134,12 @@ struct LibraryView: View {
                 .font(.headline)
 
             Spacer()
+
+            Button {
+                showNewDisk = true
+            } label: {
+                Label("New Disk", systemImage: "plus")
+            }
 
             Button {
                 showImporter = true
@@ -374,7 +395,7 @@ struct LibraryView: View {
 
         switch filter {
         case .all:
-            return "Import a D64, PRG, CRT, TAP or T64 file to begin."
+            return "Import media or create a blank D64, D71 or D81 disk to begin."
         case .favorites:
             return "Mark library items as favorites to collect them here."
         case .recent:
@@ -398,6 +419,34 @@ struct LibraryView: View {
             let item = try emulator.addTemporaryMediaToLibrary(id: media.id)
             filter = .all
             selectedItemID = item.id
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func createBlankDisk(
+        title: String,
+        format: BlankDiskImageFormat,
+        initialization: BlankDiskInitialization,
+        insertAfterCreation: Bool
+    ) {
+        do {
+            let item = try library.createBlankDisk(
+                title: title,
+                format: format,
+                initialization: initialization
+            )
+            filter = .all
+            searchText = ""
+            selectedItemID = item.id
+
+            guard insertAfterCreation else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                beginMediaRequest(
+                    for: item,
+                    preferredAction: .insertDisk(8)
+                )
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -509,6 +558,153 @@ struct LibraryView: View {
     }
 }
 
+struct NewDiskView: View {
+    let targetDriveUnit: Int
+    let currentDriveModel: C64DriveModel
+    let defaultInsertAfterCreation: Bool
+    let onCreate: (
+        String,
+        BlankDiskImageFormat,
+        BlankDiskInitialization,
+        Bool
+    ) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = "New Disk"
+    @State private var formatChoice: BlankDiskFormatChoice = .automatic
+    @State private var initialization: BlankDiskInitialization = .formatted
+    @State private var insertAfterCreation: Bool
+
+    init(
+        targetDriveUnit: Int = 8,
+        currentDriveModel: C64DriveModel,
+        defaultInsertAfterCreation: Bool,
+        onCreate: @escaping (
+            String,
+            BlankDiskImageFormat,
+            BlankDiskInitialization,
+            Bool
+        ) -> Void
+    ) {
+        self.targetDriveUnit = targetDriveUnit
+        self.currentDriveModel = currentDriveModel
+        self.defaultInsertAfterCreation = defaultInsertAfterCreation
+        self.onCreate = onCreate
+        _insertAfterCreation = State(initialValue: defaultInsertAfterCreation)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Disk") {
+                    TextField("Name", text: $title)
+                        .textInputAutocapitalization(.words)
+                        .submitLabel(.done)
+
+                    Picker("Image format", selection: $formatChoice) {
+                        ForEach(BlankDiskFormatChoice.allCases) { choice in
+                            Text(choice.title(for: currentDriveModel, unit: targetDriveUnit))
+                                .tag(choice)
+                        }
+                    }
+
+                    LabeledContent {
+                        Text(resolvedFormat.geometryDescription)
+                    } label: {
+                        Text(resolvedFormat.displayName)
+                    }
+                }
+
+                Section("Initial state") {
+                    Picker("Initial state", selection: $initialization) {
+                        ForEach(BlankDiskInitialization.allCases) { option in
+                            Text(option.title)
+                                .tag(option)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text(initialization.description)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Toggle(
+                        "Insert into Drive \(targetDriveUnit)",
+                        isOn: $insertAfterCreation
+                    )
+                    .disabled(!formatIsCompatible)
+
+                    if !formatIsCompatible {
+                        Label {
+                            Text(
+                                "\(resolvedFormat.displayName) requires \(resolvedFormat.requiredDriveDescription). "
+                                + "Drive \(targetDriveUnit) is currently \(currentDriveModel.title). The image can still be created for later use."
+                            )
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                    } else {
+                        Text(
+                            insertAfterCreation
+                                ? "The image is added to the Library and then inserted into Drive \(targetDriveUnit)."
+                                : "The image is added to the Library without changing the mounted disk."
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("After creation")
+                } footer: {
+                    if initialization == .formatted {
+                        Text("The Commodore disk label uses the first 16 supported characters of the name. The library title is kept in full.")
+                    }
+                }
+            }
+            .navigationTitle("Create New Disk")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create") {
+                        onCreate(
+                            title,
+                            resolvedFormat,
+                            initialization,
+                            insertAfterCreation && formatIsCompatible
+                        )
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .onChange(of: formatChoice) { _, _ in
+            if !formatIsCompatible {
+                insertAfterCreation = false
+            }
+        }
+    }
+
+    private var resolvedFormat: BlankDiskImageFormat {
+        formatChoice.resolvedFormat(for: currentDriveModel)
+    }
+
+    private var formatIsCompatible: Bool {
+        resolvedFormat.isCompatible(with: currentDriveModel)
+    }
+}
+
 private struct LibraryRow: View {
     let item: LibraryItem
     let isSelected: Bool
@@ -594,7 +790,7 @@ private struct LibraryMediaIcon: View {
     @ViewBuilder
     private var mediaArtwork: some View {
         switch mediaType {
-        case .d64:
+        case .d64, .d71, .d81:
             floppyArtwork
         case .crt:
             cartridgeArtwork
@@ -849,7 +1045,7 @@ private struct LibraryDetailView: View {
         case .crt:
             actionButton(.insertCartridgeAndReset, prominent: true)
 
-        case .d64:
+        case .d64, .d71, .d81:
             ForEach(availableDriveUnits, id: \.self) { unit in
                 actionButton(.insertDisk(unit), prominent: false)
                 actionButton(.autostartDisk(unit), prominent: true)

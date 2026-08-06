@@ -116,6 +116,7 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var firmwareReady = false
     @Published private(set) var isStarting = false
+    @Published private(set) var videoAspectRatio: CGFloat = 4.0 / 3.0
     @Published var presentedError: String?
     @Published private(set) var joyport1Assignment: JoyportAssignment = .none
     @Published private(set) var joyport2Assignment: JoyportAssignment = .none
@@ -124,11 +125,28 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var mountedTape: MediaReference?
     @Published private(set) var mountedCartridge: MediaReference?
     @Published private(set) var activeProgram: MediaReference?
+    @Published private(set) var trueDriveEmulationConfigured = false
+    @Published private(set) var drive9Configured = false
+    @Published private(set) var drive8ActivityLEDOn = false
+
+    var drive8PowerLEDOn: Bool {
+        isRunning && trueDriveEmulationConfigured
+    }
+
+    var drive9PowerLEDOn: Bool {
+        isRunning && trueDriveEmulationConfigured && drive9Configured
+    }
+
+    var driveActivityLEDOn: Bool {
+        drive8ActivityLEDOn
+    }
 
     let session = LibretroSession()
     let library = LibraryStore()
 
-    let availableDriveUnits = [8]
+    var availableDriveUnits: [Int] {
+        drive9Configured ? [8, 9] : [8]
+    }
 
     private var didAttemptAutomaticStart = false
     private var virtualJoypadMask: UInt32 = 0
@@ -138,8 +156,40 @@ final class EmulatorModel: ObservableObject {
     private var configuredMouseIDs: Set<ObjectIdentifier> = []
     private var notificationTokens: [NSObjectProtocol] = []
     private var configuredMousePort = 0
+    private var driveLEDOffTask: Task<Void, Never>?
 
     init() {
+        session.videoGeometryDidChange = { [weak self] aspectRatio in
+            guard aspectRatio.isFinite, aspectRatio > 0 else { return }
+            Task { @MainActor in
+                self?.videoAspectRatio = CGFloat(aspectRatio)
+            }
+        }
+        session.driveLEDStateDidChange = { [weak self] active in
+            Task { @MainActor in
+                guard let self else { return }
+                self.driveLEDOffTask?.cancel()
+                self.driveLEDOffTask = nil
+
+                guard self.trueDriveEmulationConfigured else {
+                    self.drive8ActivityLEDOn = false
+                    return
+                }
+
+                if active {
+                    self.drive8ActivityLEDOn = true
+                    return
+                }
+
+                self.driveLEDOffTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(160))
+                    guard !Task.isCancelled, let self else { return }
+                    self.drive8ActivityLEDOn = false
+                    self.driveLEDOffTask = nil
+                }
+            }
+        }
+
         Self.cleanTemporaryMediaDirectory()
         observeInputDevices()
         refreshPhysicalControllers()
@@ -148,6 +198,7 @@ final class EmulatorModel: ObservableObject {
 
         FirmwareStore.prepareDirectoriesAndConfiguration()
         refreshFirmwareState()
+        refreshDriveConfigurationState()
         if !firmwareReady {
             status = "Firmware required"
         }
@@ -191,6 +242,7 @@ final class EmulatorModel: ObservableObject {
     func startEmpty() async {
         presentedError = nil
         refreshFirmwareState()
+        refreshDriveConfigurationState()
         guard firmwareReady else {
             isRunning = false
             isStarting = false
@@ -304,6 +356,8 @@ final class EmulatorModel: ObservableObject {
         guard isRunning else {
             throw EmulatorModelError.coreNotRunning
         }
+        try validateDiskCompatibility(for: action, media: media)
+
         if !replacingExisting,
            let replacement = replacementInfo(for: action, media: media) {
             throw EmulatorModelError.replacementRequired(
@@ -408,6 +462,10 @@ final class EmulatorModel: ObservableObject {
         present(error)
     }
 
+    func reportCreatedDisk(_ item: LibraryItem) {
+        status = "Created \(item.mediaType.displayName): \(item.title)"
+    }
+
     @discardableResult
     func addTemporaryMediaToLibrary(id: UUID) throws -> LibraryItem {
         guard let media = uniqueMediaReferences.first(where: { $0.id == id && $0.isTemporary }) else {
@@ -446,6 +504,7 @@ final class EmulatorModel: ObservableObject {
     func settingsDidClose(previousFirmwareFingerprint: String) async {
         FirmwareStore.prepareDirectoriesAndConfiguration()
         refreshFirmwareState()
+        refreshDriveConfigurationState()
 
         guard FirmwareStore.configurationFingerprint != previousFirmwareFingerprint else {
             return
@@ -468,6 +527,9 @@ final class EmulatorModel: ObservableObject {
     func stop() {
         session.stop()
         isRunning = false
+        driveLEDOffTask?.cancel()
+        driveLEDOffTask = nil
+        drive8ActivityLEDOn = false
         clearMediaState(removeTemporaryFiles: true)
         status = firmwareReady ? "Core stopped" : "Firmware required"
     }
@@ -900,6 +962,36 @@ final class EmulatorModel: ObservableObject {
 
 
 
+    private func validateDiskCompatibility(
+        for action: MediaAction,
+        media: MediaReference
+    ) throws {
+        let unit: Int
+        switch action {
+        case .insertDisk(let selectedUnit), .autostartDisk(let selectedUnit):
+            unit = selectedUnit
+        case .runProgram, .insertCartridgeAndReset, .insertTape, .autostartTape:
+            return
+        }
+
+        guard availableDriveUnits.contains(unit) else {
+            throw EmulatorModelError.driveDisabled(unit)
+        }
+        guard let format = BlankDiskImageFormat(mediaType: media.mediaType) else {
+            return
+        }
+
+        let driveModel = C64DriveModel.selected(for: unit)
+        guard format.isCompatible(with: driveModel) else {
+            throw EmulatorModelError.incompatibleDiskImage(
+                unit: unit,
+                format: format.displayName,
+                currentDrive: driveModel.title,
+                requiredDrive: format.requiredDriveDescription
+            )
+        }
+    }
+
     private func makeActionRequest(for media: MediaReference) -> MediaActionRequest {
         let actions: [MediaAction]
         switch media.mediaType {
@@ -907,7 +999,7 @@ final class EmulatorModel: ObservableObject {
             actions = [.runProgram]
         case .crt:
             actions = [.insertCartridgeAndReset]
-        case .d64:
+        case .d64, .d71, .d81:
             actions = availableDriveUnits.flatMap { unit in
                 [.insertDisk(unit), .autostartDisk(unit)]
             }
@@ -1042,6 +1134,28 @@ final class EmulatorModel: ObservableObject {
         return title.isEmpty ? url.lastPathComponent : title
     }
 
+    private func refreshDriveConfigurationState() {
+        let defaults = UserDefaults.standard
+        drive9Configured = defaults.object(forKey: C64DriveSettings.drive9EnabledKey) == nil
+            ? C64DriveSettings.defaultDrive9Enabled
+            : defaults.bool(forKey: C64DriveSettings.drive9EnabledKey)
+        let requested = defaults.object(forKey: C64DriveSettings.trueDriveEmulationKey) == nil
+            ? C64DriveSettings.defaultTrueDriveEmulation
+            : defaults.bool(forKey: C64DriveSettings.trueDriveEmulationKey)
+        let drive8Ready = FirmwareStore.status(
+            for: C64DriveModel.selected(for: 8).firmwareSlot
+        ).isValid
+        let drive9Ready = !drive9Configured || FirmwareStore.status(
+            for: C64DriveModel.selected(for: 9).firmwareSlot
+        ).isValid
+        trueDriveEmulationConfigured = requested && drive8Ready && drive9Ready
+        if !trueDriveEmulationConfigured {
+            driveLEDOffTask?.cancel()
+            driveLEDOffTask = nil
+            drive8ActivityLEDOn = false
+        }
+    }
+
     private func refreshFirmwareState() {
         firmwareReady = FirmwareStore.isBootReady
     }
@@ -1070,6 +1184,8 @@ private enum EmulatorModelError: LocalizedError {
     case coreNotRunning
     case noTemporaryMedia
     case replacementRequired(String, String)
+    case driveDisabled(Int)
+    case incompatibleDiskImage(unit: Int, format: String, currentDrive: String, requiredDrive: String)
     case coreFailure(String)
 
     var errorDescription: String? {
@@ -1082,6 +1198,10 @@ private enum EmulatorModelError: LocalizedError {
             return "The selected temporary media is no longer available."
         case .replacementRequired(let current, let destination):
             return "\(destination) already contains \(current). Confirm replacement before continuing."
+        case .driveDisabled(let unit):
+            return "Drive \(unit) is disabled. Enable it in Settings → Disk Drives and restart the core before inserting media."
+        case .incompatibleDiskImage(let unit, let format, let currentDrive, let requiredDrive):
+            return "\(format) requires \(requiredDrive). Drive \(unit) is configured as \(currentDrive). Change Settings → Disk Drives and restart the core before inserting this image."
         case .coreFailure(let message):
             return message
         }
