@@ -116,6 +116,14 @@ struct FirmwareSettingsView: View {
                     Text("Drive firmware is optional for the fast virtual backend. Import the ROM matching each model selected in Disk Drives before enabling True Drive Emulation. Units 8 and 9 cannot use different ROMs when configured with the same model. Compatible replacement ROMs such as JiffyDOS are accepted.")
                 }
 
+                Section {
+                    firmwareRow(for: .printerMPS803)
+                } header: {
+                    Text("Printer ROM")
+                } footer: {
+                    Text("The original MPS-803 character ROM is optional and is not distributed by POKE64. It is required only for graphical MPS-803 output such as PDF and PNG. Diagnostic RAW capture remains available without it.")
+                }
+
                 Section("Storage") {
                     Text("Imported files are copied into the app sandbox. POKE64 records file size and SHA-256 only for validation and diagnostics.")
                         .font(.footnote)

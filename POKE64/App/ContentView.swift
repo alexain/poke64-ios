@@ -247,6 +247,7 @@ struct ContentView: View {
                             if printerEnabled, emulator.isRunning {
                                 PrinterStatusPanel(
                                     device: printerDevice,
+                                    format: C64PrinterSettings.exportFormat,
                                     capturedBytes: printerCapturedBytes,
                                     activityPulse: printerActivityPulse,
                                     onOpen: {
@@ -1338,6 +1339,7 @@ private struct DatasetteControlDock: View {
 
 private struct PrinterStatusPanel: View {
     let device: Int
+    let format: C64PrinterExportFormat
     let capturedBytes: Int?
     let activityPulse: Bool
     let onOpen: () -> Void
@@ -1374,9 +1376,11 @@ private struct PrinterStatusPanel: View {
                     )
                     .scaleEffect(activityPulse ? 1.12 : 1)
 
-                Text(activityPulse ? "PRINT" : "READY")
+                Text(activityPulse ? "PRINT" : format.rawValue.uppercased())
                     .font(.system(size: 8, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
 
                 Text(capturedSizeDescription)
                     .font(.system(size: 12, weight: .bold, design: .monospaced))

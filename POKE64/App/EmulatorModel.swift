@@ -689,19 +689,38 @@ final class EmulatorModel: ObservableObject {
         }
     }
 
-    func clearPrinterCapture() async throws {
-        try flushPrinterOutput()
-        try C64PrinterOutputStore.truncateOutput()
-        status = "Printer buffer discarded"
+    func snapshotPrinterOutput() throws {
+        guard isRunning else { return }
+        if C64PrinterSettings.exportFormat.usesRasterRenderer {
+            guard session.snapshotPrinter(atDevice: C64PrinterSettings.device) else {
+                throw EmulatorModelError.coreFailure(
+                    session.lastErrorMessage ?? "Unable to refresh the printer preview"
+                )
+            }
+        } else {
+            try flushPrinterOutput()
+        }
     }
 
-    func ejectPrinterPaper() async throws -> URL {
+    func clearPrinterCapture() async throws {
+        // A real form feed resets the MPS-803 interpreter to the top of the
+        // next sheet. The finalized page is then deleted instead of exported.
         try flushPrinterOutput()
-        let outputURL = try C64PrinterOutputStore.ejectOutput(
+        try C64PrinterOutputStore.discardActiveOutput(
             device: C64PrinterSettings.device
         )
+        status = "Printer paper discarded"
+    }
+
+    func ejectPrinterPaper() async throws -> [URL] {
+        try flushPrinterOutput()
+        let outputURLs = try C64PrinterOutputStore.ejectOutput(
+            device: C64PrinterSettings.device,
+            format: C64PrinterSettings.exportFormat,
+            intensity: C64PrinterSettings.dotIntensity
+        )
         status = "Printer paper ejected"
-        return outputURL
+        return outputURLs
     }
 
     func stop() {

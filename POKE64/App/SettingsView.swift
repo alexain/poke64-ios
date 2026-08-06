@@ -218,11 +218,60 @@ enum C64TapeSettings {
     }
 }
 
+enum C64PrinterExportFormat: String, CaseIterable, Identifiable {
+    case pdf
+    case png
+    case raw
+    case pdfAndRaw = "pdf+raw"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .pdf: return "PDF"
+        case .png: return "PNG pages"
+        case .raw: return "RAW diagnostic stream"
+        case .pdfAndRaw: return "PDF + RAW"
+        }
+    }
+
+    var usesRasterRenderer: Bool { self != .raw }
+    var includesRawCapture: Bool { self == .raw || self == .pdfAndRaw }
+}
+
+enum C64PrinterDotIntensity: String, CaseIterable, Identifiable {
+    case light
+    case normal
+    case dark
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .light: return "Light"
+        case .normal: return "Normal"
+        case .dark: return "Dark"
+        }
+    }
+
+    var inkLevel: UInt8 {
+        switch self {
+        case .light: return 145
+        case .normal: return 72
+        case .dark: return 22
+        }
+    }
+}
+
 enum C64PrinterSettings {
     static let enabledKey = "poke64.printer.enabled"
     static let deviceKey = "poke64.printer.device"
+    static let exportFormatKey = "poke64.printer.exportFormat"
+    static let dotIntensityKey = "poke64.printer.dotIntensity"
     static let defaultEnabled = false
     static let defaultDevice = 4
+    static let defaultExportFormat: C64PrinterExportFormat = .pdf
+    static let defaultDotIntensity: C64PrinterDotIntensity = .normal
     static let supportedDevices = [4, 5]
 
     static var enabled: Bool {
@@ -239,18 +288,43 @@ enum C64PrinterSettings {
         return supportedDevices.contains(stored) ? stored : defaultDevice
     }
 
+    static var exportFormat: C64PrinterExportFormat {
+        let raw = UserDefaults.standard.string(forKey: exportFormatKey)
+        return C64PrinterExportFormat(rawValue: raw ?? "") ?? defaultExportFormat
+    }
+
+    static var dotIntensity: C64PrinterDotIntensity {
+        let raw = UserDefaults.standard.string(forKey: dotIntensityKey)
+        return C64PrinterDotIntensity(rawValue: raw ?? "") ?? defaultDotIntensity
+    }
+
+    static var isReadyForSelectedFormat: Bool {
+        !exportFormat.usesRasterRenderer
+            || FirmwareStore.status(for: .printerMPS803).isValid
+    }
+
     static var configurationFingerprint: String {
-        [String(enabled), String(device)].joined(separator: ":")
+        [
+            String(enabled),
+            String(device),
+            exportFormat.rawValue
+        ].joined(separator: ":")
     }
 }
 
 enum C64PrinterOutputStoreError: LocalizedError {
     case noCapturedData
+    case invalidRasterPage(String)
+    case outputCreationFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .noCapturedData:
-            return "The printer buffer does not contain any captured data."
+            return "The printer does not contain any printable data."
+        case .invalidRasterPage(let filename):
+            return "The printer page \(filename) is not a valid POKE64 raster page."
+        case .outputCreationFailed(let message):
+            return "The printer output could not be created: \(message)"
         }
     }
 }
@@ -266,6 +340,14 @@ enum C64PrinterOutputStore {
             at: directory,
             withIntermediateDirectories: true
         )
+        try FileManager.default.createDirectory(
+            at: try spoolDirectory(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: try ejectedOutputDirectory(),
+            withIntermediateDirectories: true
+        )
         return directory
     }
 
@@ -274,19 +356,68 @@ enum C64PrinterOutputStore {
             .appendingPathComponent(outputFilename, isDirectory: false)
     }
 
+    static func spoolDirectoryURL() throws -> URL {
+        try prepareDirectory()
+        return try spoolDirectory()
+    }
+
     static func capturedByteCount() -> Int? {
-        guard let url = try? outputURL(),
-              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attributes[.size] as? NSNumber else {
-            return nil
+        activeByteCount(
+            device: C64PrinterSettings.device,
+            format: C64PrinterSettings.exportFormat
+        )
+    }
+
+    static func activeByteCount(
+        device: Int,
+        format: C64PrinterExportFormat
+    ) -> Int? {
+        var total = 0
+        var found = false
+
+        if format.includesRawCapture,
+           let attributes = try? FileManager.default.attributesOfItem(
+            atPath: try outputURL().path
+           ),
+           let size = attributes[.size] as? NSNumber {
+            total += size.intValue
+            found = true
         }
-        return size.intValue
+
+        if format.usesRasterRenderer {
+            for url in activeRasterURLs(device: device, includePreview: true) {
+                if let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+                   let fileSize = values.fileSize {
+                    total += fileSize
+                    found = true
+                }
+            }
+        }
+        return found ? total : nil
+    }
+
+    static func activeRasterPageCount(device: Int) -> Int {
+        activeRasterURLs(device: device).count
+    }
+
+    static func previewImage(
+        device: Int,
+        intensity: C64PrinterDotIntensity
+    ) throws -> UIImage? {
+        let preview = try spoolDirectory()
+            .appendingPathComponent("printer-\(device)-preview.pgm")
+        let source: URL?
+        if FileManager.default.fileExists(atPath: preview.path) {
+            source = preview
+        } else {
+            source = activeRasterURLs(device: device).last
+        }
+        guard let source else { return nil }
+        return try rasterImage(from: source, intensity: intensity)
     }
 
     static func removeOutput() throws {
-        let url = try outputURL()
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
-        try FileManager.default.removeItem(at: url)
+        try discardActiveOutput(device: C64PrinterSettings.device)
     }
 
     static func truncateOutput() throws {
@@ -303,62 +434,89 @@ enum C64PrinterOutputStore {
         try handle.synchronize()
     }
 
-    static func ejectOutput(device: Int) throws -> URL {
-        let fileManager = FileManager.default
-        let sourceURL = try outputURL()
-        guard fileManager.fileExists(atPath: sourceURL.path),
-              (capturedByteCount() ?? 0) > 0 else {
+    static func discardActiveOutput(device: Int) throws {
+        let manager = FileManager.default
+        for url in activeRasterURLs(device: device, includePreview: true) {
+            try? manager.removeItem(at: url)
+        }
+        try truncateOutput()
+    }
+
+    static func ejectOutput(
+        device: Int,
+        format: C64PrinterExportFormat,
+        intensity: C64PrinterDotIntensity
+    ) throws -> [URL] {
+        if format == .raw {
+            let raw = try finalizeRawOutput(device: device)
+            return [raw]
+        }
+
+        let pages = activeRasterURLs(device: device)
+        guard !pages.isEmpty else {
             throw C64PrinterOutputStoreError.noCapturedData
         }
 
-        let directory = try ejectedOutputDirectory()
-        try fileManager.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
+        let jobDirectory = try createJobDirectory(device: device)
+        var outputs: [URL] = []
 
-        let components = Calendar.current.dateComponents(
-            [.year, .month, .day, .hour, .minute, .second],
-            from: Date()
-        )
-        let filename = String(
-            format: "printer-%d-%04d%02d%02d-%02d%02d%02d.raw",
-            device,
-            components.year ?? 0,
-            components.month ?? 0,
-            components.day ?? 0,
-            components.hour ?? 0,
-            components.minute ?? 0,
-            components.second ?? 0
-        )
-        var destinationURL = directory.appendingPathComponent(
-            filename,
-            isDirectory: false
-        )
-        if fileManager.fileExists(atPath: destinationURL.path) {
-            destinationURL = directory.appendingPathComponent(
-                "printer-\(UUID().uuidString).raw",
+        switch format {
+        case .pdf, .pdfAndRaw:
+            let pdfURL = jobDirectory.appendingPathComponent(
+                "printer-\(device).pdf",
                 isDirectory: false
             )
+            try createPDF(from: pages, intensity: intensity, at: pdfURL)
+            outputs.append(pdfURL)
+
+        case .png:
+            for (index, page) in pages.enumerated() {
+                let image = try rasterImage(from: page, intensity: intensity)
+                guard let data = image.pngData() else {
+                    throw C64PrinterOutputStoreError.outputCreationFailed(
+                        "PNG encoding failed"
+                    )
+                }
+                let url = jobDirectory.appendingPathComponent(
+                    String(format: "printer-%d-page-%03d.png", device, index + 1),
+                    isDirectory: false
+                )
+                try data.write(to: url, options: [.atomic])
+                outputs.append(url)
+            }
+
+        case .raw:
+            break
         }
 
-        try fileManager.copyItem(at: sourceURL, to: destinationURL)
-        try truncateOutput()
-        return destinationURL
+        if format.includesRawCapture,
+           (capturedRawByteCount() ?? 0) > 0 {
+            let rawURL = jobDirectory.appendingPathComponent(
+                "printer-\(device).raw",
+                isDirectory: false
+            )
+            try FileManager.default.copyItem(at: try outputURL(), to: rawURL)
+            outputs.append(rawURL)
+        }
+
+        try discardActiveOutput(device: device)
+        return outputs
     }
 
-    static func mostRecentEjectedOutputURL() -> URL? {
+    static func mostRecentEjectedOutputURLs() -> [URL] {
         guard let directory = try? ejectedOutputDirectory(),
-              let files = try? FileManager.default.contentsOfDirectory(
+              let jobs = try? FileManager.default.contentsOfDirectory(
                 at: directory,
-                includingPropertiesForKeys: [.contentModificationDateKey],
+                includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey],
                 options: [.skipsHiddenFiles]
               ) else {
-            return nil
+            return []
         }
 
-        return files
-            .filter { $0.pathExtension.lowercased() == "raw" }
+        let latest = jobs
+            .filter {
+                (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            }
             .sorted { lhs, rhs in
                 let lhsDate = try? lhs.resourceValues(
                     forKeys: [.contentModificationDateKey]
@@ -369,12 +527,22 @@ enum C64PrinterOutputStore {
                 return (lhsDate ?? .distantPast) > (rhsDate ?? .distantPast)
             }
             .first
+
+        guard let latest,
+              let files = try? FileManager.default.contentsOfDirectory(
+                at: latest,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+              ) else {
+            return []
+        }
+        return files.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     static func makeShareSnapshot() throws -> URL {
         let sourceURL = try outputURL()
         guard FileManager.default.fileExists(atPath: sourceURL.path),
-              (capturedByteCount() ?? 0) > 0 else {
+              (capturedRawByteCount() ?? 0) > 0 else {
             throw C64PrinterOutputStoreError.noCapturedData
         }
 
@@ -391,6 +559,203 @@ enum C64PrinterOutputStore {
         try? FileManager.default.removeItem(at: url)
     }
 
+    private static func capturedRawByteCount() -> Int? {
+        guard let attributes = try? FileManager.default.attributesOfItem(
+            atPath: try outputURL().path
+        ), let size = attributes[.size] as? NSNumber else {
+            return nil
+        }
+        return size.intValue
+    }
+
+    private static func activeRasterURLs(
+        device: Int,
+        includePreview: Bool = false
+    ) -> [URL] {
+        guard let directory = try? spoolDirectory(),
+              let files = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+              ) else {
+            return []
+        }
+        let pagePrefix = "printer-\(device)-page-"
+        let previewName = "printer-\(device)-preview.pgm"
+        return files
+            .filter {
+                $0.pathExtension.lowercased() == "pgm"
+                    && ($0.lastPathComponent.hasPrefix(pagePrefix)
+                        || (includePreview && $0.lastPathComponent == previewName))
+            }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    private static func finalizeRawOutput(device: Int) throws -> URL {
+        guard (capturedRawByteCount() ?? 0) > 0 else {
+            throw C64PrinterOutputStoreError.noCapturedData
+        }
+        let jobDirectory = try createJobDirectory(device: device)
+        let destination = jobDirectory.appendingPathComponent(
+            "printer-\(device).raw",
+            isDirectory: false
+        )
+        try FileManager.default.copyItem(at: try outputURL(), to: destination)
+        try truncateOutput()
+        return destination
+    }
+
+    private static func createJobDirectory(device: Int) throws -> URL {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let root = try ejectedOutputDirectory()
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        var directory = root.appendingPathComponent(
+            "printer-\(device)-\(formatter.string(from: Date()))",
+            isDirectory: true
+        )
+        if FileManager.default.fileExists(atPath: directory.path) {
+            directory = root.appendingPathComponent(
+                "printer-\(device)-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        }
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        return directory
+    }
+
+    private static func createPDF(
+        from pages: [URL],
+        intensity: C64PrinterDotIntensity,
+        at destination: URL
+    ) throws {
+        let images = try pages.map { try rasterImage(from: $0, intensity: intensity) }
+        let pageBounds = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let renderer = UIGraphicsPDFRenderer(bounds: pageBounds)
+        do {
+            try renderer.writePDF(to: destination) { context in
+                for image in images {
+                    context.beginPage()
+                    context.cgContext.setFillColor(UIColor.white.cgColor)
+                    context.cgContext.fill(pageBounds)
+                    let printable = pageBounds.insetBy(dx: 24, dy: 24)
+                    let physicalSize = CGSize(
+                        width: image.size.width / 60.0,
+                        height: image.size.height / 72.0
+                    )
+                    let scale = min(
+                        printable.width / physicalSize.width,
+                        printable.height / physicalSize.height
+                    )
+                    let size = CGSize(
+                        width: physicalSize.width * scale,
+                        height: physicalSize.height * scale
+                    )
+                    let rect = CGRect(
+                        x: printable.midX - size.width / 2,
+                        y: printable.midY - size.height / 2,
+                        width: size.width,
+                        height: size.height
+                    )
+                    image.draw(in: rect)
+                }
+            }
+        } catch {
+            throw C64PrinterOutputStoreError.outputCreationFailed(
+                error.localizedDescription
+            )
+        }
+    }
+
+    private static func rasterImage(
+        from url: URL,
+        intensity: C64PrinterDotIntensity
+    ) throws -> UIImage {
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        var index = 0
+        func token() -> String? {
+            while index < data.count {
+                let byte = data[index]
+                if byte == 35 {
+                    while index < data.count && data[index] != 10 { index += 1 }
+                } else if byte == 9 || byte == 10 || byte == 13 || byte == 32 {
+                    index += 1
+                } else {
+                    break
+                }
+            }
+            let start = index
+            while index < data.count {
+                let byte = data[index]
+                if byte == 9 || byte == 10 || byte == 13 || byte == 32 || byte == 35 {
+                    break
+                }
+                index += 1
+            }
+            guard index > start else { return nil }
+            return String(data: data[start..<index], encoding: .ascii)
+        }
+
+        guard token() == "P5",
+              let widthToken = token(), let width = Int(widthToken),
+              let heightToken = token(), let height = Int(heightToken),
+              token() == "255" else {
+            throw C64PrinterOutputStoreError.invalidRasterPage(
+                url.lastPathComponent
+            )
+        }
+        while index < data.count,
+              [9, 10, 13, 32].contains(data[index]) {
+            index += 1
+        }
+        let (required, overflow) = width.multipliedReportingOverflow(by: height)
+        guard width > 0, width <= 4_096,
+              height > 0, height <= 8_192,
+              !overflow, required > 0,
+              data.count - index >= required else {
+            throw C64PrinterOutputStoreError.invalidRasterPage(
+                url.lastPathComponent
+            )
+        }
+
+        var pixels = [UInt8](data[index..<(index + required)])
+        let ink = intensity.inkLevel
+        for offset in pixels.indices {
+            if pixels[offset] < 128 {
+                pixels[offset] = ink
+            } else {
+                pixels[offset] = 255
+            }
+        }
+        let pixelData = Data(pixels) as CFData
+        guard let provider = CGDataProvider(data: pixelData),
+              let image = CGImage(
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bitsPerPixel: 8,
+                bytesPerRow: width,
+                space: CGColorSpaceCreateDeviceGray(),
+                bitmapInfo: CGBitmapInfo(rawValue: 0),
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: false,
+                intent: .defaultIntent
+              ) else {
+            throw C64PrinterOutputStoreError.outputCreationFailed(
+                "The raster image could not be decoded"
+            )
+        }
+        return UIImage(cgImage: image, scale: 1, orientation: .up)
+    }
+
     private static func outputDirectory() throws -> URL {
         let documents = try FileManager.default.url(
             for: .documentDirectory,
@@ -402,6 +767,11 @@ enum C64PrinterOutputStore {
             .appendingPathComponent("Saves", isDirectory: true)
             .appendingPathComponent("POKE64", isDirectory: true)
             .appendingPathComponent("Printer", isDirectory: true)
+    }
+
+    private static func spoolDirectory() throws -> URL {
+        try outputDirectory()
+            .appendingPathComponent("Spool", isDirectory: true)
     }
 
     private static func ejectedOutputDirectory() throws -> URL {
@@ -1503,7 +1873,7 @@ private struct TapeSettingsView: View {
 
 struct PrinterShareItem: Identifiable {
     let id = UUID()
-    let url: URL
+    let urls: [URL]
 }
 
 struct PrinterActivityView: UIViewControllerRepresentable {
@@ -1530,19 +1900,17 @@ private enum PrinterBufferAction: String, Identifiable, Equatable {
 
     var title: String {
         switch self {
-        case .eject:
-            return "Eject current paper?"
-        case .discard:
-            return "Discard printer buffer?"
+        case .eject: return "Eject current paper?"
+        case .discard: return "Discard current paper?"
         }
     }
 
     var message: String {
         switch self {
         case .eject:
-            return "The current RAW buffer will be finalized as a completed print job. The C64 will continue running with a fresh sheet."
+            return "The active paper will be finalized in the selected export format. The C64 and mounted media will remain running."
         case .discard:
-            return "The active RAW data will be deleted without restarting the C64."
+            return "The active page and optional RAW stream will be deleted without restarting the C64."
         }
     }
 }
@@ -1556,12 +1924,21 @@ struct PrinterCaptureSheet: View {
     @State private var errorMessage: String?
     @State private var statusMessage: String?
     @State private var shareItem: PrinterShareItem?
-    @State private var activeShareSnapshotURL: URL?
-    @State private var latestEjectedOutputURL: URL?
+    @State private var temporaryShareURLs: [URL] = []
+    @State private var latestEjectedOutputURLs: [URL] = []
+    @State private var previewImage: UIImage?
     @State private var isRefreshing = false
     @State private var isPerformingFileOperation = false
     @State private var pendingBufferAction: PrinterBufferAction?
     @State private var lastRefreshDate: Date?
+
+    private var printerDevice: Int { C64PrinterSettings.device }
+    private var exportFormat: C64PrinterExportFormat {
+        C64PrinterSettings.exportFormat
+    }
+    private var dotIntensity: C64PrinterDotIntensity {
+        C64PrinterSettings.dotIntensity
+    }
 
     private var capturedSizeDescription: String {
         guard let capturedBytes, capturedBytes > 0 else { return "Empty" }
@@ -1571,8 +1948,15 @@ struct PrinterCaptureSheet: View {
         )
     }
 
-    private var printerDevice: Int {
-        C64PrinterSettings.device
+    private var activePaperDescription: String {
+        guard exportFormat.usesRasterRenderer else {
+            return capturedSizeDescription
+        }
+        let pages = C64PrinterOutputStore.activeRasterPageCount(device: printerDevice)
+        if pages > 0 {
+            return "\(pages) completed page\(pages == 1 ? "" : "s")"
+        }
+        return previewImage == nil ? "Empty" : "Page in progress"
     }
 
     var body: some View {
@@ -1580,6 +1964,11 @@ struct PrinterCaptureSheet: View {
             ScrollView {
                 VStack(spacing: 18) {
                     printerStatusCard
+
+                    if exportFormat.usesRasterRenderer {
+                        printerPreview
+                    }
+
                     captureActions
 
                     if let statusMessage {
@@ -1597,7 +1986,9 @@ struct PrinterCaptureSheet: View {
                             )
                     }
 
-                    Text("RAW capture is the diagnostic backend. Page preview, dot-matrix rendering and PDF export will be added when the graphical printer renderer is connected.")
+                    Text(exportFormat.usesRasterRenderer
+                        ? "The MPS-803 driver interprets text, Commodore graphics characters, control codes and bit-image data before POKE64 creates the PDF or PNG output."
+                        : "RAW keeps the original IEC byte stream for diagnostics and compatibility analysis.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1608,9 +1999,7 @@ struct PrinterCaptureSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        dismiss()
-                    }
+                    Button("Done") { dismiss() }
                 }
             }
         }
@@ -1618,14 +2007,14 @@ struct PrinterCaptureSheet: View {
         .presentationDragIndicator(.visible)
         .task {
             refreshOutputStatus()
-            latestEjectedOutputURL = C64PrinterOutputStore
-                .mostRecentEjectedOutputURL()
+            latestEjectedOutputURLs = C64PrinterOutputStore
+                .mostRecentEjectedOutputURLs()
         }
-        .sheet(item: $shareItem, onDismiss: cleanupShareSnapshot) { item in
-            PrinterActivityView(activityItems: [item.url])
+        .sheet(item: $shareItem, onDismiss: cleanupShareSnapshots) { item in
+            PrinterActivityView(activityItems: item.urls)
         }
         .confirmationDialog(
-            pendingBufferAction?.title ?? "Printer buffer",
+            pendingBufferAction?.title ?? "Printer paper",
             isPresented: Binding(
                 get: { pendingBufferAction != nil },
                 set: { if !$0 { pendingBufferAction = nil } }
@@ -1635,21 +2024,15 @@ struct PrinterCaptureSheet: View {
             if pendingBufferAction == .eject {
                 Button("Eject Paper") {
                     pendingBufferAction = nil
-                    Task {
-                        await ejectPaper()
-                    }
+                    Task { await ejectPaper() }
                 }
             } else if pendingBufferAction == .discard {
-                Button("Discard Buffer", role: .destructive) {
+                Button("Discard Paper", role: .destructive) {
                     pendingBufferAction = nil
-                    Task {
-                        await discardBuffer()
-                    }
+                    Task { await discardBuffer() }
                 }
             }
-            Button("Cancel", role: .cancel) {
-                pendingBufferAction = nil
-            }
+            Button("Cancel", role: .cancel) { pendingBufferAction = nil }
         } message: {
             Text(pendingBufferAction?.message ?? "")
         }
@@ -1660,9 +2043,7 @@ struct PrinterCaptureSheet: View {
                 set: { if !$0 { errorMessage = nil } }
             )
         ) {
-            Button("OK") {
-                errorMessage = nil
-            }
+            Button("OK") { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "Unknown error")
         }
@@ -1686,9 +2067,13 @@ struct PrinterCaptureSheet: View {
 
                 Spacer()
 
-                Text("RAW")
-                    .font(.system(.caption, design: .monospaced).weight(.bold))
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(exportFormat.usesRasterRenderer ? "MPS-803" : "RAW")
+                        .font(.system(.caption, design: .monospaced).weight(.bold))
+                    Text(exportFormat.title)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Divider()
@@ -1698,8 +2083,8 @@ struct PrinterCaptureSheet: View {
                     Text("ACTIVE PAPER")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text(capturedSizeDescription)
-                        .font(.system(.title2, design: .monospaced).weight(.bold))
+                    Text(activePaperDescription)
+                        .font(.system(.title3, design: .monospaced).weight(.bold))
                 }
 
                 Spacer()
@@ -1722,43 +2107,70 @@ struct PrinterCaptureSheet: View {
         )
     }
 
+    @ViewBuilder
+    private var printerPreview: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("PAPER PREVIEW")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            if let previewImage {
+                Image(uiImage: previewImage)
+                    .resizable()
+                    .interpolation(.none)
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: 390)
+                    .background(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+            } else {
+                ContentUnavailableView(
+                    "No Printed Dots Yet",
+                    systemImage: "printer",
+                    description: Text("Print from the C64, then refresh the preview.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 160)
+            }
+        }
+        .padding(14)
+        .background(
+            .secondary.opacity(0.06),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+    }
+
     private var captureActions: some View {
         VStack(spacing: 10) {
             actionButton(
-                "Refresh Status",
+                exportFormat.usesRasterRenderer ? "Refresh Preview" : "Refresh Status",
                 systemImage: "arrow.clockwise",
                 isBusy: isRefreshing
             ) {
-                Task {
-                    await refreshOutputStatusWithFeedback()
-                }
+                Task { await refreshOutputStatusWithFeedback() }
             }
             .disabled(isRefreshing || isPerformingFileOperation)
 
-            actionButton(
-                "Share Active RAW…",
-                systemImage: "square.and.arrow.up"
-            ) {
-                Task {
-                    await shareActiveCapture()
+            if exportFormat == .raw {
+                actionButton(
+                    "Share Active RAW…",
+                    systemImage: "square.and.arrow.up"
+                ) {
+                    Task { await shareActiveCapture() }
                 }
+                .disabled(isPerformingFileOperation)
             }
-            .disabled(isPerformingFileOperation)
 
-            actionButton(
-                "Eject Paper",
-                systemImage: "eject.fill"
-            ) {
+            actionButton("Eject Paper", systemImage: "eject.fill") {
                 pendingBufferAction = .eject
             }
             .disabled(isPerformingFileOperation)
 
-            if latestEjectedOutputURL != nil {
+            if !latestEjectedOutputURLs.isEmpty {
                 actionButton(
-                    "Share Last Ejected RAW…",
+                    "Share Last Ejected Output…",
                     systemImage: "doc.badge.arrow.up"
                 ) {
-                    shareLastEjectedOutput()
+                    shareItem = PrinterShareItem(urls: latestEjectedOutputURLs)
                 }
                 .disabled(isPerformingFileOperation)
             }
@@ -1767,11 +2179,10 @@ struct PrinterCaptureSheet: View {
                 pendingBufferAction = .discard
             } label: {
                 HStack {
-                    Label("Discard Buffer", systemImage: "trash")
+                    Label("Discard Paper", systemImage: "trash")
                     Spacer()
                     if isPerformingFileOperation {
-                        ProgressView()
-                            .controlSize(.small)
+                        ProgressView().controlSize(.small)
                     }
                 }
                 .frame(maxWidth: .infinity, minHeight: 34)
@@ -1792,10 +2203,7 @@ struct PrinterCaptureSheet: View {
             HStack {
                 Label(title, systemImage: systemImage)
                 Spacer()
-                if isBusy {
-                    ProgressView()
-                        .controlSize(.small)
-                }
+                if isBusy { ProgressView().controlSize(.small) }
             }
             .frame(maxWidth: .infinity, minHeight: 34)
             .contentShape(Rectangle())
@@ -1805,6 +2213,18 @@ struct PrinterCaptureSheet: View {
 
     private func refreshOutputStatus() {
         capturedBytes = C64PrinterOutputStore.capturedByteCount()
+        if exportFormat.usesRasterRenderer {
+            do {
+                previewImage = try C64PrinterOutputStore.previewImage(
+                    device: printerDevice,
+                    intensity: dotIntensity
+                )
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        } else {
+            previewImage = nil
+        }
         lastRefreshDate = Date()
     }
 
@@ -1816,9 +2236,9 @@ struct PrinterCaptureSheet: View {
         defer { isRefreshing = false }
 
         do {
-            try emulator.flushPrinterOutput()
+            try emulator.snapshotPrinterOutput()
+            try? await Task.sleep(for: .milliseconds(120))
             refreshOutputStatus()
-            try? await Task.sleep(for: .milliseconds(180))
         } catch {
             errorMessage = error.localizedDescription
             refreshOutputStatus()
@@ -1828,26 +2248,21 @@ struct PrinterCaptureSheet: View {
     @MainActor
     private func shareActiveCapture() async {
         do {
-            try emulator.flushPrinterOutput()
+            try emulator.snapshotPrinterOutput()
             refreshOutputStatus()
             let snapshotURL = try C64PrinterOutputStore.makeShareSnapshot()
-            activeShareSnapshotURL = snapshotURL
-            shareItem = PrinterShareItem(url: snapshotURL)
+            temporaryShareURLs = [snapshotURL]
+            shareItem = PrinterShareItem(urls: [snapshotURL])
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    private func shareLastEjectedOutput() {
-        guard let latestEjectedOutputURL else { return }
-        shareItem = PrinterShareItem(url: latestEjectedOutputURL)
-    }
-
-    private func cleanupShareSnapshot() {
-        if let activeShareSnapshotURL {
-            C64PrinterOutputStore.removeShareSnapshot(at: activeShareSnapshotURL)
+    private func cleanupShareSnapshots() {
+        for url in temporaryShareURLs {
+            C64PrinterOutputStore.removeShareSnapshot(at: url)
         }
-        activeShareSnapshotURL = nil
+        temporaryShareURLs = []
         shareItem = nil
     }
 
@@ -1859,9 +2274,10 @@ struct PrinterCaptureSheet: View {
         defer { isPerformingFileOperation = false }
 
         do {
-            let outputURL = try await emulator.ejectPrinterPaper()
-            latestEjectedOutputURL = outputURL
-            statusMessage = "Paper ejected as \(outputURL.lastPathComponent)."
+            let outputURLs = try await emulator.ejectPrinterPaper()
+            latestEjectedOutputURLs = outputURLs
+            let names = outputURLs.map(\.lastPathComponent).joined(separator: ", ")
+            statusMessage = "Paper ejected as \(names)."
             refreshOutputStatus()
         } catch {
             errorMessage = error.localizedDescription
@@ -1878,7 +2294,7 @@ struct PrinterCaptureSheet: View {
 
         do {
             try await emulator.clearPrinterCapture()
-            statusMessage = "The active printer buffer was discarded."
+            statusMessage = "The active printer paper was discarded."
             refreshOutputStatus()
         } catch {
             errorMessage = error.localizedDescription
@@ -1892,8 +2308,25 @@ private struct PrinterSettingsView: View {
     private var printerEnabled = C64PrinterSettings.defaultEnabled
     @AppStorage(C64PrinterSettings.deviceKey)
     private var printerDevice = C64PrinterSettings.defaultDevice
+    @AppStorage(C64PrinterSettings.exportFormatKey)
+    private var exportFormatRawValue = C64PrinterSettings.defaultExportFormat.rawValue
+    @AppStorage(C64PrinterSettings.dotIntensityKey)
+    private var dotIntensityRawValue = C64PrinterSettings.defaultDotIntensity.rawValue
 
     @State private var capturedBytes: Int?
+
+    private var exportFormat: C64PrinterExportFormat {
+        C64PrinterExportFormat(rawValue: exportFormatRawValue)
+            ?? C64PrinterSettings.defaultExportFormat
+    }
+
+    private var printerFirmwareStatus: FirmwareStatus {
+        FirmwareStore.status(for: .printerMPS803)
+    }
+
+    private var canEnablePrinter: Bool {
+        !exportFormat.usesRasterRenderer || printerFirmwareStatus.isValid
+    }
 
     private var capturedSizeDescription: String {
         guard let capturedBytes, capturedBytes > 0 else { return "Empty" }
@@ -1906,7 +2339,8 @@ private struct PrinterSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Enable IEC printer capture", isOn: $printerEnabled)
+                Toggle("Enable IEC printer", isOn: $printerEnabled)
+                    .disabled(!canEnablePrinter)
 
                 Picker("IEC device", selection: $printerDevice) {
                     ForEach(C64PrinterSettings.supportedDevices, id: \.self) { device in
@@ -1917,16 +2351,71 @@ private struct PrinterSettingsView: View {
             } header: {
                 Text("Printer")
             } footer: {
-                Text("Closing Settings restarts the core when printer enablement or IEC device changes. When enabled, the PRN \(printerDevice) panel appears beside the emulator and opens the printer controls.")
+                Text("Closing Settings restarts the core when the printer device or backend changes. When enabled, PRN \(printerDevice) appears beside the emulator.")
             }
 
-            Section("Diagnostic Backend") {
-                LabeledContent("Driver", value: "RAW")
-                LabeledContent("Output mode", value: "Text stream")
-                LabeledContent("Capture file", value: C64PrinterOutputStore.outputFilename)
-                LabeledContent("Active buffer", value: capturedSizeDescription)
+            Section {
+                Picker("Export format", selection: $exportFormatRawValue) {
+                    ForEach(C64PrinterExportFormat.allCases) { format in
+                        Text(format.title).tag(format.rawValue)
+                    }
+                }
 
-                Text("The RAW backend verifies IEC printing before the graphical dot-matrix renderer is integrated.")
+                LabeledContent(
+                    "Printer model",
+                    value: exportFormat.usesRasterRenderer
+                        ? "Commodore MPS-803"
+                        : "RAW diagnostic capture"
+                )
+
+                if exportFormat.usesRasterRenderer {
+                    Picker("Dot intensity", selection: $dotIntensityRawValue) {
+                        ForEach(C64PrinterDotIntensity.allCases) { intensity in
+                            Text(intensity.title).tag(intensity.rawValue)
+                        }
+                    }
+
+                    HStack {
+                        Label(
+                            printerFirmwareStatus.isValid
+                                ? "MPS-803 ROM installed"
+                                : "MPS-803 ROM required",
+                            systemImage: printerFirmwareStatus.isValid
+                                ? "checkmark.circle.fill"
+                                : "exclamationmark.triangle.fill"
+                        )
+                        .foregroundStyle(
+                            printerFirmwareStatus.isValid ? .green : .orange
+                        )
+                        Spacer()
+                        Text("4 KB")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if !printerFirmwareStatus.isValid {
+                        Text("Import mps803-D7811G-111-U32053A.bin in Settings → Firmware / ROMs before enabling graphical printing.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Output")
+            } footer: {
+                Text(exportFormat.usesRasterRenderer
+                    ? "PDF is the default. Text and bit-image graphics are rendered as MPS-803 dot-matrix pages before export. PDF + RAW also retains the original IEC stream."
+                    : "RAW stores the unprocessed IEC byte stream and does not require printer firmware.")
+            }
+
+            Section("Active Paper") {
+                LabeledContent("Buffered data", value: capturedSizeDescription)
+                if exportFormat.usesRasterRenderer {
+                    LabeledContent(
+                        "Completed pages",
+                        value: "\(C64PrinterOutputStore.activeRasterPageCount(device: printerDevice))"
+                    )
+                }
+                Text("Use the PRN \(printerDevice) panel beside the emulator to preview, eject, export or discard the current paper.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -1942,7 +2431,7 @@ private struct PrinterSettingsView: View {
                 .font(.system(.body, design: .monospaced))
                 .textSelection(.enabled)
 
-                Text("Enable the printer, close Settings, enter the program in BASIC and run it. Tap PRN \(printerDevice) beside the emulator to inspect, share, eject or discard the captured output without restarting the C64.")
+                Text("For graphical output, eject the paper from the PRN panel after printing to create the selected PDF or PNG files.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -1950,8 +2439,14 @@ private struct PrinterSettingsView: View {
         .task {
             capturedBytes = C64PrinterOutputStore.capturedByteCount()
         }
+        .onChange(of: exportFormatRawValue) { _, _ in
+            if !canEnablePrinter {
+                printerEnabled = false
+            }
+        }
     }
 }
+
 
 private struct DiskDriveSettingsView: View {
     @AppStorage(C64DriveModel.drive8DefaultsKey)

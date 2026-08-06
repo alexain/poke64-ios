@@ -13,7 +13,7 @@ POKE64 is designed to load a locally built `vice_x64sc_libretro` core.
 
 The `vice-libretro` and VICE trees contain the GNU GPL version 2 license text, while source notices commonly permit redistribution under GPL version 2 or, at the recipient's option, a later version. A distributor must inspect the exact pinned source tree rather than rely only on this summary.
 
-The VICE source tree, compiled dylib and firmware-verification reports are excluded from this repository. They are created locally during the build process.
+The VICE source tree, compiled dylib and firmware-verification reports are excluded from this repository. They are created locally during the build process. POKE64 applies a local GPL-side patch that restores the VICE MPS-803 interpreter and replaces the desktop graphics exporter with a sandbox-safe grayscale page spool used by the iOS frontend.
 
 The POKE64 build script removes detected exact firmware payloads from the unsigned core and refuses to finish when expected categories cannot be verified. A distributor remains responsible for reviewing the generated artifact and satisfying all obligations for the selected upstream revision, including preserving notices and providing complete corresponding source in a GPL-compliant form.
 
@@ -33,7 +33,7 @@ OpenROMs does not provide the proprietary Commodore or JiffyDOS drive-ROM files 
 
 ## Commodore and replacement firmware
 
-POKE64 does not include original Commodore BASIC, KERNAL, character or drive firmware, and does not include JiffyDOS. The application provides import slots for user-supplied files.
+POKE64 does not include original Commodore BASIC, KERNAL, character, drive or MPS-803 printer firmware, and does not include JiffyDOS. The application provides import slots for user-supplied files.
 
 Copyright and licensing of imported firmware remain separate from POKE64, VICE and OpenROMs. Users and redistributors are responsible for ensuring that imported or redistributed firmware is lawfully obtained and used.
 

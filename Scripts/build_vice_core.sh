@@ -57,6 +57,13 @@ python3 "${SCRIPT_DIR}/prepare_external_firmware_core.py" \
   --source "${SOURCE_DIR}" \
   --report "${SOURCE_PATCH_REPORT}"
 
+# Restore VICE's real MPS-803 interpreter and replace the desktop graphics
+# exporter with POKE64's sandbox-safe grayscale page spool. This patch remains
+# within the separately licensed GPL VICE core.
+python3 "${SCRIPT_DIR}/prepare_virtual_printer_core.py" \
+  --source "${SOURCE_DIR}" \
+  --replacement "${SCRIPT_DIR}/vice-patches/output-graphics-poke64.c"
+
 make -C "${SOURCE_DIR}" clean EMUTYPE=x64sc || true
 make -C "${SOURCE_DIR}" \
   -j"${JOBS}" \
@@ -66,6 +73,29 @@ make -C "${SOURCE_DIR}" \
 
 mkdir -p "${OUTPUT_DIR}"
 cp -f "${SOURCE_DIR}/vice_x64sc_libretro_ios.dylib" "${OUTPUT_CORE}"
+
+# Capture the complete symbol table before testing it. With `set -o pipefail`,
+# piping `nm` directly into `grep -q` can report a false failure: grep exits as
+# soon as it finds a match, nm receives SIGPIPE, and the pipeline becomes
+# non-zero even though the requested symbol is present.
+PRINTER_SYMBOLS_FILE="$(mktemp "${TMPDIR:-/tmp}/poke64-printer-symbols.XXXXXX")"
+trap 'rm -f "${PRINTER_SYMBOLS_FILE}"' EXIT
+nm -gU "${OUTPUT_CORE}" > "${PRINTER_SYMBOLS_FILE}"
+
+for symbol in \
+  poke64_printer_set_output_directory \
+  poke64_printer_snapshot \
+  poke64_printer_configure_raw_capture; do
+  if ! grep -Eq "[[:space:]]_${symbol}$" "${PRINTER_SYMBOLS_FILE}"; then
+    echo "Missing required graphical printer symbol: ${symbol}" >&2
+    echo "Available POKE64 printer symbols:" >&2
+    grep -E '[[:space:]]_poke64_printer_' "${PRINTER_SYMBOLS_FILE}" >&2 || true
+    exit 1
+  fi
+done
+
+rm -f "${PRINTER_SYMBOLS_FILE}"
+trap - EXIT
 
 # Verify the linked dylib without modifying it. Any exact ROM payload found in
 # the final Mach-O is a hard build failure.
