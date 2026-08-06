@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.1 — 2026-08-06
+
+- Added media-specific actions shared by Open and Library: direct PRG execution, CRT insertion with reset, D64 insertion or autostart in Drive 8, and TAP/T64 insertion or autostart in the datasette.
+- Added replacement confirmation when a drive, datasette or cartridge slot already contains another medium.
+- Added runtime VICE bridging for disk, tape and cartridge mounting, detaching and autostart without routing every action through generic content loading.
+- Changed Soft Reset and Hard Reset to preserve mounted disks, tapes and cartridges.
+- Added **Eject All Media and Reset** to detach every mounted medium, clear temporary media and restart the C64 empty.
+- Added shared media-action state and dialogs that can be reused by the future Devices interface.
+- Fixed empty virtual drives so `LOAD"$",8` reports `DEVICE NOT PRESENT` instead of exposing the application sandbox filesystem.
+
 ## 0.5.0 — 2026-08-05
 
 - Added a persistent media library for D64, PRG, CRT, TAP and T64 files.

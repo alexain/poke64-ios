@@ -34,6 +34,18 @@ typedef NS_ENUM(NSInteger, C64KeyCode) {
 
 - (BOOL)startWithoutContent;
 - (BOOL)loadContentAtURL:(NSURL *)url;
+- (BOOL)attachDiskAtURL:(NSURL *)url
+              driveUnit:(NSInteger)unit NS_SWIFT_NAME(attachDisk(at:driveUnit:));
+- (BOOL)autostartDiskAtURL:(NSURL *)url
+                  driveUnit:(NSInteger)unit NS_SWIFT_NAME(autostartDisk(at:driveUnit:));
+- (BOOL)attachTapeAtURL:(NSURL *)url NS_SWIFT_NAME(attachTape(at:));
+- (BOOL)autostartTapeAtURL:(NSURL *)url NS_SWIFT_NAME(autostartTape(at:));
+- (BOOL)runProgramAtURL:(NSURL *)url NS_SWIFT_NAME(runProgram(at:));
+- (BOOL)attachCartridgeAtURL:(NSURL *)url NS_SWIFT_NAME(attachCartridge(at:));
+- (BOOL)ejectDiskFromDriveUnit:(NSInteger)unit NS_SWIFT_NAME(ejectDisk(fromDriveUnit:));
+- (BOOL)ejectTape;
+- (BOOL)ejectCartridge;
+- (BOOL)ejectAllMediaAndReset;
 - (void)stop;
 - (void)softReset;
 - (void)hardReset;

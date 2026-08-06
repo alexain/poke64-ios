@@ -51,12 +51,13 @@ Expand the persistent D64, PRG, CRT, TAP and T64 library:
 ## 5. Media and expansion devices
 
 - Add a unified Devices control for Drive, Tape, Cartridge/REU and Printer functions without expanding the main toolbar.
-- Support drive units 8–11 and selectable drive models.
-- Add disk control, mount/eject operations and multidisk sets.
+- Add per-device status, individual eject controls and direct access to the shared media-action workflow.
+- Support drive units 9–11 and selectable drive models in addition to the current Drive 8 workflow.
+- Add write protection, disk swapping and multidisk sets.
 - Add side-mounted drive activity LEDs beside the 4:3 display.
 - Add synchronized 1541 mechanical sounds when true drive emulation is available.
-- Add complete datasette transport controls and status.
-- Add cartridge management beyond initial loading and ejection.
+- Add complete datasette transport controls, counter and status.
+- Add dedicated cartridge status, individual cartridge eject and supported REU controls.
 - Add REU configuration and supported expansion options.
 
 ## 6. Graphics and audio
@@ -122,9 +123,9 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 ```text
 Commodore mouse validation
 → bottom C64 keyboard
+→ unified Devices control and per-device status
+→ additional drives, multidisk and datasette transport
 → library duplicate detection, metadata and media inspection
-→ unified Devices control
-→ drive, tape, cartridge and REU management
 → complete settings panels
 → CRT graphics and advanced audio
 → printer and networking

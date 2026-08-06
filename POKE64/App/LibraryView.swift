@@ -32,13 +32,8 @@ private enum LibraryFilter: String, CaseIterable, Identifiable {
 }
 
 struct LibraryView: View {
-    @ObservedObject var library: LibraryStore
-    let loadedItemID: UUID?
-    let temporaryMedia: TemporaryMediaInfo?
-    let temporaryMediaAddedItemID: UUID?
-    let onImport: (URL) throws -> LibraryItem
-    let onAddTemporaryMedia: () throws -> LibraryItem
-    let onRun: (LibraryItem) throws -> Void
+    @ObservedObject private var emulator: EmulatorModel
+    @ObservedObject private var library: LibraryStore
 
     @Environment(\.dismiss) private var dismiss
     @State private var filter: LibraryFilter = .all
@@ -47,7 +42,12 @@ struct LibraryView: View {
     @State private var showImporter = false
     @State private var errorMessage: String?
     @State private var deletionCandidate: LibraryItem?
-    @State private var newlyAddedTemporaryMediaItemID: UUID?
+    @State private var mediaActionPrompt: MediaActionPromptState?
+
+    init(emulator: EmulatorModel) {
+        _emulator = ObservedObject(wrappedValue: emulator)
+        _library = ObservedObject(wrappedValue: emulator.library)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,6 +64,11 @@ struct LibraryView: View {
             }
             .navigationSplitViewStyle(.balanced)
         }
+        .mediaActionPrompt(
+            prompt: $mediaActionPrompt,
+            emulator: emulator,
+            onComplete: { dismiss() }
+        )
         .fileImporter(
             isPresented: $showImporter,
             allowedContentTypes: [.data],
@@ -133,43 +138,47 @@ struct LibraryView: View {
 
     private var sidebar: some View {
         List {
-            if let temporaryMedia {
+            if !emulator.temporaryMediaItems.isEmpty {
                 Section("Current Media") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(spacing: 12) {
-                            LibraryMediaIcon(mediaType: temporaryMedia.mediaType, size: 42)
+                    ForEach(emulator.temporaryMediaItems) { temporaryMedia in
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(spacing: 12) {
+                                LibraryMediaIcon(mediaType: temporaryMedia.mediaType, size: 42)
 
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(temporaryMedia.title)
-                                    .font(.body.weight(.semibold))
-                                    .lineLimit(1)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(temporaryMedia.title)
+                                        .font(.body.weight(.semibold))
+                                        .lineLimit(1)
 
-                                Text(temporaryMedia.originalFilename)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                                    Text(temporaryMedia.originalFilename)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
 
-                                Text("Temporary \(temporaryMedia.mediaType.displayName) media")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
+                                    Text("Temporary \(temporaryMedia.mediaType.displayName) media")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
                             }
-                        }
 
-                        Button {
-                            addTemporaryMedia()
-                        } label: {
-                            Label(
-                                temporaryMediaIsAdded ? "Added to Library" : "Add to Library",
-                                systemImage: temporaryMediaIsAdded
-                                    ? "checkmark.circle.fill"
-                                    : "plus.circle.fill"
-                            )
-                            .frame(maxWidth: .infinity)
+                            Button {
+                                addTemporaryMedia(temporaryMedia)
+                            } label: {
+                                Label(
+                                    temporaryMedia.addedLibraryItemID == nil
+                                        ? "Add to Library"
+                                        : "Added to Library",
+                                    systemImage: temporaryMedia.addedLibraryItemID == nil
+                                        ? "plus.circle.fill"
+                                        : "checkmark.circle.fill"
+                                )
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(temporaryMedia.addedLibraryItemID != nil)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(temporaryMediaIsAdded)
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
                 }
             }
 
@@ -218,7 +227,7 @@ struct LibraryView: View {
                         LibraryRow(
                             item: item,
                             isSelected: selectedItemID == item.id,
-                            isRunning: loadedItemID == item.id
+                            isActive: emulator.mountedLibraryItemIDs.contains(item.id)
                         )
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -241,13 +250,13 @@ struct LibraryView: View {
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
-                            .disabled(loadedItemID == item.id)
+                            .disabled(emulator.mountedLibraryItemIDs.contains(item.id))
                         }
                         .contextMenu {
                             Button {
-                                run(item)
+                                beginMediaRequest(for: item)
                             } label: {
-                                Label("Run", systemImage: "play.fill")
+                                Label("Media Actions", systemImage: "play.circle")
                             }
 
                             Button {
@@ -266,7 +275,7 @@ struct LibraryView: View {
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
-                            .disabled(loadedItemID == item.id)
+                            .disabled(emulator.mountedLibraryItemIDs.contains(item.id))
                         }
                     }
                 }
@@ -293,8 +302,9 @@ struct LibraryView: View {
         if let item = selectedItem {
             LibraryDetailView(
                 item: item,
-                isRunning: loadedItemID == item.id,
-                onRun: { run(item) },
+                isActive: emulator.mountedLibraryItemIDs.contains(item.id),
+                availableDriveUnits: emulator.availableDriveUnits,
+                onAction: { action in beginMediaRequest(for: item, preferredAction: action) },
                 onToggleFavorite: { toggleFavorite(item) },
                 onRename: { title in rename(item, to: title) },
                 onDelete: { deletionCandidate = item }
@@ -334,11 +344,6 @@ struct LibraryView: View {
         return library.item(withID: selectedItemID)
     }
 
-    private var temporaryMediaIsAdded: Bool {
-        let itemID = newlyAddedTemporaryMediaItemID ?? temporaryMediaAddedItemID
-        guard let itemID else { return false }
-        return library.item(withID: itemID) != nil
-    }
 
     private var emptyTitle: String {
         switch filter {
@@ -388,10 +393,9 @@ struct LibraryView: View {
         }
     }
 
-    private func addTemporaryMedia() {
+    private func addTemporaryMedia(_ media: TemporaryMediaInfo) {
         do {
-            let item = try onAddTemporaryMedia()
-            newlyAddedTemporaryMediaItemID = item.id
+            let item = try emulator.addTemporaryMediaToLibrary(id: media.id)
             filter = .all
             selectedItemID = item.id
         } catch {
@@ -405,7 +409,7 @@ struct LibraryView: View {
 
         for url in urls {
             do {
-                lastImported = try onImport(url)
+                lastImported = try emulator.importIntoLibrary(url: url)
             } catch {
                 failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
             }
@@ -419,9 +423,41 @@ struct LibraryView: View {
         }
     }
 
-    private func run(_ item: LibraryItem) {
+    private func beginMediaRequest(
+        for item: LibraryItem,
+        preferredAction: MediaAction? = nil
+    ) {
         do {
-            try onRun(item)
+            let originalRequest = try emulator.actionRequest(for: item)
+            let request: MediaActionRequest
+            if let preferredAction {
+                request = MediaActionRequest(
+                    media: originalRequest.media,
+                    actions: [preferredAction]
+                )
+            } else {
+                request = originalRequest
+            }
+
+            if request.actions.count > 1 {
+                mediaActionPrompt = .choose(request)
+                return
+            }
+
+            guard let action = request.actions.first else { return }
+            if let replacement = emulator.replacementInfo(
+                for: action,
+                media: request.media
+            ) {
+                mediaActionPrompt = .replace(
+                    request,
+                    action: action,
+                    replacement: replacement
+                )
+                return
+            }
+
+            try emulator.performMediaAction(action, media: request.media)
             dismiss()
         } catch {
             errorMessage = error.localizedDescription
@@ -445,8 +481,8 @@ struct LibraryView: View {
     }
 
     private func delete(_ item: LibraryItem) {
-        guard loadedItemID != item.id else {
-            errorMessage = "Eject or replace the currently running media before deleting it."
+        guard !emulator.mountedLibraryItemIDs.contains(item.id) else {
+            errorMessage = "Eject or replace the active media before deleting it."
             deletionCandidate = nil
             return
         }
@@ -476,7 +512,7 @@ struct LibraryView: View {
 private struct LibraryRow: View {
     let item: LibraryItem
     let isSelected: Bool
-    let isRunning: Bool
+    let isActive: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -494,8 +530,8 @@ private struct LibraryRow: View {
                             .foregroundStyle(.yellow)
                     }
 
-                    if isRunning {
-                        Text("RUNNING")
+                    if isActive {
+                        Text("ACTIVE")
                             .font(.caption2.weight(.bold))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
@@ -692,8 +728,9 @@ private struct LibraryMediaIcon: View {
 
 private struct LibraryDetailView: View {
     let item: LibraryItem
-    let isRunning: Bool
-    let onRun: () -> Void
+    let isActive: Bool
+    let availableDriveUnits: [Int]
+    let onAction: (MediaAction) -> Void
     let onToggleFavorite: () -> Void
     let onRename: (String) -> Void
     let onDelete: () -> Void
@@ -702,15 +739,17 @@ private struct LibraryDetailView: View {
 
     init(
         item: LibraryItem,
-        isRunning: Bool,
-        onRun: @escaping () -> Void,
+        isActive: Bool,
+        availableDriveUnits: [Int],
+        onAction: @escaping (MediaAction) -> Void,
         onToggleFavorite: @escaping () -> Void,
         onRename: @escaping (String) -> Void,
         onDelete: @escaping () -> Void
     ) {
         self.item = item
-        self.isRunning = isRunning
-        self.onRun = onRun
+        self.isActive = isActive
+        self.availableDriveUnits = availableDriveUnits
+        self.onAction = onAction
         self.onToggleFavorite = onToggleFavorite
         self.onRename = onRename
         self.onDelete = onDelete
@@ -731,8 +770,8 @@ private struct LibraryDetailView: View {
                             .font(.callout.weight(.medium))
                             .foregroundStyle(.secondary)
 
-                        if isRunning {
-                            Label("Currently running", systemImage: "play.circle.fill")
+                        if isActive {
+                            Label(activeStatusTitle, systemImage: activeStatusSystemImage)
                                 .font(.caption)
                                 .foregroundStyle(.green)
                         }
@@ -740,13 +779,7 @@ private struct LibraryDetailView: View {
                 }
                 .padding(.vertical, 6)
 
-                Button {
-                    onRun()
-                } label: {
-                    Label(isRunning ? "Restart Media" : "Run", systemImage: "play.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
+                mediaActionButtons
             }
 
             Section("Title") {
@@ -794,10 +827,10 @@ private struct LibraryDetailView: View {
                 } label: {
                     Label("Delete from Library", systemImage: "trash")
                 }
-                .disabled(isRunning)
+                .disabled(isActive)
             } footer: {
-                if isRunning {
-                    Text("Currently running media cannot be deleted. Eject it or launch another item first.")
+                if isActive {
+                    Text("Active media cannot be deleted. Eject, reset or replace it first.")
                 }
             }
         }
@@ -805,6 +838,56 @@ private struct LibraryDetailView: View {
         .onChange(of: item.title) { _, newValue in
             editedTitle = newValue
         }
+    }
+
+    @ViewBuilder
+    private var mediaActionButtons: some View {
+        switch item.mediaType {
+        case .prg:
+            actionButton(.runProgram, prominent: true)
+
+        case .crt:
+            actionButton(.insertCartridgeAndReset, prominent: true)
+
+        case .d64:
+            ForEach(availableDriveUnits, id: \.self) { unit in
+                actionButton(.insertDisk(unit), prominent: false)
+                actionButton(.autostartDisk(unit), prominent: true)
+            }
+
+        case .tap, .t64:
+            actionButton(.insertTape, prominent: false)
+            actionButton(.autostartTape, prominent: true)
+        }
+    }
+
+    @ViewBuilder
+    private func actionButton(_ action: MediaAction, prominent: Bool) -> some View {
+        if prominent {
+            Button {
+                onAction(action)
+            } label: {
+                Label(action.title, systemImage: action.systemImage)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+        } else {
+            Button {
+                onAction(action)
+            } label: {
+                Label(action.title, systemImage: action.systemImage)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var activeStatusTitle: String {
+        item.mediaType == .prg ? "Currently running" : "Currently mounted"
+    }
+
+    private var activeStatusSystemImage: String {
+        item.mediaType == .prg ? "play.circle.fill" : "checkmark.circle.fill"
     }
 
     private static let fileSizeFormatter: ByteCountFormatter = {
