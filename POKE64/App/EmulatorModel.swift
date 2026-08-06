@@ -198,6 +198,35 @@ struct MediaReplacementInfo: Equatable {
     let destination: String
 }
 
+struct MountedDiskSetInfo: Identifiable, Equatable {
+    let unit: Int
+    let displayName: String
+    let members: [LibraryItem]
+    let currentIndex: Int
+
+    var id: Int { unit }
+
+    var currentItem: LibraryItem {
+        members[currentIndex]
+    }
+
+    var currentMemberLabel: String {
+        currentItem.mediaSetDescriptor?.memberLabel ?? currentItem.title
+    }
+
+    var positionLabel: String {
+        "Disk \(currentIndex + 1) of \(members.count)"
+    }
+
+    var hasPrevious: Bool {
+        currentIndex > 0
+    }
+
+    var hasNext: Bool {
+        currentIndex + 1 < members.count
+    }
+}
+
 struct TemporaryMediaInfo: Identifiable, Equatable {
     let id: UUID
     let title: String
@@ -362,6 +391,52 @@ final class EmulatorModel: ObservableObject {
 
     var mountedLibraryItemIDs: Set<UUID> {
         Set(uniqueMediaReferences.compactMap(\.libraryItemID))
+    }
+
+    var mountedDiskSetUnits: [Int] {
+        availableDriveUnits.filter { mountedDiskSetInfo(for: $0) != nil }
+    }
+
+    func mountedDiskSetInfo(for unit: Int) -> MountedDiskSetInfo? {
+        guard let mounted = mountedDisks[unit],
+              let libraryItemID = mounted.libraryItemID,
+              let currentItem = library.item(withID: libraryItemID),
+              let descriptor = currentItem.mediaSetDescriptor else {
+            return nil
+        }
+
+        let members = library.mediaSetMembers(for: currentItem)
+        guard members.count > 1,
+              let currentIndex = members.firstIndex(where: { $0.id == currentItem.id }) else {
+            return nil
+        }
+
+        return MountedDiskSetInfo(
+            unit: unit,
+            displayName: descriptor.displayName,
+            members: members,
+            currentIndex: currentIndex
+        )
+    }
+
+    func selectDiskSetMember(_ item: LibraryItem, in unit: Int) {
+        do {
+            let request = try actionRequest(for: item)
+            try performMediaAction(
+                .insertDisk(unit),
+                media: request.media,
+                replacingExisting: true
+            )
+        } catch {
+            present(error)
+        }
+    }
+
+    func selectAdjacentDisk(in unit: Int, offset: Int) {
+        guard let info = mountedDiskSetInfo(for: unit) else { return }
+        let targetIndex = info.currentIndex + offset
+        guard info.members.indices.contains(targetIndex) else { return }
+        selectDiskSetMember(info.members[targetIndex], in: unit)
     }
 
     func attach(videoView: C64MetalView) {
@@ -654,6 +729,23 @@ final class EmulatorModel: ObservableObject {
     func importIntoLibrary(url: URL) throws -> LibraryItem {
         let item = try library.importMedia(from: url)
         status = "Imported: \(item.title)"
+        return item
+    }
+
+    @discardableResult
+    func importIntoLibrary(
+        inspection: LibraryImportInspection,
+        resolution: LibraryImportResolution
+    ) throws -> LibraryItem {
+        let item = try library.importMedia(inspection, resolution: resolution)
+        switch resolution {
+        case .replaceExisting:
+            status = "Replaced library media: \(item.title)"
+        case .useExisting:
+            status = "Using existing library media: \(item.title)"
+        case .keepBoth:
+            status = "Imported: \(item.title)"
+        }
         return item
     }
 
@@ -1231,11 +1323,27 @@ final class EmulatorModel: ObservableObject {
         guard availableDriveUnits.contains(unit) else {
             throw EmulatorModelError.driveDisabled(unit)
         }
+        let driveModel = C64DriveModel.selected(for: unit)
+
+        if media.mediaType == .g64 {
+            let compatible = driveModel == .cbm1541
+                || driveModel == .cbm1541II
+                || driveModel == .cbm1571
+            guard compatible else {
+                throw EmulatorModelError.incompatibleDiskImage(
+                    unit: unit,
+                    format: media.mediaType.displayName,
+                    currentDrive: driveModel.title,
+                    requiredDrive: "a Commodore 1541, 1541-II or 1571"
+                )
+            }
+            return
+        }
+
         guard let format = BlankDiskImageFormat(mediaType: media.mediaType) else {
             return
         }
 
-        let driveModel = C64DriveModel.selected(for: unit)
         guard format.isCompatible(with: driveModel) else {
             throw EmulatorModelError.incompatibleDiskImage(
                 unit: unit,
@@ -1253,7 +1361,7 @@ final class EmulatorModel: ObservableObject {
             actions = [.runProgram]
         case .crt:
             actions = [.insertCartridgeAndReset]
-        case .d64, .d71, .d81:
+        case .d64, .d71, .d81, .g64:
             actions = availableDriveUnits.flatMap { unit in
                 [.insertDisk(unit), .autostartDisk(unit)]
             }

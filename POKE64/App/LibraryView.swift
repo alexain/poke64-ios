@@ -1,6 +1,60 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+
+private enum LibraryImportConflictKind {
+    case exactDuplicate
+    case filenameConflict
+}
+
+private struct PendingLibraryImportConflict: Identifiable {
+    let id = UUID()
+    let inspection: LibraryImportInspection
+    let existingItem: LibraryItem
+    let kind: LibraryImportConflictKind
+
+    var title: String {
+        switch kind {
+        case .exactDuplicate:
+            return "Duplicate Media"
+        case .filenameConflict:
+            return "Import Conflict"
+        }
+    }
+
+    var message: String {
+        switch kind {
+        case .exactDuplicate:
+            return "\(inspection.originalFilename) has the same SHA-256 content as “\(existingItem.title)”. Use the existing item or keep another copy?"
+        case .filenameConflict:
+            return "A different file named \(inspection.originalFilename) is already in the Library. Replace it, keep both versions or skip this file?"
+        }
+    }
+}
+
+private struct LibraryMediaSetListEntry: Identifiable {
+    let descriptor: LibraryMediaSetDescriptor
+    let members: [LibraryItem]
+
+    var id: String {
+        "set:\(descriptor.key)"
+    }
+}
+
+private enum LibraryListEntry: Identifiable {
+    case item(LibraryItem)
+    case mediaSet(LibraryMediaSetListEntry)
+
+    var id: String {
+        switch self {
+        case .item(let item):
+            return "item:\(item.id.uuidString)"
+        case .mediaSet(let set):
+            return set.id
+        }
+    }
+}
+
 private enum LibraryFilter: String, CaseIterable, Identifiable {
     case all
     case favorites
@@ -44,6 +98,11 @@ struct LibraryView: View {
     @State private var errorMessage: String?
     @State private var deletionCandidate: LibraryItem?
     @State private var mediaActionPrompt: MediaActionPromptState?
+    @State private var importQueue: [URL] = []
+    @State private var importFailures: [String] = []
+    @State private var lastImportedItemID: UUID?
+    @State private var pendingImportConflict: PendingLibraryImportConflict?
+    @State private var expandedMediaSetKeys: Set<String> = []
 
     init(emulator: EmulatorModel) {
         _emulator = ObservedObject(wrappedValue: emulator)
@@ -95,6 +154,45 @@ struct LibraryView: View {
             case .failure(let error):
                 errorMessage = error.localizedDescription
             }
+        }
+        .confirmationDialog(
+            pendingImportConflict?.title ?? "Import Conflict",
+            isPresented: Binding(
+                get: { pendingImportConflict != nil },
+                set: { isPresented in
+                    if !isPresented, pendingImportConflict != nil {
+                        skipImportConflict()
+                    }
+                }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingImportConflict
+        ) { conflict in
+            switch conflict.kind {
+            case .exactDuplicate:
+                Button("Use Existing") {
+                    resolveImportConflict(.useExisting(conflict.existingItem))
+                }
+                Button("Import Copy") {
+                    resolveImportConflict(.keepBoth)
+                }
+                Button("Skip", role: .cancel) {
+                    skipImportConflict()
+                }
+
+            case .filenameConflict:
+                Button("Replace", role: .destructive) {
+                    resolveImportConflict(.replaceExisting(conflict.existingItem))
+                }
+                Button("Keep Both") {
+                    resolveImportConflict(.keepBoth)
+                }
+                Button("Skip", role: .cancel) {
+                    skipImportConflict()
+                }
+            }
+        } message: { conflict in
+            Text(conflict.message)
         }
         .alert(
             "Delete media?",
@@ -244,59 +342,29 @@ struct LibraryView: View {
                 )
             } else {
                 List {
-                    ForEach(filteredItems) { item in
-                        LibraryRow(
-                            item: item,
-                            isSelected: selectedItemID == item.id,
-                            isActive: emulator.mountedLibraryItemIDs.contains(item.id)
-                        )
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            selectedItemID = item.id
-                        }
-                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                            Button {
-                                toggleFavorite(item)
+                    ForEach(libraryListEntries) { entry in
+                        switch entry {
+                        case .item(let item):
+                            libraryItemRow(item)
+
+                        case .mediaSet(let mediaSet):
+                            DisclosureGroup(
+                                isExpanded: mediaSetExpansionBinding(for: mediaSet.descriptor.key)
+                            ) {
+                                ForEach(mediaSet.members) { member in
+                                    libraryItemRow(member, isMediaSetMember: true)
+                                }
                             } label: {
-                                Label(
-                                    item.isFavorite ? "Unfavorite" : "Favorite",
-                                    systemImage: item.isFavorite ? "star.slash" : "star"
+                                LibraryMediaSetRow(
+                                    mediaSet: mediaSet,
+                                    selectedItemID: selectedItemID,
+                                    activeItemIDs: emulator.mountedLibraryItemIDs
                                 )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectedItemID = preferredItem(in: mediaSet).id
+                                }
                             }
-                            .tint(.yellow)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                deletionCandidate = item
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                            .disabled(emulator.mountedLibraryItemIDs.contains(item.id))
-                        }
-                        .contextMenu {
-                            Button {
-                                beginMediaRequest(for: item)
-                            } label: {
-                                Label("Media Actions", systemImage: "play.circle")
-                            }
-
-                            Button {
-                                toggleFavorite(item)
-                            } label: {
-                                Label(
-                                    item.isFavorite ? "Remove from Favorites" : "Add to Favorites",
-                                    systemImage: item.isFavorite ? "star.slash" : "star"
-                                )
-                            }
-
-                            Divider()
-
-                            Button(role: .destructive) {
-                                deletionCandidate = item
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                            .disabled(emulator.mountedLibraryItemIDs.contains(item.id))
                         }
                     }
                 }
@@ -325,7 +393,12 @@ struct LibraryView: View {
                 item: item,
                 isActive: emulator.mountedLibraryItemIDs.contains(item.id),
                 availableDriveUnits: emulator.availableDriveUnits,
+                mediaSetItems: library.mediaSetMembers(for: item),
                 onAction: { action in beginMediaRequest(for: item, preferredAction: action) },
+                onSelectMediaSetItem: { selectedItemID = $0.id },
+                onMediaSetAction: { member, action in
+                    beginMediaRequest(for: member, preferredAction: action)
+                },
                 onToggleFavorite: { toggleFavorite(item) },
                 onRename: { title in rename(item, to: title) },
                 onDelete: { deletionCandidate = item }
@@ -358,6 +431,136 @@ struct LibraryView: View {
                 || $0.originalFilename.localizedCaseInsensitiveContains(searchText)
                 || $0.mediaType.displayName.localizedCaseInsensitiveContains(searchText)
         }
+    }
+
+    private var libraryListEntries: [LibraryListEntry] {
+        var emittedSetKeys: Set<String> = []
+        var entries: [LibraryListEntry] = []
+
+        for item in filteredItems {
+            guard let descriptor = item.mediaSetDescriptor else {
+                entries.append(.item(item))
+                continue
+            }
+
+            let members = filteredItems
+                .filter { $0.mediaSetDescriptor?.key == descriptor.key }
+                .sorted(by: Self.mediaSetMemberSort)
+
+            guard members.count > 1 else {
+                entries.append(.item(item))
+                continue
+            }
+
+            guard emittedSetKeys.insert(descriptor.key).inserted else { continue }
+            entries.append(
+                .mediaSet(
+                    LibraryMediaSetListEntry(
+                        descriptor: descriptor,
+                        members: members
+                    )
+                )
+            )
+        }
+
+        return entries
+    }
+
+    @ViewBuilder
+    private func libraryItemRow(
+        _ item: LibraryItem,
+        isMediaSetMember: Bool = false
+    ) -> some View {
+        LibraryRow(
+            item: item,
+            isSelected: selectedItemID == item.id,
+            isActive: emulator.mountedLibraryItemIDs.contains(item.id)
+        )
+        .padding(.leading, isMediaSetMember ? 18 : 0)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectedItemID = item.id
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button {
+                toggleFavorite(item)
+            } label: {
+                Label(
+                    item.isFavorite ? "Unfavorite" : "Favorite",
+                    systemImage: item.isFavorite ? "star.slash" : "star"
+                )
+            }
+            .tint(.yellow)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                deletionCandidate = item
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            .disabled(emulator.mountedLibraryItemIDs.contains(item.id))
+        }
+        .contextMenu {
+            Button {
+                beginMediaRequest(for: item)
+            } label: {
+                Label("Media Actions", systemImage: "play.circle")
+            }
+
+            Button {
+                toggleFavorite(item)
+            } label: {
+                Label(
+                    item.isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                    systemImage: item.isFavorite ? "star.slash" : "star"
+                )
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                deletionCandidate = item
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            .disabled(emulator.mountedLibraryItemIDs.contains(item.id))
+        }
+    }
+
+    private func mediaSetExpansionBinding(for key: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedMediaSetKeys.contains(key) },
+            set: { expanded in
+                if expanded {
+                    expandedMediaSetKeys.insert(key)
+                } else {
+                    expandedMediaSetKeys.remove(key)
+                }
+            }
+        )
+    }
+
+    private func preferredItem(in mediaSet: LibraryMediaSetListEntry) -> LibraryItem {
+        if let selectedItemID,
+           let selected = mediaSet.members.first(where: { $0.id == selectedItemID }) {
+            return selected
+        }
+        if let active = mediaSet.members.first(where: {
+            emulator.mountedLibraryItemIDs.contains($0.id)
+        }) {
+            return active
+        }
+        return mediaSet.members[0]
+    }
+
+    private static func mediaSetMemberSort(
+        _ lhs: LibraryItem,
+        _ rhs: LibraryItem
+    ) -> Bool {
+        let lhsOrder = lhs.mediaSetDescriptor?.sortOrder ?? Int.max
+        let rhsOrder = rhs.mediaSetDescriptor?.sortOrder ?? Int.max
+        if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
+        return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
     }
 
     private var selectedItem: LibraryItem? {
@@ -395,7 +598,7 @@ struct LibraryView: View {
 
         switch filter {
         case .all:
-            return "Import media or create a blank D64, D71 or D81 disk to begin."
+            return "Import media, including G64 track images, or create a blank D64, D71 or D81 disk to begin."
         case .favorites:
             return "Mark library items as favorites to collect them here."
         case .recent:
@@ -453,23 +656,89 @@ struct LibraryView: View {
     }
 
     private func importFiles(_ urls: [URL]) {
-        var lastImported: LibraryItem?
-        var failures: [String] = []
+        importQueue = urls
+        importFailures = []
+        lastImportedItemID = nil
+        pendingImportConflict = nil
+        processNextImport()
+    }
 
-        for url in urls {
+    private func processNextImport() {
+        while !importQueue.isEmpty {
+            let url = importQueue.removeFirst()
+
             do {
-                lastImported = try emulator.importIntoLibrary(url: url)
+                let inspection = try library.inspectImport(from: url)
+
+                if let duplicate = inspection.exactDuplicate {
+                    pendingImportConflict = PendingLibraryImportConflict(
+                        inspection: inspection,
+                        existingItem: duplicate,
+                        kind: .exactDuplicate
+                    )
+                    return
+                }
+
+                if let conflict = inspection.filenameConflict {
+                    pendingImportConflict = PendingLibraryImportConflict(
+                        inspection: inspection,
+                        existingItem: conflict,
+                        kind: .filenameConflict
+                    )
+                    return
+                }
+
+                let item = try emulator.importIntoLibrary(
+                    inspection: inspection,
+                    resolution: .keepBoth
+                )
+                lastImportedItemID = item.id
             } catch {
-                failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                importFailures.append(
+                    "\(url.lastPathComponent): \(error.localizedDescription)"
+                )
             }
         }
 
-        filter = .all
-        selectedItemID = lastImported?.id
+        finishImportQueue()
+    }
 
-        if !failures.isEmpty {
-            errorMessage = failures.joined(separator: "\n\n")
+    private func resolveImportConflict(_ resolution: LibraryImportResolution) {
+        guard let conflict = pendingImportConflict else { return }
+        pendingImportConflict = nil
+
+        do {
+            let item = try emulator.importIntoLibrary(
+                inspection: conflict.inspection,
+                resolution: resolution
+            )
+            lastImportedItemID = item.id
+        } catch {
+            importFailures.append(
+                "\(conflict.inspection.originalFilename): \(error.localizedDescription)"
+            )
         }
+
+        processNextImport()
+    }
+
+    private func skipImportConflict() {
+        pendingImportConflict = nil
+        processNextImport()
+    }
+
+    private func finishImportQueue() {
+        filter = .all
+        searchText = ""
+        selectedItemID = lastImportedItemID
+
+        if !importFailures.isEmpty {
+            errorMessage = importFailures.joined(separator: "\n\n")
+        }
+
+        importQueue = []
+        importFailures = []
+        lastImportedItemID = nil
     }
 
     private func beginMediaRequest(
@@ -705,6 +974,89 @@ struct NewDiskView: View {
     }
 }
 
+private struct LibraryMediaSetRow: View {
+    let mediaSet: LibraryMediaSetListEntry
+    let selectedItemID: UUID?
+    let activeItemIDs: Set<UUID>
+
+    var body: some View {
+        HStack(spacing: 12) {
+            LibraryMediaIcon(mediaType: mediaSet.members[0].mediaType, size: 38)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(mediaSet.descriptor.displayName)
+                        .font(.body.weight(.semibold))
+                        .lineLimit(1)
+
+                    Text("MULTI-DISK")
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.16), in: Capsule())
+                        .foregroundStyle(Color.accentColor)
+
+                    if isActive {
+                        Text("ACTIVE")
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(.green.opacity(0.18), in: Capsule())
+                            .foregroundStyle(.green)
+                    }
+                }
+
+                Text("\(mediaSet.members.count) disks · \(formatSummary)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let activeMember {
+                    Text("Mounted: \(activeMember.mediaSetDescriptor?.memberLabel ?? activeMember.title)")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                } else {
+                    Text(memberSummary)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 8)
+        }
+        .padding(.vertical, 4)
+        .listRowBackground(
+            isSelected
+                ? Color.accentColor.opacity(0.14)
+                : Color.clear
+        )
+    }
+
+    private var isSelected: Bool {
+        guard let selectedItemID else { return false }
+        return mediaSet.members.contains(where: { $0.id == selectedItemID })
+    }
+
+    private var activeMember: LibraryItem? {
+        mediaSet.members.first(where: { activeItemIDs.contains($0.id) })
+    }
+
+    private var isActive: Bool {
+        activeMember != nil
+    }
+
+    private var formatSummary: String {
+        let formats = Set(mediaSet.members.map { $0.mediaType.displayName })
+        return formats.sorted().joined(separator: " / ")
+    }
+
+    private var memberSummary: String {
+        mediaSet.members
+            .compactMap { $0.mediaSetDescriptor?.memberLabel }
+            .joined(separator: " · ")
+    }
+}
+
 private struct LibraryRow: View {
     let item: LibraryItem
     let isSelected: Bool
@@ -741,7 +1093,7 @@ private struct LibraryRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
-                Text("\(item.mediaType.displayName) · \(Self.fileSizeFormatter.string(fromByteCount: item.fileSize))")
+                Text(rowMetadata)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -760,6 +1112,18 @@ private struct LibraryRow: View {
                 ? Color.accentColor.opacity(0.14)
                 : Color.clear
         )
+    }
+
+
+    private var rowMetadata: String {
+        var components = [
+            item.mediaType.displayName,
+            Self.fileSizeFormatter.string(fromByteCount: item.fileSize)
+        ]
+        if let descriptor = item.mediaSetDescriptor {
+            components.append(descriptor.memberLabel)
+        }
+        return components.joined(separator: " · ")
     }
 
     private static let fileSizeFormatter: ByteCountFormatter = {
@@ -790,7 +1154,7 @@ private struct LibraryMediaIcon: View {
     @ViewBuilder
     private var mediaArtwork: some View {
         switch mediaType {
-        case .d64, .d71, .d81:
+        case .d64, .d71, .d81, .g64:
             floppyArtwork
         case .crt:
             cartridgeArtwork
@@ -926,7 +1290,10 @@ private struct LibraryDetailView: View {
     let item: LibraryItem
     let isActive: Bool
     let availableDriveUnits: [Int]
+    let mediaSetItems: [LibraryItem]
     let onAction: (MediaAction) -> Void
+    let onSelectMediaSetItem: (LibraryItem) -> Void
+    let onMediaSetAction: (LibraryItem, MediaAction) -> Void
     let onToggleFavorite: () -> Void
     let onRename: (String) -> Void
     let onDelete: () -> Void
@@ -937,7 +1304,10 @@ private struct LibraryDetailView: View {
         item: LibraryItem,
         isActive: Bool,
         availableDriveUnits: [Int],
+        mediaSetItems: [LibraryItem],
         onAction: @escaping (MediaAction) -> Void,
+        onSelectMediaSetItem: @escaping (LibraryItem) -> Void,
+        onMediaSetAction: @escaping (LibraryItem, MediaAction) -> Void,
         onToggleFavorite: @escaping () -> Void,
         onRename: @escaping (String) -> Void,
         onDelete: @escaping () -> Void
@@ -945,7 +1315,10 @@ private struct LibraryDetailView: View {
         self.item = item
         self.isActive = isActive
         self.availableDriveUnits = availableDriveUnits
+        self.mediaSetItems = mediaSetItems
         self.onAction = onAction
+        self.onSelectMediaSetItem = onSelectMediaSetItem
+        self.onMediaSetAction = onMediaSetAction
         self.onToggleFavorite = onToggleFavorite
         self.onRename = onRename
         self.onDelete = onDelete
@@ -1001,11 +1374,92 @@ private struct LibraryDetailView: View {
                     "Size",
                     value: Self.fileSizeFormatter.string(fromByteCount: item.fileSize)
                 )
+
+                if let driveRequirement = item.mediaType.driveRequirementDescription {
+                    LabeledContent("Compatible drive", value: driveRequirement)
+                }
+
+                if let descriptor = item.mediaSetDescriptor {
+                    LabeledContent("Detected set", value: descriptor.displayName)
+                    LabeledContent("Set member", value: descriptor.memberLabel)
+                }
+
+                if let hash = item.sha256 {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("SHA-256")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(hash)
+                            .font(.caption2)
+                            .monospaced()
+                            .textSelection(.enabled)
+                    }
+                }
+
                 LabeledContent("Imported", value: item.importedAt.formatted(date: .abbreviated, time: .shortened))
                 LabeledContent(
                     "Last opened",
                     value: item.lastOpenedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Never"
                 )
+            }
+
+            if mediaSetItems.count > 1 {
+                Section {
+                    ForEach(mediaSetItems) { member in
+                        HStack(spacing: 10) {
+                            Button {
+                                onSelectMediaSetItem(member)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(
+                                        systemName: member.id == item.id
+                                            ? "checkmark.circle.fill"
+                                            : "circle"
+                                    )
+                                    .foregroundStyle(
+                                        member.id == item.id
+                                            ? Color.accentColor
+                                            : Color.secondary
+                                    )
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(member.mediaSetDescriptor?.memberLabel ?? member.title)
+                                            .foregroundStyle(.primary)
+                                        Text(member.originalFilename)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+
+                            Menu {
+                                ForEach(availableDriveUnits, id: \.self) { unit in
+                                    Button {
+                                        onMediaSetAction(member, .insertDisk(unit))
+                                    } label: {
+                                        Label(
+                                            "Insert in Drive \(unit)",
+                                            systemImage: "externaldrive.fill"
+                                        )
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .frame(width: 32, height: 32)
+                            }
+                            .accessibilityLabel("Insert \(member.title)")
+                        }
+                    }
+                } header: {
+                    Text("Multi-disk Set")
+                } footer: {
+                    Text("POKE64 groups disks automatically when filenames use labels such as Disk 1, Disk 2, Side A or Side B. Select a member, then insert it in the required drive.")
+                }
             }
 
             Section {
@@ -1045,7 +1499,7 @@ private struct LibraryDetailView: View {
         case .crt:
             actionButton(.insertCartridgeAndReset, prominent: true)
 
-        case .d64, .d71, .d81:
+        case .d64, .d71, .d81, .g64:
             ForEach(availableDriveUnits, id: \.self) { unit in
                 actionButton(.insertDisk(unit), prominent: false)
                 actionButton(.autostartDisk(unit), prominent: true)

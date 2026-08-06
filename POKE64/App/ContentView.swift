@@ -918,6 +918,7 @@ private struct DevicesConfigurationView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var errorMessage: String?
+    @State private var driveMediaSetSelection: DriveMediaSetSelection?
 
     var body: some View {
         NavigationStack {
@@ -962,6 +963,9 @@ private struct DevicesConfigurationView: View {
                 Text(errorMessage ?? "Unknown error")
             }
         }
+        .sheet(item: $driveMediaSetSelection) { selection in
+            DriveMediaSetSheet(unit: selection.unit, emulator: emulator)
+        }
     }
 
     @ViewBuilder
@@ -987,6 +991,24 @@ private struct DevicesConfigurationView: View {
                     perform(.autostartDisk(unit), media: media)
                 } label: {
                     Label("Autostart Disk", systemImage: "play.circle.fill")
+                }
+
+                if let setInfo = emulator.mountedDiskSetInfo(for: unit) {
+                    LabeledContent("Multi-disk set") {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(setInfo.displayName)
+                                .lineLimit(1)
+                            Text("\(setInfo.currentMemberLabel) · \(setInfo.positionLabel)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Button {
+                        driveMediaSetSelection = DriveMediaSetSelection(unit: unit)
+                    } label: {
+                        Label("Swap Multi-Disk Set…", systemImage: "arrow.left.arrow.right.circle")
+                    }
                 }
 
                 Button {
@@ -1534,6 +1556,101 @@ private struct DatasetteStatusPanel: View {
     }
 }
 
+private struct DriveMediaSetSelection: Identifiable {
+    let unit: Int
+    var id: Int { unit }
+}
+
+private struct DriveMediaSetSheet: View {
+    let unit: Int
+    @ObservedObject var emulator: EmulatorModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let info = emulator.mountedDiskSetInfo(for: unit) {
+                    List {
+                        Section {
+                            LabeledContent("Drive", value: "\(unit)")
+                            LabeledContent("Set", value: info.displayName)
+                            LabeledContent("Current", value: info.currentMemberLabel)
+                            LabeledContent("Position", value: info.positionLabel)
+                        }
+
+                        Section("Available Disks") {
+                            ForEach(info.members) { member in
+                                let memberIndex = info.members.firstIndex(where: {
+                                    $0.id == member.id
+                                }) ?? 0
+                                let isCurrent = member.id == info.currentItem.id
+
+                                Button {
+                                    emulator.selectDiskSetMember(member, in: unit)
+                                    dismiss()
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(
+                                            systemName: isCurrent
+                                                ? "checkmark.circle.fill"
+                                                : "circle"
+                                        )
+                                        .foregroundStyle(
+                                            isCurrent
+                                                ? Color.accentColor
+                                                : Color.secondary
+                                        )
+
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(
+                                                member.mediaSetDescriptor?.memberLabel
+                                                    ?? "Disk \(memberIndex + 1)"
+                                            )
+                                            .foregroundStyle(.primary)
+
+                                            Text(member.originalFilename)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+
+                                        Spacer()
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(isCurrent)
+                            }
+                        }
+
+                        Section {
+                            Text("Selecting another member replaces the image in Drive \(unit) immediately, without resetting the C64.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "Multi-disk Set Unavailable",
+                        systemImage: "externaldrive.badge.questionmark",
+                        description: Text("The mounted disk is no longer part of a detected Library set.")
+                    )
+                }
+            }
+            .navigationTitle("Swap Multi-Disk Set")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
 private struct DriveStatusPanel: View {
     let drive8PowerOn: Bool
     let drive9Enabled: Bool
@@ -1810,7 +1927,7 @@ private struct MediaActionPromptModifier: ViewModifier {
     private var chooseDialogMessage: String? {
         guard let prompt, case .choose = prompt.mode else { return nil }
         switch prompt.request.media.mediaType {
-        case .d64, .d71, .d81:
+        case .d64, .d71, .d81, .g64:
             return "Choose whether to insert the disk without resetting the C64 or autostart it."
         case .tap:
             return "Choose whether to insert the TAP image without resetting the C64 or autostart it."

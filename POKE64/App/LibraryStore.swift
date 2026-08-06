@@ -1,4 +1,5 @@
 import Combine
+import CryptoKit
 import Foundation
 
 /// Media formats currently exposed by the first persistent-library implementation.
@@ -6,6 +7,7 @@ enum LibraryMediaType: String, Codable, CaseIterable, Hashable {
     case d64
     case d71
     case d81
+    case g64
     case prg
     case crt
     case tap
@@ -21,7 +23,7 @@ enum LibraryMediaType: String, Codable, CaseIterable, Hashable {
 
     var systemImage: String {
         switch self {
-        case .d64, .d71, .d81:
+        case .d64, .d71, .d81, .g64:
             return "externaldrive.fill"
         case .prg:
             return "doc.text.fill"
@@ -35,6 +37,119 @@ enum LibraryMediaType: String, Codable, CaseIterable, Hashable {
     static var supportedExtensionsDescription: String {
         allCases.map(\.displayName).joined(separator: ", ")
     }
+
+    var isDiskImage: Bool {
+        switch self {
+        case .d64, .d71, .d81, .g64:
+            return true
+        case .prg, .crt, .tap, .t64:
+            return false
+        }
+    }
+
+    var driveRequirementDescription: String? {
+        switch self {
+        case .d64, .g64:
+            return "Commodore 1541, 1541-II or 1571"
+        case .d71:
+            return "Commodore 1571"
+        case .d81:
+            return "Commodore 1581"
+        case .prg, .crt, .tap, .t64:
+            return nil
+        }
+    }
+
+}
+
+struct LibraryMediaSetDescriptor: Hashable {
+    let key: String
+    let displayName: String
+    let memberLabel: String
+    let sortOrder: Int
+
+    static func detect(in filename: String) -> LibraryMediaSetDescriptor? {
+        let stem = URL(fileURLWithPath: filename)
+            .deletingPathExtension()
+            .lastPathComponent
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let markerPattern = #"(?i)(?:^|[\s._(\[])(?:disk|disc|side)[\s._-]*([0-9]+|[a-z])"#
+        guard let markerExpression = try? NSRegularExpression(pattern: markerPattern),
+              let markerMatch = markerExpression.firstMatch(
+                in: stem,
+                range: NSRange(stem.startIndex..<stem.endIndex, in: stem)
+              ),
+              let markerRange = Range(markerMatch.range(at: 0), in: stem) else {
+            return nil
+        }
+
+        let base = String(stem[..<markerRange.lowerBound])
+            .trimmingCharacters(in: CharacterSet(charactersIn: " ._-()[]"))
+        guard !base.isEmpty else { return nil }
+
+        let suffix = String(stem[markerRange.lowerBound...])
+        let diskMember = captureMember(
+            in: suffix,
+            pattern: #"(?i)(?:disk|disc)[\s._-]*([0-9]+|[a-z])"#
+        )
+        let sideMember = captureMember(
+            in: suffix,
+            pattern: #"(?i)side[\s._-]*([0-9]+|[a-z])"#
+        )
+        guard diskMember != nil || sideMember != nil else { return nil }
+
+        let normalizedKey = base
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+            .unicodeScalars
+            .filter { CharacterSet.alphanumerics.contains($0) }
+            .map(String.init)
+            .joined()
+        guard !normalizedKey.isEmpty else { return nil }
+
+        var labels: [String] = []
+        if let diskMember { labels.append("Disk \(diskMember)") }
+        if let sideMember { labels.append("Side \(sideMember)") }
+
+        let diskOrder = memberOrder(diskMember)
+        let sideOrder = memberOrder(sideMember)
+        let sortOrder: Int
+        if diskMember != nil {
+            sortOrder = diskOrder * 100 + sideOrder
+        } else {
+            sortOrder = 10_000 + sideOrder
+        }
+
+        return LibraryMediaSetDescriptor(
+            key: normalizedKey,
+            displayName: base,
+            memberLabel: labels.joined(separator: " · "),
+            sortOrder: sortOrder
+        )
+    }
+
+    private static func captureMember(
+        in text: String,
+        pattern: String
+    ) -> String? {
+        guard let expression = try? NSRegularExpression(pattern: pattern),
+              let match = expression.firstMatch(
+                in: text,
+                range: NSRange(text.startIndex..<text.endIndex, in: text)
+              ),
+              let range = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+        return String(text[range]).uppercased()
+    }
+
+    private static func memberOrder(_ member: String?) -> Int {
+        guard let member else { return 0 }
+        if let numeric = Int(member) { return numeric }
+        guard let scalar = member.unicodeScalars.first else { return Int.max / 4 }
+        return Int(scalar.value) - 64
+    }
 }
 
 struct LibraryItem: Identifiable, Codable, Hashable {
@@ -44,9 +159,31 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     let storedFilename: String
     let mediaType: LibraryMediaType
     let fileSize: Int64
+    let sha256: String?
     let importedAt: Date
     var lastOpenedAt: Date?
     var isFavorite: Bool
+
+    var mediaSetDescriptor: LibraryMediaSetDescriptor? {
+        guard mediaType.isDiskImage else { return nil }
+        return LibraryMediaSetDescriptor.detect(in: originalFilename)
+    }
+}
+
+struct LibraryImportInspection {
+    let data: Data
+    let originalFilename: String
+    let mediaType: LibraryMediaType
+    let fileSize: Int64
+    let sha256: String
+    let exactDuplicate: LibraryItem?
+    let filenameConflict: LibraryItem?
+}
+
+enum LibraryImportResolution {
+    case keepBoth
+    case replaceExisting(LibraryItem)
+    case useExisting(LibraryItem)
 }
 
 enum BlankDiskImageFormat: String, CaseIterable, Identifiable, Hashable {
@@ -119,7 +256,7 @@ enum BlankDiskImageFormat: String, CaseIterable, Identifiable, Hashable {
         case .d64: self = .d64
         case .d71: self = .d71
         case .d81: self = .d81
-        case .prg, .crt, .tap, .t64:
+        case .g64, .prg, .crt, .tap, .t64:
             return nil
         }
     }
@@ -256,11 +393,10 @@ final class LibraryStore: ObservableObject {
             }
     }
 
-    @discardableResult
-    func importMedia(
+    func inspectImport(
         from sourceURL: URL,
         originalFilename: String? = nil
-    ) throws -> LibraryItem {
+    ) throws -> LibraryImportInspection {
         let accessing = sourceURL.startAccessingSecurityScopedResource()
         defer {
             if accessing {
@@ -268,7 +404,7 @@ final class LibraryStore: ObservableObject {
             }
         }
 
-        let values = try sourceURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        let values = try sourceURL.resourceValues(forKeys: [.isRegularFileKey])
         guard values.isRegularFile == true else {
             throw LibraryStoreError.sourceIsNotAFile
         }
@@ -287,21 +423,103 @@ final class LibraryStore: ObservableObject {
             throw LibraryStoreError.unsupportedFormat(fileExtension)
         }
 
+        let data = try Data(contentsOf: sourceURL, options: [.mappedIfSafe])
+        let hash = Self.sha256(data)
+        let exactDuplicate = items.first {
+            $0.fileSize == Int64(data.count) && $0.sha256 == hash
+        }
+        let filenameConflict = items.first { item in
+            item.originalFilename.compare(
+                resolvedOriginalFilename,
+                options: [.caseInsensitive, .diacriticInsensitive]
+            ) == .orderedSame && item.sha256 != hash
+        }
+
+        return LibraryImportInspection(
+            data: data,
+            originalFilename: resolvedOriginalFilename,
+            mediaType: mediaType,
+            fileSize: Int64(data.count),
+            sha256: hash,
+            exactDuplicate: exactDuplicate,
+            filenameConflict: filenameConflict
+        )
+    }
+
+    @discardableResult
+    func importMedia(
+        from sourceURL: URL,
+        originalFilename: String? = nil
+    ) throws -> LibraryItem {
+        let inspection = try inspectImport(
+            from: sourceURL,
+            originalFilename: originalFilename
+        )
+        if let duplicate = inspection.exactDuplicate {
+            return try importMedia(inspection, resolution: .useExisting(duplicate))
+        }
+        return try importMedia(inspection, resolution: .keepBoth)
+    }
+
+    @discardableResult
+    func importMedia(
+        _ inspection: LibraryImportInspection,
+        resolution: LibraryImportResolution
+    ) throws -> LibraryItem {
+        switch resolution {
+        case .useExisting(let item):
+            guard let existing = self.item(withID: item.id) else {
+                throw LibraryStoreError.itemMissing
+            }
+            return existing
+
+        case .replaceExisting(let item):
+            return try replace(item, with: inspection)
+
+        case .keepBoth:
+            return try storeNewImport(inspection)
+        }
+    }
+
+    func mediaSetMembers(for item: LibraryItem) -> [LibraryItem] {
+        guard let descriptor = item.mediaSetDescriptor else { return [] }
+
+        return items
+            .filter { candidate in
+                candidate.mediaSetDescriptor?.key == descriptor.key
+            }
+            .sorted { lhs, rhs in
+                let lhsDescriptor = lhs.mediaSetDescriptor
+                let rhsDescriptor = rhs.mediaSetDescriptor
+                let lhsOrder = lhsDescriptor?.sortOrder ?? Int.max
+                let rhsOrder = rhsDescriptor?.sortOrder ?? Int.max
+                if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
+                return Self.defaultSort(lhs, rhs)
+            }
+    }
+
+    private func storeNewImport(
+        _ inspection: LibraryImportInspection
+    ) throws -> LibraryItem {
+        let data = inspection.data
         try prepareStorage()
 
         let id = UUID()
-        let storedFilename = id.uuidString.lowercased() + "." + mediaType.rawValue
-        let destinationURL = mediaDirectoryURL.appendingPathComponent(storedFilename, isDirectory: false)
-        try fileManager.copyItem(at: sourceURL, to: destinationURL)
+        let storedFilename = id.uuidString.lowercased() + "." + inspection.mediaType.rawValue
+        let destinationURL = mediaDirectoryURL.appendingPathComponent(
+            storedFilename,
+            isDirectory: false
+        )
+        try data.write(to: destinationURL, options: .atomic)
 
-        let title = Self.defaultTitle(forFilename: resolvedOriginalFilename)
         let item = LibraryItem(
             id: id,
-            title: title,
-            originalFilename: resolvedOriginalFilename,
+            title: Self.defaultTitle(forFilename: inspection.originalFilename),
+            originalFilename: inspection.originalFilename,
             storedFilename: storedFilename,
-            mediaType: mediaType,
-            fileSize: Int64(values.fileSize ?? 0),
+            mediaType: inspection.mediaType,
+            fileSize: Int64(data.count),
+            sha256: Self.sha256(data),
             importedAt: Date(),
             lastOpenedAt: nil,
             isFavorite: false
@@ -319,6 +537,56 @@ final class LibraryStore: ObservableObject {
         }
 
         return item
+    }
+
+    private func replace(
+        _ existingItem: LibraryItem,
+        with inspection: LibraryImportInspection
+    ) throws -> LibraryItem {
+        guard let index = items.firstIndex(where: { $0.id == existingItem.id }) else {
+            throw LibraryStoreError.itemMissing
+        }
+
+        let destinationURL = mediaDirectoryURL.appendingPathComponent(
+            existingItem.storedFilename,
+            isDirectory: false
+        )
+        guard fileManager.fileExists(atPath: destinationURL.path) else {
+            throw LibraryStoreError.storedFileMissing(existingItem.originalFilename)
+        }
+
+        let replacementData = inspection.data
+        let previousData = try Data(contentsOf: destinationURL)
+        let previousItem = items[index]
+        let replacementItem = LibraryItem(
+            id: previousItem.id,
+            title: previousItem.title,
+            originalFilename: inspection.originalFilename,
+            storedFilename: previousItem.storedFilename,
+            mediaType: inspection.mediaType,
+            fileSize: Int64(replacementData.count),
+            sha256: Self.sha256(replacementData),
+            importedAt: Date(),
+            lastOpenedAt: previousItem.lastOpenedAt,
+            isFavorite: previousItem.isFavorite
+        )
+
+        try replacementData.write(to: destinationURL, options: .atomic)
+        items[index] = replacementItem
+        items.sort(by: Self.defaultSort)
+
+        do {
+            try persist()
+        } catch {
+            try? previousData.write(to: destinationURL, options: .atomic)
+            if let restoredIndex = items.firstIndex(where: { $0.id == previousItem.id }) {
+                items[restoredIndex] = previousItem
+                items.sort(by: Self.defaultSort)
+            }
+            throw error
+        }
+
+        return replacementItem
     }
 
     @discardableResult
@@ -356,6 +624,7 @@ final class LibraryStore: ObservableObject {
             storedFilename: storedFilename,
             mediaType: format.mediaType,
             fileSize: Int64(data.count),
+            sha256: Self.sha256(data),
             importedAt: Date(),
             lastOpenedAt: nil,
             isFavorite: false
@@ -451,13 +720,35 @@ final class LibraryStore: ObservableObject {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let decoded = try decoder.decode([LibraryItem].self, from: data)
-        let existing = decoded.filter { item in
+        var existing = decoded.filter { item in
             let url = mediaDirectoryURL.appendingPathComponent(item.storedFilename, isDirectory: false)
             return fileManager.fileExists(atPath: url.path)
         }
+        var upgradedMetadata = false
+
+        for index in existing.indices where existing[index].sha256 == nil {
+            let item = existing[index]
+            let url = mediaDirectoryURL.appendingPathComponent(item.storedFilename, isDirectory: false)
+            guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else { continue }
+
+            existing[index] = LibraryItem(
+                id: item.id,
+                title: item.title,
+                originalFilename: item.originalFilename,
+                storedFilename: item.storedFilename,
+                mediaType: item.mediaType,
+                fileSize: Int64(data.count),
+                sha256: Self.sha256(data),
+                importedAt: item.importedAt,
+                lastOpenedAt: item.lastOpenedAt,
+                isFavorite: item.isFavorite
+            )
+            upgradedMetadata = true
+        }
+
         items = existing.sorted(by: Self.defaultSort)
 
-        if existing.count != decoded.count {
+        if existing.count != decoded.count || upgradedMetadata {
             try persist()
         }
     }
@@ -469,6 +760,12 @@ final class LibraryStore: ObservableObject {
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(items)
         try data.write(to: indexURL, options: .atomic)
+    }
+
+    private static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     private static func defaultTitle(forFilename filename: String) -> String {
