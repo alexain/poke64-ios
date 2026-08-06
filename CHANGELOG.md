@@ -4,12 +4,18 @@
 
 ### Added
 
+- Added experimental IEC device 4 or 5 RAW printer capture for validating C64 printing through the libretro core.
+- Added a contextual PRN 4/5 status panel beside the emulator with capture size and activity feedback.
+- Added a Virtual Printer sheet for refreshing, sharing, ejecting and discarding the active RAW print buffer.
+- Added persistent completed RAW print jobs when ejecting virtual paper.
 - Added docked datasette controls with Play, Stop, Rewind, Fast Forward and counter reset.
 - Added native VICE tape transport telemetry, motor/activity status and a three-digit TAP counter in the emulator side margin and Devices panel.
 - Added Tape settings for automatic control presentation, counter reset on insertion, CPU-reset behavior and tape autostart load mode.
 
 ### Changed
 
+- Ejecting or discarding virtual printer paper now flushes and rotates the RAW buffer without restarting the C64 or ejecting mounted media.
+- Added selection between IEC printer devices 4 and 5.
 - Moved datasette control access from the main toolbar to the tappable tape counter/status panel beside the emulator.
 - Kept the tappable datasette status panel compact when the keyboard or control dock reduces the emulator display size.
 - Set the default datasette sound level to 20%, matching the default mechanical drive-noise level.

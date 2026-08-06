@@ -680,6 +680,30 @@ final class EmulatorModel: ObservableObject {
         }
     }
 
+    func flushPrinterOutput() throws {
+        guard isRunning else { return }
+        guard session.flushPrinter(atDevice: C64PrinterSettings.device) else {
+            throw EmulatorModelError.coreFailure(
+                session.lastErrorMessage ?? "Unable to flush the printer output"
+            )
+        }
+    }
+
+    func clearPrinterCapture() async throws {
+        try flushPrinterOutput()
+        try C64PrinterOutputStore.truncateOutput()
+        status = "Printer buffer discarded"
+    }
+
+    func ejectPrinterPaper() async throws -> URL {
+        try flushPrinterOutput()
+        let outputURL = try C64PrinterOutputStore.ejectOutput(
+            device: C64PrinterSettings.device
+        )
+        status = "Printer paper ejected"
+        return outputURL
+    }
+
     func stop() {
         session.stop()
         isRunning = false

@@ -64,6 +64,7 @@ typedef NS_ENUM(NSInteger, C64DatasetteCommand) {
 - (BOOL)ejectDiskFromDriveUnit:(NSInteger)unit NS_SWIFT_NAME(ejectDisk(fromDriveUnit:));
 - (BOOL)ejectTape;
 - (BOOL)controlDatasette:(C64DatasetteCommand)command;
+- (BOOL)flushPrinterAtDevice:(NSInteger)device NS_SWIFT_NAME(flushPrinter(atDevice:));
 - (BOOL)ejectCartridge;
 - (BOOL)ejectAllMediaAndReset;
 - (void)stop;

@@ -193,6 +193,7 @@ enum FirmwareStore {
             "machine:\(C64MachineModel.selected.rawValue)",
             "reu:\(C64REUSettings.configurationFingerprint)",
             "tape:\(C64TapeSettings.configurationFingerprint)",
+            "printer:\(C64PrinterSettings.configurationFingerprint)",
             "video:\(C64VideoSettings.configurationFingerprint)",
             "audio:\(C64AudioSettings.configurationFingerprint)",
             "drive:\(C64DriveSettings.configurationFingerprint)"
@@ -446,6 +447,24 @@ enum FirmwareStore {
 
         lines.append("DatasetteResetWithCPU=\(C64TapeSettings.resetWithCPU ? 1 : 0)")
         lines.append("AutostartTapeBasicLoad=\(C64TapeSettings.autostartBasicLoad ? 1 : 0)")
+
+        try C64PrinterOutputStore.prepareDirectory()
+        let printerEnabled = C64PrinterSettings.enabled
+        let printerDevice = C64PrinterSettings.device
+        lines.append(
+            "PrinterTextDevice1=\"\(C64PrinterOutputStore.relativeOutputPath)\""
+        )
+        for device in C64PrinterSettings.supportedDevices {
+            lines.append("Printer\(device)Driver=\"raw\"")
+            lines.append("Printer\(device)Output=\"text\"")
+            lines.append("Printer\(device)TextDevice=0")
+            lines.append(
+                "Printer\(device)=\(printerEnabled && printerDevice == device ? 1 : 0)"
+            )
+            lines.append(
+                "TrapDevice\(device)=\(printerEnabled && printerDevice == device ? 1 : 0)"
+            )
+        }
 
         // VICE validates a drive model against its configured ROM. Write the
         // ROM resources before drive types so configuration loading never tries
