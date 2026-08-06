@@ -9,6 +9,7 @@ enum FirmwareSlot: String, CaseIterable, Identifiable {
     case drive1541II
     case drive1571
     case drive1581
+    case printerMPS803
 
     var id: String { rawValue }
 
@@ -21,6 +22,7 @@ enum FirmwareSlot: String, CaseIterable, Identifiable {
         case .drive1541II: return "1541-II drive ROM"
         case .drive1571: return "1571 drive ROM"
         case .drive1581: return "1581 drive ROM"
+        case .printerMPS803: return "MPS-803 printer ROM"
         }
     }
 
@@ -40,6 +42,8 @@ enum FirmwareSlot: String, CaseIterable, Identifiable {
             return "Optional 1571 firmware for D71 media and compatible replacements"
         case .drive1581:
             return "Optional 1581 firmware for D81 media and compatible replacements"
+        case .printerMPS803:
+            return "Optional 4 KB character ROM required by graphical Commodore MPS-803 printing"
         }
     }
 
@@ -49,13 +53,14 @@ enum FirmwareSlot: String, CaseIterable, Identifiable {
         case .chargen: return 4_096
         case .drive1541, .drive1541II: return 16_384
         case .drive1571, .drive1581: return 32_768
+        case .printerMPS803: return 4_096
         }
     }
 
     var isRequiredForBoot: Bool {
         switch self {
         case .basic, .kernal, .chargen: return true
-        case .drive1541, .drive1541II, .drive1571, .drive1581: return false
+        case .drive1541, .drive1541II, .drive1571, .drive1581, .printerMPS803: return false
         }
     }
 
@@ -68,6 +73,7 @@ enum FirmwareSlot: String, CaseIterable, Identifiable {
         case .drive1541II: return "poke64-dos1541ii.bin"
         case .drive1571: return "poke64-dos1571.bin"
         case .drive1581: return "poke64-dos1581.bin"
+        case .printerMPS803: return "mps803-D7811G-111-U32053A.bin"
         }
     }
 }
@@ -193,6 +199,7 @@ enum FirmwareStore {
             "machine:\(C64MachineModel.selected.rawValue)",
             "reu:\(C64REUSettings.configurationFingerprint)",
             "tape:\(C64TapeSettings.configurationFingerprint)",
+            "printer:\(C64PrinterSettings.configurationFingerprint)",
             "video:\(C64VideoSettings.configurationFingerprint)",
             "audio:\(C64AudioSettings.configurationFingerprint)",
             "drive:\(C64DriveSettings.configurationFingerprint)"
@@ -447,6 +454,27 @@ enum FirmwareStore {
         lines.append("DatasetteResetWithCPU=\(C64TapeSettings.resetWithCPU ? 1 : 0)")
         lines.append("AutostartTapeBasicLoad=\(C64TapeSettings.autostartBasicLoad ? 1 : 0)")
 
+        try C64PrinterOutputStore.prepareDirectory()
+        let printerFormat = C64PrinterSettings.exportFormat
+        let printerEnabled = C64PrinterSettings.enabled
+            && C64PrinterSettings.isReadyForSelectedFormat
+        let printerDevice = C64PrinterSettings.device
+        lines.append(
+            "PrinterTextDevice1=\"\(C64PrinterOutputStore.relativeOutputPath)\""
+        )
+        for device in C64PrinterSettings.supportedDevices {
+            let selected = printerEnabled && printerDevice == device
+            lines.append(
+                "Printer\(device)Driver=\"\(printerFormat.usesRasterRenderer ? "mps803" : "raw")\""
+            )
+            lines.append(
+                "Printer\(device)Output=\"\(printerFormat.usesRasterRenderer ? "graphics" : "text")\""
+            )
+            lines.append("Printer\(device)TextDevice=0")
+            lines.append("Printer\(device)=\(selected ? 1 : 0)")
+            lines.append("TrapDevice\(device)=\(selected ? 1 : 0)")
+        }
+
         // VICE validates a drive model against its configured ROM. Write the
         // ROM resources before drive types so configuration loading never tries
         // to enable a model while it still points at a missing default ROM.
@@ -530,8 +558,21 @@ enum FirmwareStore {
         return directory.appendingPathComponent("persistent-memory.reu", isDirectory: false)
     }
 
+    private static func printerFirmwareDirectory() throws -> URL {
+        let directory = try viceDirectory()
+            .appendingPathComponent("PRINTER", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        return directory
+    }
+
     private static func fileURL(for slot: FirmwareSlot) throws -> URL {
-        try firmwareDirectory().appendingPathComponent(slot.storedFilename, isDirectory: false)
+        let directory = slot == .printerMPS803
+            ? try printerFirmwareDirectory()
+            : try firmwareDirectory()
+        return directory.appendingPathComponent(slot.storedFilename, isDirectory: false)
     }
 
     private static func openROMsMarkerURL() throws -> URL {

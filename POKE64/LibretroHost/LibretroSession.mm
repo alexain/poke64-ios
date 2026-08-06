@@ -111,6 +111,10 @@ struct CoreAPI {
     int (*tape_image_detach)(unsigned int) = nullptr;
     void (*tape_image_detach_all)(void) = nullptr;
     void (*datasette_control)(int, int) = nullptr;
+    void (*printer_formfeed)(unsigned int) = nullptr;
+    void (*poke64_printer_set_output_directory)(const char *) = nullptr;
+    int (*poke64_printer_snapshot)(unsigned int) = nullptr;
+    void (*poke64_printer_configure_raw_capture)(unsigned int, int, const char *) = nullptr;
     int *tape_enabled = nullptr;
     int *tape_control = nullptr;
     int *tape_counter = nullptr;
@@ -139,6 +143,8 @@ enum class MediaCommandType {
     EjectDisk,
     EjectTape,
     DatasetteControl,
+    PrinterFormFeed,
+    PrinterSnapshot,
     EjectCartridge,
     EjectAllAndReset
 };
@@ -161,6 +167,8 @@ struct KeyEvent {
 
 static bool storedDriveEnabled(unsigned int unit);
 static bool storedTrueDriveEmulationEnabled();
+static unsigned int storedPrinterDevice();
+static NSString *storedPrinterExportFormat();
 static int storedDriveTypeResourceValue(unsigned int unit);
 static int storedDriveSoundVolumeResourceValue();
 static const char *storedDriveROMResourceName(unsigned int unit);
@@ -528,6 +536,18 @@ struct SessionImpl {
         api.datasette_control = reinterpret_cast<void (*)(int, int)>(
             dlsym(coreHandle, "datasette_control")
         );
+        api.printer_formfeed = reinterpret_cast<void (*)(unsigned int)>(
+            dlsym(coreHandle, "printer_formfeed")
+        );
+        api.poke64_printer_set_output_directory = reinterpret_cast<void (*)(const char *)>(
+            dlsym(coreHandle, "poke64_printer_set_output_directory")
+        );
+        api.poke64_printer_snapshot = reinterpret_cast<int (*)(unsigned int)>(
+            dlsym(coreHandle, "poke64_printer_snapshot")
+        );
+        api.poke64_printer_configure_raw_capture = reinterpret_cast<void (*)(unsigned int, int, const char *)>(
+            dlsym(coreHandle, "poke64_printer_configure_raw_capture")
+        );
         api.tape_enabled = reinterpret_cast<int *>(dlsym(coreHandle, "tape_enabled"));
         api.tape_control = reinterpret_cast<int *>(dlsym(coreHandle, "tape_control"));
         api.tape_counter = reinterpret_cast<int *>(dlsym(coreHandle, "tape_counter"));
@@ -677,6 +697,122 @@ struct SessionImpl {
             return false;
         }
         return true;
+    }
+
+    bool applyRuntimePrinterConfiguration(std::string &error) {
+        const unsigned int selectedDevice = storedPrinterDevice();
+        const unsigned int selectedIndex = selectedDevice - 4;
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        const bool requested = [defaults objectForKey:@"poke64.printer.enabled"] != nil
+            && [defaults boolForKey:@"poke64.printer.enabled"];
+        NSString *format = storedPrinterExportFormat();
+        const bool raster = ![format isEqualToString:@"raw"];
+        const bool rawTee = [format isEqualToString:@"pdf+raw"];
+
+        NSString *save = [NSString stringWithUTF8String:saveDirectory.c_str()];
+        NSURL *printerDirectory = [[NSURL fileURLWithPath:save isDirectory:YES]
+            URLByAppendingPathComponent:@"POKE64/Printer" isDirectory:YES];
+        NSURL *spoolDirectory = [printerDirectory
+            URLByAppendingPathComponent:@"Spool" isDirectory:YES];
+        [NSFileManager.defaultManager createDirectoryAtURL:spoolDirectory
+                               withIntermediateDirectories:YES
+                                                attributes:nil
+                                                     error:nil];
+        NSURL *rawURL = [printerDirectory
+            URLByAppendingPathComponent:@"printer.raw" isDirectory:NO];
+
+        if (raster && requested) {
+            if (!api.poke64_printer_set_output_directory
+                || !api.poke64_printer_snapshot
+                || !api.poke64_printer_configure_raw_capture) {
+                error = "The installed VICE core does not include POKE64 graphical printer support. Rebuild it with Scripts/build_vice_core.sh.";
+                return false;
+            }
+
+            NSURL *system = [NSURL fileURLWithPath:[NSString
+                stringWithUTF8String:systemDirectory.c_str()] isDirectory:YES];
+            NSURL *rom = [[[system URLByAppendingPathComponent:@"vice" isDirectory:YES]
+                URLByAppendingPathComponent:@"PRINTER" isDirectory:YES]
+                URLByAppendingPathComponent:@"mps803-D7811G-111-U32053A.bin" isDirectory:NO];
+            NSDictionary<NSURLResourceKey, id> *values = [rom resourceValuesForKeys:@[
+                NSURLIsRegularFileKey,
+                NSURLFileSizeKey
+            ] error:nil];
+            if (![values[NSURLIsRegularFileKey] boolValue]
+                || [values[NSURLFileSizeKey] longLongValue] != 4096) {
+                error = "Import the 4 KB MPS-803 printer ROM before enabling PDF or PNG output.";
+                return false;
+            }
+        }
+
+        for (unsigned int device = 4; device <= 5; ++device) {
+            const std::string printerResource = "Printer" + std::to_string(device);
+            const std::string trapResource = "TrapDevice" + std::to_string(device);
+            if (!setRuntimeIntegerResource(printerResource.c_str(), 0, error)
+                || !setRuntimeIntegerResource(trapResource.c_str(), 0, error)) {
+                return false;
+            }
+        }
+
+        if (!requested) {
+            if (api.poke64_printer_configure_raw_capture) {
+                api.poke64_printer_configure_raw_capture(0, 0, nullptr);
+                api.poke64_printer_configure_raw_capture(1, 0, nullptr);
+            }
+            return true;
+        }
+
+        if (!api.resources_set_string) {
+            error = "The VICE core does not expose printer resource configuration";
+            return false;
+        }
+
+        const std::string deviceSuffix = std::to_string(selectedDevice);
+        if (api.resources_set_string(
+                ("Printer" + deviceSuffix + "Driver").c_str(),
+                raster ? "mps803" : "raw"
+            ) < 0
+            || api.resources_set_string(
+                ("Printer" + deviceSuffix + "Output").c_str(),
+                raster ? "graphics" : "text"
+            ) < 0) {
+            error = "VICE rejected the selected virtual-printer backend";
+            return false;
+        }
+
+        if (!raster) {
+            if (api.resources_set_string("PrinterTextDevice1", "POKE64/Printer/printer.raw") < 0
+                || !setRuntimeIntegerResource(
+                    ("Printer" + deviceSuffix + "TextDevice").c_str(),
+                    0,
+                    error
+                )) {
+                error = error.empty() ? "VICE rejected the RAW printer output path" : error;
+                return false;
+            }
+        }
+
+        if (api.poke64_printer_set_output_directory) {
+            api.poke64_printer_set_output_directory(
+                spoolDirectory.fileSystemRepresentation
+            );
+        }
+        if (api.poke64_printer_configure_raw_capture) {
+            api.poke64_printer_configure_raw_capture(0, 0, nullptr);
+            api.poke64_printer_configure_raw_capture(1, 0, nullptr);
+            if (rawTee) {
+                api.poke64_printer_configure_raw_capture(
+                    selectedIndex,
+                    1,
+                    rawURL.fileSystemRepresentation
+                );
+            }
+        }
+
+        const std::string printerResource = "Printer" + deviceSuffix;
+        const std::string trapResource = "TrapDevice" + deviceSuffix;
+        return setRuntimeIntegerResource(printerResource.c_str(), 1, error)
+            && setRuntimeIntegerResource(trapResource.c_str(), 1, error);
     }
 
     bool applyRuntimeDriveConfiguration(unsigned int unit, std::string &error) {
@@ -969,6 +1105,48 @@ struct SessionImpl {
                 api.datasette_control(static_cast<int>(kTapePort), command->unit);
                 updateDatasetteState(true);
                 return true;
+
+            case MediaCommandType::PrinterFormFeed: {
+                if (command->unit < 4 || command->unit > 5) {
+                    error = "Printer device must be 4 or 5";
+                    return false;
+                }
+                if (api.printer_formfeed) {
+                    api.printer_formfeed(
+                        static_cast<unsigned int>(command->unit - 4)
+                    );
+                    return true;
+                }
+
+                // Compatibility fallback for older core builds: cycling the
+                // selected printer resource closes and reopens the RAW backend,
+                // which flushes its stdio buffer without resetting the C64.
+                const std::string resource =
+                    "Printer" + std::to_string(command->unit);
+                if (!setRuntimeIntegerResource(resource.c_str(), 0, error)) {
+                    return false;
+                }
+                return setRuntimeIntegerResource(resource.c_str(), 1, error);
+            }
+
+            case MediaCommandType::PrinterSnapshot: {
+                if (command->unit < 4 || command->unit > 5) {
+                    error = "Printer device must be 4 or 5";
+                    return false;
+                }
+                if (!api.poke64_printer_snapshot) {
+                    error = "The installed VICE core does not include graphical printer snapshots";
+                    return false;
+                }
+                if (api.poke64_printer_snapshot(
+                        static_cast<unsigned int>(command->unit - 4)
+                    ) < 0) {
+                    error = "The graphical printer preview could not be written";
+                    return false;
+                }
+                return true;
+            }
+
 
             case MediaCommandType::EjectCartridge:
                 if (!api.cartridge_detach_image) {
@@ -1293,6 +1471,22 @@ static bool storedTrueDriveEmulationEnabled() {
         : false;
 }
 
+static unsigned int storedPrinterDevice() {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    const NSInteger stored = [defaults objectForKey:@"poke64.printer.device"] != nil
+        ? [defaults integerForKey:@"poke64.printer.device"]
+        : 4;
+    return stored == 5 ? 5u : 4u;
+}
+
+static NSString *storedPrinterExportFormat() {
+    return validatedDefaultString(
+        @"poke64.printer.exportFormat",
+        @[@"pdf", @"png", @"raw", @"pdf+raw"],
+        @"pdf"
+    );
+}
+
 static NSString *storedDriveModel(unsigned int unit) {
     NSString *key = unit == 9 ? @"poke64.drive9.model" : @"poke64.drive.model";
     return validatedDefaultString(
@@ -1387,6 +1581,27 @@ static void applyStoredREUOptions(SessionImpl *session) {
     );
 }
 
+static void applyStoredPrinterOptions(SessionImpl *session) {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    const bool enabled = [defaults objectForKey:@"poke64.printer.enabled"] != nil
+        && [defaults boolForKey:@"poke64.printer.enabled"];
+
+    // The libretro core keeps its printer backend disabled by default and
+    // treats Virtual Device Traps as the device-4 printer trap. Both options
+    // must therefore follow POKE64's printer switch; the generated vicerc then
+    // selects the RAW driver, output file and active IEC device.
+    assignCoreOption(
+        session,
+        "vice_printer",
+        enabled ? @"enabled" : @"disabled"
+    );
+    assignCoreOption(
+        session,
+        "vice_virtual_device_traps",
+        enabled ? @"enabled" : @"disabled"
+    );
+}
+
 static void applyStoredDriveOptions(SessionImpl *session) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     const bool trueDrive = storedTrueDriveEmulationEnabled();
@@ -1395,11 +1610,6 @@ static void applyStoredDriveOptions(SessionImpl *session) {
         session,
         "vice_drive_true_emulation",
         trueDrive ? @"enabled" : @"disabled"
-    );
-    assignCoreOption(
-        session,
-        "vice_virtual_device_traps",
-        trueDrive ? @"disabled" : @"enabled"
     );
     assignCoreOption(
         session,
@@ -1618,6 +1828,7 @@ static bool environmentCallback(unsigned command, void *data) {
             applyStoredVideoOptions(session);
             applyStoredAudioOptions(session);
             applyStoredDriveOptions(session);
+            applyStoredPrinterOptions(session);
             return true;
         }
 
@@ -1918,6 +2129,12 @@ bool SessionImpl::start(const char *path, std::string &error) {
             updateDatasetteState(firstIteration);
 
             if (firstIteration) {
+                {
+                    std::string printerError;
+                    if (!applyRuntimePrinterConfiguration(printerError)) {
+                        recordCoreMessage(printerError.c_str(), true);
+                    }
+                }
                 if (storedTrueDriveEmulationEnabled()) {
                     std::string driveError;
                     if (!applyRuntimeDriveConfiguration(8, driveError)) {
@@ -2119,6 +2336,47 @@ bool SessionImpl::start(const char *path, std::string &error) {
     }
     return success;
 }
+
+- (BOOL)flushPrinterAtDevice:(NSInteger)device {
+    self.lastErrorMessage = nil;
+    if (device < 4 || device > 5) {
+        self.lastErrorMessage = @"Printer device must be 4 or 5";
+        return NO;
+    }
+
+    std::string message;
+    const bool success = _impl->performMediaCommand(
+        MediaCommandType::PrinterFormFeed,
+        nullptr,
+        static_cast<int>(device),
+        message
+    );
+    if (!success) {
+        self.lastErrorMessage = [NSString stringWithUTF8String:message.c_str()];
+    }
+    return success;
+}
+
+- (BOOL)snapshotPrinterAtDevice:(NSInteger)device {
+    self.lastErrorMessage = nil;
+    if (device < 4 || device > 5) {
+        self.lastErrorMessage = @"Printer device must be 4 or 5";
+        return NO;
+    }
+
+    std::string message;
+    const bool success = _impl->performMediaCommand(
+        MediaCommandType::PrinterSnapshot,
+        nullptr,
+        static_cast<int>(device),
+        message
+    );
+    if (!success) {
+        self.lastErrorMessage = [NSString stringWithUTF8String:message.c_str()];
+    }
+    return success;
+}
+
 
 - (BOOL)ejectCartridge {
     return [self performMediaCommand:MediaCommandType::EjectCartridge URL:nil driveUnit:0];

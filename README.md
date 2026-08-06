@@ -23,13 +23,14 @@ POKE64 is an independent open-source project. It is not affiliated with Commodor
 - Configurable 1541, 1541-II, 1571 and 1581 models, with Fast Virtual Drive or shared True Drive Emulation for every enabled drive.
 - Optional Drive 9 with an independent model and independently mounted media.
 - True Drive mechanical sound, per-drive power indicators and an aggregate floppy-activity indicator supplied by the libretro core.
-- External BASIC, KERNAL, character, 1541, 1541-II, 1571 and 1581 ROM management with exact-size validation and SHA-256 diagnostics.
+- External BASIC, KERNAL, character, 1541, 1541-II, 1571, 1581 and MPS-803 printer ROM management with exact-size validation and SHA-256 diagnostics.
 - Optional one-step installation of a pinned MEGA65 OpenROMs system profile, while preserving a complete previous system-ROM set for restoration.
 - Compatible custom firmware support, including matching JiffyDOS-style C64 KERNAL and drive-ROM replacements.
 - Compact centered toolbar with a unified Ports popover and Port 1/Port 2 swapping.
 - Soft Reset and Hard Reset that retain mounted media, plus **Eject All Media and Reset**.
+- IEC virtual printer on device 4 or 5 with Commodore MPS-803 text/graphics rendering, paper preview, PDF output by default, PNG pages and optional RAW capture.
 
-The Tape, Printer and Networking settings panels remain placeholders. Advanced datasette transport, printer output, modem networking, save states, multidisk sets and drives 10–11 are not implemented yet.
+Networking remains a placeholder. Writable TAP recording, modem networking, save states, multidisk sets, drives 10–11 and additional printer models remain pending.
 
 ## Firmware policy
 
@@ -46,8 +47,9 @@ POKE64 accepts the following user-supplied firmware slots:
 | 1541-II drive ROM | 16,384 bytes | Optional True Drive firmware for the 1541-II |
 | 1571 drive ROM | 32,768 bytes | Optional True Drive firmware for the 1571 and D71 media |
 | 1581 drive ROM | 32,768 bytes | Optional True Drive firmware for the 1581 and D81 media |
+| MPS-803 printer ROM | 4,096 bytes | Optional character ROM required for graphical MPS-803 PDF/PNG output |
 
-Drive firmware is shared **by model**, not by unit number. If Drive 8 and Drive 9 both use the same model, they must use the same ROM. Full JiffyDOS operation requires a compatible C64 KERNAL, the matching drive ROM and True Drive Emulation.
+Drive firmware is shared **by model**, not by unit number. If Drive 8 and Drive 9 both use the same model, they must use the same ROM. Full JiffyDOS operation requires a compatible C64 KERNAL, the matching drive ROM and True Drive Emulation. The MPS-803 ROM must be imported by the user under its VICE filename `mps803-D7811G-111-U32053A.bin`; POKE64 never downloads or redistributes it. RAW printer capture remains usable without printer firmware.
 
 POKE64 can download the generic BASIC, KERNAL and character files from a pinned revision of the MEGA65 OpenROMs project. Those files are downloaded at runtime and are not stored in this repository. OpenROMs has its own license and notices; see [Third-party notices](THIRD_PARTY_NOTICES.md).
 
@@ -57,7 +59,7 @@ Users and redistributors are responsible for ensuring that every imported or red
 
 POKE64 is under active development and currently targets iPadOS 17 or later. iPhone and macOS adaptations are planned for a later stage.
 
-System, Graphics, Audio, Disk Drives and Firmware / ROMs now have persistent functional settings. Closing Settings restarts the core only when a configuration fingerprint has changed.
+System, Graphics, Audio, Disk Drives, Tape, Printer and Firmware / ROMs now have persistent functional settings. Closing Settings restarts the core only when a configuration fingerprint has changed.
 
 Drive 8 is always available. Drive 9 can be enabled independently. Fast Virtual Drive uses VICE virtual-device traps; True Drive executes the selected drive ROMs for all enabled drives and enables hardware-level timing, compatible drive-side firmware and mechanical sound.
 
@@ -73,6 +75,7 @@ A cartridge, disk or tape remains mounted across Soft and Hard Reset, matching p
 ## Documentation
 
 - [Build and development guide](Docs/BUILDING.md)
+- [VICE revision used by v0.7.0](Docs/VICE_REVISION.md)
 - [Architecture](Docs/ARCHITECTURE.md)
 - [Roadmap](Docs/ROADMAP.md)
 - [External-firmware testing](Docs/TESTING_EXTERNAL_FIRMWARE.md)
@@ -90,4 +93,9 @@ VICE and `vice-libretro` are separate GPL-2.0-or-later components, subject to th
 
 The libretro API header subset used by POKE64 is MIT-licensed. OpenROMs, XcodeGen and other third-party components retain their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-POKE64 does not license or distribute proprietary Commodore firmware, JiffyDOS or commercial media.
+POKE64 does not license or distribute proprietary Commodore firmware, including the MPS-803 printer ROM, JiffyDOS or commercial media.
+
+
+### Virtual-printer licensing
+
+The POKE64 raster-printer backend stored under `Scripts/vice-patches` is compiled into the VICE-derived core and is licensed GPL-2.0-or-later. It is not covered by the MIT License used by the application frontend.

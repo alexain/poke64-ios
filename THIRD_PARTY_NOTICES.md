@@ -13,7 +13,7 @@ POKE64 is designed to load a locally built `vice_x64sc_libretro` core.
 
 The `vice-libretro` and VICE trees contain the GNU GPL version 2 license text, while source notices commonly permit redistribution under GPL version 2 or, at the recipient's option, a later version. A distributor must inspect the exact pinned source tree rather than rely only on this summary.
 
-The VICE source tree, compiled dylib and firmware-verification reports are excluded from this repository. They are created locally during the build process.
+The VICE source tree, compiled dylib and firmware-verification reports are excluded from this repository. They are created locally during the build process. POKE64 applies a local GPL-side patch that restores the VICE MPS-803 interpreter and replaces the desktop graphics exporter with a sandbox-safe grayscale page spool used by the iOS frontend.
 
 The POKE64 build script removes detected exact firmware payloads from the unsigned core and refuses to finish when expected categories cannot be verified. A distributor remains responsible for reviewing the generated artifact and satisfying all obligations for the selected upstream revision, including preserving notices and providing complete corresponding source in a GPL-compliant form.
 
@@ -33,7 +33,7 @@ OpenROMs does not provide the proprietary Commodore or JiffyDOS drive-ROM files 
 
 ## Commodore and replacement firmware
 
-POKE64 does not include original Commodore BASIC, KERNAL, character or drive firmware, and does not include JiffyDOS. The application provides import slots for user-supplied files.
+POKE64 does not include original Commodore BASIC, KERNAL, character, drive or MPS-803 printer firmware, and does not include JiffyDOS. The application provides import slots for user-supplied files.
 
 Copyright and licensing of imported firmware remain separate from POKE64, VICE and OpenROMs. Users and redistributors are responsible for ensuring that imported or redistributed firmware is lawfully obtained and used.
 
@@ -60,3 +60,21 @@ The project links Apple system frameworks including SwiftUI/UIKit, Metal/MetalKi
 ## Content
 
 No game, program, disk image, tape image, cartridge image or commercial content is included in this repository or its release archives.
+
+### POKE64 MPS-803 raster backend
+
+For POKE64 0.7.0, the pinned `vice-libretro` revision is:
+
+```text
+c8c242db75a559246d6d51017e6dd4ecd75d6a9f
+```
+
+`Scripts/vice-patches/output-graphics-poke64.c` replaces a graphics
+output backend inside the VICE-derived core. Because it is compiled and
+linked into that GPL component, this file is intentionally licensed
+GPL-2.0-or-later and is not covered by the repository's root MIT
+License.
+
+The proprietary Commodore MPS-803 printer ROM is not included in the
+repository, application bundle, generated core or release artifacts.
+It must be supplied separately and legally by the user.
