@@ -121,6 +121,7 @@ struct ContentView: View {
                 in: proxy.size,
                 aspectRatio: emulator.videoAspectRatio
             )
+            let sideMargin = max(0, (proxy.size.width - displaySize.width) / 2)
 
             ZStack {
                 Color.black
@@ -153,6 +154,20 @@ struct ContentView: View {
                 }
                 .frame(width: displaySize.width, height: displaySize.height)
                 .clipped()
+
+                if emulator.trueDriveEmulationConfigured, sideMargin >= 72 {
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        DriveStatusPanel(
+                            powerOn: emulator.drive8PowerLEDOn,
+                            activityOn: emulator.drive8ActivityLEDOn
+                        )
+                        .frame(width: sideMargin)
+                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -887,6 +902,57 @@ private struct DevicesConfigurationView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+private struct DriveStatusPanel: View {
+    let powerOn: Bool
+    let activityOn: Bool
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text("DRIVE 8")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.55))
+
+            indicator(title: "PWR", isOn: powerOn, activeColor: .green)
+            indicator(title: "ACT", isOn: activityOn, activeColor: .red)
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 8)
+        .background(
+            .white.opacity(0.045),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "Drive 8, power \(powerOn ? "on" : "off"), activity \(activityOn ? "active" : "idle")"
+        )
+    }
+
+    private func indicator(
+        title: String,
+        isOn: Bool,
+        activeColor: Color
+    ) -> some View {
+        VStack(spacing: 4) {
+            Circle()
+                .fill(isOn ? activeColor : activeColor.opacity(0.16))
+                .frame(width: 13, height: 13)
+                .shadow(
+                    color: isOn ? activeColor.opacity(0.85) : .clear,
+                    radius: isOn ? 5 : 0
+                )
+
+            Text(title)
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.5))
+        }
+        .animation(.easeOut(duration: 0.08), value: isOn)
     }
 }
 

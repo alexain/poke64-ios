@@ -10,6 +10,7 @@ extern "C" {
 #endif
 
 #define RETRO_API_VERSION 1
+#define RETRO_ENVIRONMENT_EXPERIMENTAL 0x10000
 
 #define RETRO_DEVICE_NONE 0
 #define RETRO_DEVICE_JOYPAD 1
@@ -66,11 +67,11 @@ extern "C" {
 #define RETRO_ENVIRONMENT_SET_GEOMETRY 37
 #define RETRO_ENVIRONMENT_GET_USERNAME 38
 #define RETRO_ENVIRONMENT_GET_LANGUAGE 39
-#define RETRO_ENVIRONMENT_GET_LED_INTERFACE 46
-#define RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE 47
-#define RETRO_ENVIRONMENT_GET_FASTFORWARDING 49
-#define RETRO_ENVIRONMENT_GET_TARGET_REFRESH_RATE 50
-#define RETRO_ENVIRONMENT_GET_INPUT_BITMASKS 51
+#define RETRO_ENVIRONMENT_GET_LED_INTERFACE (46 | RETRO_ENVIRONMENT_EXPERIMENTAL)
+#define RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE (47 | RETRO_ENVIRONMENT_EXPERIMENTAL)
+#define RETRO_ENVIRONMENT_GET_FASTFORWARDING (49 | RETRO_ENVIRONMENT_EXPERIMENTAL)
+#define RETRO_ENVIRONMENT_GET_TARGET_REFRESH_RATE (50 | RETRO_ENVIRONMENT_EXPERIMENTAL)
+#define RETRO_ENVIRONMENT_GET_INPUT_BITMASKS (51 | RETRO_ENVIRONMENT_EXPERIMENTAL)
 #define RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION 52
 #define RETRO_ENVIRONMENT_GET_DISK_CONTROL_INTERFACE_VERSION 57
 #define RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE 58
@@ -221,6 +222,11 @@ typedef void (*retro_input_poll_t)(void);
 typedef int16_t (*retro_input_state_t)(unsigned port, unsigned device, unsigned index, unsigned id);
 typedef void (*retro_keyboard_event_t)(bool down, unsigned keycode, uint32_t character, uint16_t key_modifiers);
 typedef void (*retro_log_printf_t)(enum retro_log_level level, const char *fmt, ...);
+typedef void (*retro_set_led_state_t)(int led, int state);
+
+struct retro_led_interface {
+    retro_set_led_state_t set_led_state;
+};
 
 struct retro_keyboard_callback {
     retro_keyboard_event_t callback;

@@ -99,11 +99,14 @@ struct FirmwareSettingsView: View {
                 }
 
                 Section {
+                    firmwareRow(for: .drive1541)
                     firmwareRow(for: .drive1541II)
+                    firmwareRow(for: .drive1571)
+                    firmwareRow(for: .drive1581)
                 } header: {
-                    Text("Drive ROM")
+                    Text("Drive ROMs")
                 } footer: {
-                    Text("The drive ROM is optional. When installed, POKE64 enables VICE True Drive Emulation. A matching replacement ROM can be used together with a custom KERNAL such as JiffyDOS.")
+                    Text("Drive firmware is optional for the fast virtual backend. Import the ROM matching the model selected in Disk Drives before enabling True Drive Emulation. Compatible replacement ROMs such as JiffyDOS are accepted.")
                 }
 
                 Section("Storage") {

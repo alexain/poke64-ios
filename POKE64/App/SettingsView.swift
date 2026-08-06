@@ -349,6 +349,104 @@ enum C64AudioSettings {
     }
 }
 
+enum C64DriveModel: String, CaseIterable, Identifiable {
+    case cbm1541 = "1541"
+    case cbm1541II = "1541-II"
+    case cbm1571 = "1571"
+    case cbm1581 = "1581"
+
+    static let defaultsKey = "poke64.drive.model"
+    static let defaultValue: C64DriveModel = .cbm1541II
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .cbm1541:
+            return "Commodore 1541"
+        case .cbm1541II:
+            return "Commodore 1541-II"
+        case .cbm1571:
+            return "Commodore 1571"
+        case .cbm1581:
+            return "Commodore 1581"
+        }
+    }
+
+    var resourceValue: Int {
+        switch self {
+        case .cbm1541: return 1541
+        case .cbm1541II: return 1542
+        case .cbm1571: return 1571
+        case .cbm1581: return 1581
+        }
+    }
+
+    var firmwareSlot: FirmwareSlot {
+        switch self {
+        case .cbm1541: return .drive1541
+        case .cbm1541II: return .drive1541II
+        case .cbm1571: return .drive1571
+        case .cbm1581: return .drive1581
+        }
+    }
+
+    var mediaSummary: String {
+        switch self {
+        case .cbm1541, .cbm1541II:
+            return "1541-family media such as D64 and G64"
+        case .cbm1571:
+            return "D64 and double-sided D71 media"
+        case .cbm1581:
+            return "3.5-inch D81 media"
+        }
+    }
+
+    var supportsMechanicalSound: Bool {
+        self != .cbm1581
+    }
+
+    static var selected: C64DriveModel {
+        get {
+            guard let value = UserDefaults.standard.string(forKey: defaultsKey),
+                  let model = C64DriveModel(rawValue: value) else {
+                return defaultValue
+            }
+            return model
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey)
+        }
+    }
+}
+
+enum C64DriveSettings {
+    static let trueDriveEmulationKey = "poke64.drive.trueEmulation"
+    static let writeProtectionKey = "poke64.drive.writeProtection"
+    static let soundLevelKey = "poke64.drive.soundLevel"
+
+    static let defaultTrueDriveEmulation = false
+    static let defaultWriteProtection = false
+    static let defaultSoundLevel = 20
+
+    static var configurationFingerprint: String {
+        let defaults = UserDefaults.standard
+        return [
+            defaults.string(forKey: C64DriveModel.defaultsKey)
+                ?? C64DriveModel.defaultValue.rawValue,
+            String(defaults.object(forKey: trueDriveEmulationKey) == nil
+                ? defaultTrueDriveEmulation
+                : defaults.bool(forKey: trueDriveEmulationKey)),
+            String(defaults.object(forKey: writeProtectionKey) == nil
+                ? defaultWriteProtection
+                : defaults.bool(forKey: writeProtectionKey)),
+            String(defaults.object(forKey: soundLevelKey) == nil
+                ? defaultSoundLevel
+                : defaults.integer(forKey: soundLevelKey))
+        ].joined(separator: ":")
+    }
+}
+
 enum SettingsPanel: String, CaseIterable, Identifiable {
     case system
     case graphics
@@ -504,14 +602,7 @@ private struct SettingsPanelDetail: View {
                     ]
                 )
             case .diskDrives:
-                SettingsPlaceholderView(
-                    panel: panel,
-                    plannedFeatures: [
-                        "Units 8, 9, 10 and 11",
-                        "Drive model and firmware selection",
-                        "True Drive Emulation and drive sounds"
-                    ]
-                )
+                DiskDriveSettingsView()
             case .printer:
                 SettingsPlaceholderView(
                     panel: panel,
@@ -942,6 +1033,185 @@ private struct AudioLevelSlider: View {
             )
         }
         .padding(.vertical, 2)
+    }
+}
+
+private struct DiskDriveSettingsView: View {
+    @AppStorage(C64DriveModel.defaultsKey)
+    private var driveModelRawValue = C64DriveModel.defaultValue.rawValue
+
+    @AppStorage(C64DriveSettings.trueDriveEmulationKey)
+    private var trueDriveEmulation = C64DriveSettings.defaultTrueDriveEmulation
+
+    @AppStorage(C64DriveSettings.writeProtectionKey)
+    private var writeProtection = C64DriveSettings.defaultWriteProtection
+
+    @AppStorage(C64DriveSettings.soundLevelKey)
+    private var driveSoundLevel = C64DriveSettings.defaultSoundLevel
+
+    private var selectedModel: C64DriveModel {
+        C64DriveModel(rawValue: driveModelRawValue) ?? .defaultValue
+    }
+
+    private var firmwareStatus: FirmwareStatus {
+        FirmwareStore.status(for: selectedModel.firmwareSlot)
+    }
+
+    private var canEnableTrueDrive: Bool {
+        firmwareStatus.isValid
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Drive model", selection: $driveModelRawValue) {
+                    ForEach(C64DriveModel.allCases) { model in
+                        Text(model.title).tag(model.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Toggle("True Drive Emulation", isOn: $trueDriveEmulation)
+                    .disabled(!canEnableTrueDrive)
+
+                LabeledContent(
+                    "Active backend",
+                    value: trueDriveEmulation ? "Hardware-level drive" : "Fast virtual drive"
+                )
+
+                LabeledContent("Typical media", value: selectedModel.mediaSummary)
+            } header: {
+                Text("Drive 8")
+            } footer: {
+                Text(trueDriveEmulation
+                    ? "True Drive Emulation executes the selected drive ROM and is required for complete JiffyDOS compatibility, accurate drive timing and mechanical drive sound."
+                    : "Fast virtual drive uses VICE traps for convenient loading. It does not execute drive firmware, so drive-side JiffyDOS commands are unavailable.")
+            }
+
+            Section {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(selectedModel.firmwareSlot.title)
+                            .font(.body.weight(.medium))
+                        Text(selectedModel.firmwareSlot.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if firmwareStatus.isValid {
+                        Label("Installed", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    } else if firmwareStatus.isInstalled {
+                        Label("Invalid", systemImage: "xmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else {
+                        Label("Missing", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+
+                if let fileSize = firmwareStatus.fileSize {
+                    LabeledContent("ROM size", value: "\(fileSize) bytes")
+                        .font(.caption)
+                }
+
+                if !firmwareStatus.isValid {
+                    Label(
+                        "Import this ROM in Firmware / ROMs before enabling True Drive Emulation.",
+                        systemImage: "info.circle"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Drive Firmware")
+            } footer: {
+                Text("POKE64 accepts standard or compatible replacement firmware. For JiffyDOS, use a matching C64 KERNAL and drive ROM; POKE64 cannot determine compatibility from the filename alone.")
+            }
+
+            Section {
+                Toggle("Default write protection", isOn: $writeProtection)
+            } header: {
+                Text("Media Safety")
+            } footer: {
+                Text("When enabled, newly attached Drive 8 images are opened read-only. Existing files are not modified by this setting.")
+            }
+
+            Section {
+                AudioLevelSlider(
+                    title: "Mechanical drive sound",
+                    value: $driveSoundLevel,
+                    range: 0...100,
+                    step: 5,
+                    valueText: { $0 == 0 ? "Off" : "\($0)%" }
+                )
+                .disabled(!trueDriveEmulation || !selectedModel.supportsMechanicalSound)
+            } header: {
+                Text("Drive Sound")
+            } footer: {
+                if !selectedModel.supportsMechanicalSound {
+                    Text("The VICE libretro drive-sound option supports 1541-family and 1571 drives, not the 1581.")
+                } else if !trueDriveEmulation {
+                    Text("Mechanical drive sound requires True Drive Emulation and a compatible disk image.")
+                } else {
+                    Text("Mechanical drive sound is produced while a compatible D64 or D71 image is active.")
+                }
+            }
+
+            Section("Compatibility") {
+                Label(
+                    "Drive model changes apply when Settings is closed and the C64 restarts.",
+                    systemImage: "arrow.clockwise"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+                if trueDriveEmulation {
+                    Label(
+                        "JiffyDOS requires a matching custom C64 KERNAL and drive ROM.",
+                        systemImage: "bolt.horizontal.circle"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Button("Restore Drive Defaults") {
+                    restoreDefaults()
+                }
+                .disabled(isUsingDefaults)
+            }
+        }
+        .onChange(of: driveModelRawValue) { _, _ in
+            if !canEnableTrueDrive {
+                trueDriveEmulation = false
+            }
+        }
+        .onChange(of: trueDriveEmulation) { _, enabled in
+            if enabled && !canEnableTrueDrive {
+                trueDriveEmulation = false
+            }
+        }
+    }
+
+    private var isUsingDefaults: Bool {
+        driveModelRawValue == C64DriveModel.defaultValue.rawValue
+            && trueDriveEmulation == C64DriveSettings.defaultTrueDriveEmulation
+            && writeProtection == C64DriveSettings.defaultWriteProtection
+            && driveSoundLevel == C64DriveSettings.defaultSoundLevel
+    }
+
+    private func restoreDefaults() {
+        driveModelRawValue = C64DriveModel.defaultValue.rawValue
+        trueDriveEmulation = C64DriveSettings.defaultTrueDriveEmulation
+        writeProtection = C64DriveSettings.defaultWriteProtection
+        driveSoundLevel = C64DriveSettings.defaultSoundLevel
     }
 }
 

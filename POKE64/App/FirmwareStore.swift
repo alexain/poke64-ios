@@ -5,7 +5,10 @@ enum FirmwareSlot: String, CaseIterable, Identifiable {
     case basic
     case kernal
     case chargen
+    case drive1541
     case drive1541II
+    case drive1571
+    case drive1581
 
     var id: String { rawValue }
 
@@ -14,7 +17,10 @@ enum FirmwareSlot: String, CaseIterable, Identifiable {
         case .basic: return "BASIC ROM"
         case .kernal: return "KERNAL ROM"
         case .chargen: return "Character ROM"
+        case .drive1541: return "1541 drive ROM"
         case .drive1541II: return "1541-II drive ROM"
+        case .drive1571: return "1571 drive ROM"
+        case .drive1581: return "1581 drive ROM"
         }
     }
 
@@ -26,8 +32,14 @@ enum FirmwareSlot: String, CaseIterable, Identifiable {
             return "C64 KERNAL firmware, including compatible replacements such as JiffyDOS"
         case .chargen:
             return "C64 character generator firmware"
+        case .drive1541:
+            return "Optional 1541 firmware; compatible replacements such as JiffyDOS are accepted"
         case .drive1541II:
-            return "Optional drive firmware; compatible replacements such as JiffyDOS are accepted"
+            return "Optional 1541-II firmware; compatible replacements such as JiffyDOS are accepted"
+        case .drive1571:
+            return "Optional 1571 firmware for D71 media and compatible replacements"
+        case .drive1581:
+            return "Optional 1581 firmware for D81 media and compatible replacements"
         }
     }
 
@@ -35,14 +47,15 @@ enum FirmwareSlot: String, CaseIterable, Identifiable {
         switch self {
         case .basic, .kernal: return 8_192
         case .chargen: return 4_096
-        case .drive1541II: return 16_384
+        case .drive1541, .drive1541II: return 16_384
+        case .drive1571, .drive1581: return 32_768
         }
     }
 
     var isRequiredForBoot: Bool {
         switch self {
         case .basic, .kernal, .chargen: return true
-        case .drive1541II: return false
+        case .drive1541, .drive1541II, .drive1571, .drive1581: return false
         }
     }
 
@@ -51,7 +64,10 @@ enum FirmwareSlot: String, CaseIterable, Identifiable {
         case .basic: return "poke64-basic.bin"
         case .kernal: return "poke64-kernal.bin"
         case .chargen: return "poke64-chargen.bin"
+        case .drive1541: return "poke64-dos1541.bin"
         case .drive1541II: return "poke64-dos1541ii.bin"
+        case .drive1571: return "poke64-dos1571.bin"
+        case .drive1581: return "poke64-dos1581.bin"
         }
     }
 }
@@ -123,7 +139,8 @@ enum FirmwareStore {
     }
 
     static var hasDriveFirmware: Bool {
-        status(for: .drive1541II).isValid
+        [.drive1541, .drive1541II, .drive1571, .drive1581]
+            .contains { status(for: $0).isValid }
     }
 
     static var hasInstalledSystemFirmware: Bool {
@@ -175,7 +192,8 @@ enum FirmwareStore {
             "profile:\(activeProfileName)",
             "machine:\(C64MachineModel.selected.rawValue)",
             "video:\(C64VideoSettings.configurationFingerprint)",
-            "audio:\(C64AudioSettings.configurationFingerprint)"
+            "audio:\(C64AudioSettings.configurationFingerprint)",
+            "drive:\(C64DriveSettings.configurationFingerprint)"
         ].joined(separator: "|")
     }
 
@@ -348,14 +366,30 @@ enum FirmwareStore {
         try writeVicerc()
     }
 
+    private static func sanitizeDriveConfiguration() {
+        let model = C64DriveModel.selected
+        let defaults = UserDefaults.standard
+        let requested = defaults.object(forKey: C64DriveSettings.trueDriveEmulationKey) == nil
+            ? C64DriveSettings.defaultTrueDriveEmulation
+            : defaults.bool(forKey: C64DriveSettings.trueDriveEmulationKey)
+
+        if requested && !status(for: model.firmwareSlot).isValid {
+            defaults.set(false, forKey: C64DriveSettings.trueDriveEmulationKey)
+        }
+    }
+
     static func writeVicerc() throws {
+        sanitizeDriveConfiguration()
         let vice = try viceDirectory()
         let configURL = vice.appendingPathComponent("vicerc", isDirectory: false)
 
         let basic = try fileURL(for: .basic)
         let kernal = try fileURL(for: .kernal)
         let chargen = try fileURL(for: .chargen)
-        let drive = try fileURL(for: .drive1541II)
+        let drive1541 = try fileURL(for: .drive1541)
+        let drive1541II = try fileURL(for: .drive1541II)
+        let drive1571 = try fileURL(for: .drive1571)
+        let drive1581 = try fileURL(for: .drive1581)
 
         var lines = ["[C64SC]"]
         if FileManager.default.fileExists(atPath: basic.path) {
@@ -368,26 +402,53 @@ enum FirmwareStore {
             lines.append("ChargenName=\"\(escapedVicercPath(chargen.path))\"")
         }
 
-        let driveInstalled = FileManager.default.fileExists(atPath: drive.path)
+        let selectedDriveModel = C64DriveModel.selected
+        let selectedFirmwareIsValid = status(for: selectedDriveModel.firmwareSlot).isValid
+        let defaults = UserDefaults.standard
+        let trueDriveRequested = defaults.object(forKey: C64DriveSettings.trueDriveEmulationKey) == nil
+            ? C64DriveSettings.defaultTrueDriveEmulation
+            : defaults.bool(forKey: C64DriveSettings.trueDriveEmulationKey)
+        let trueDriveEnabled = trueDriveRequested && selectedFirmwareIsValid
+        let writeProtected = defaults.object(forKey: C64DriveSettings.writeProtectionKey) == nil
+            ? C64DriveSettings.defaultWriteProtection
+            : defaults.bool(forKey: C64DriveSettings.writeProtectionKey)
 
-        // Temporary compatibility mode: use VICE virtual-device traps for
-        // reliable D64 autostart until the dedicated Disk Drives panel owns
-        // drive models, ROM selection and True Drive Emulation.
-        lines.append("Drive8TrueEmulation=0")
+        // VICE validates a drive model against its configured ROM. Write the
+        // ROM resources before Drive8Type so configuration loading never tries
+        // to enable a model while it still points at a missing default ROM.
+        let driveROMs: [(URL, String)] = [
+            (drive1541, "DosName1541"),
+            (drive1541II, "DosName1541ii"),
+            (drive1571, "DosName1571"),
+            (drive1581, "DosName1581")
+        ]
+        for (url, resource) in driveROMs where FileManager.default.fileExists(atPath: url.path) {
+            lines.append("\(resource)=\"\(escapedVicercPath(url.path))\"")
+        }
+
+        lines.append("Drive8Type=\(selectedDriveModel.resourceValue)")
+        lines.append("Drive8TrueEmulation=\(trueDriveEnabled ? 1 : 0)")
         lines.append("Drive9TrueEmulation=0")
-        lines.append("TrapDevice8=1")
+        lines.append("TrapDevice8=\(trueDriveEnabled ? 0 : 1)")
         lines.append("TrapDevice9=1")
-        // Do not expose VICE's host-filesystem device when no disk image is
-        // mounted. Runtime disk attachment switches the unit to its virtual
-        // disk-image backend; an empty unit must answer DEVICE NOT PRESENT.
+        lines.append("AttachDevice8d0Readonly=\(writeProtected ? 1 : 0)")
+        lines.append("AttachDevice8d1Readonly=\(writeProtected ? 1 : 0)")
+
+        let storedSoundLevel = defaults.object(forKey: C64DriveSettings.soundLevelKey) == nil
+            ? C64DriveSettings.defaultSoundLevel
+            : defaults.integer(forKey: C64DriveSettings.soundLevelKey)
+        let soundLevel = min(100, max(0, ((storedSoundLevel + 2) / 5) * 5))
+        let driveSoundEnabled = trueDriveEnabled
+            && selectedDriveModel.supportsMechanicalSound
+            && soundLevel > 0
+        lines.append("DriveSoundEmulation=\(driveSoundEnabled ? 1 : 0)")
+        lines.append("DriveSoundEmulationVolume=\(driveSoundEnabled ? soundLevel * 20 : 0)")
+
+        // Never expose VICE's host-filesystem device as an empty IEC drive.
         lines.append("FileSystemDevice8=0")
         lines.append("FileSystemDevice9=0")
         lines.append("FileSystemDevice10=0")
         lines.append("FileSystemDevice11=0")
-        if driveInstalled {
-            // Retain the imported 1541-II ROM for the future drive backend.
-            lines.append("DosName1541ii=\"\(escapedVicercPath(drive.path))\"")
-        }
 
         lines.append("")
         try lines.joined(separator: "\n").write(to: configURL, atomically: true, encoding: .utf8)

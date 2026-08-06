@@ -125,6 +125,12 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var mountedTape: MediaReference?
     @Published private(set) var mountedCartridge: MediaReference?
     @Published private(set) var activeProgram: MediaReference?
+    @Published private(set) var trueDriveEmulationConfigured = false
+    @Published private(set) var drive8ActivityLEDOn = false
+
+    var drive8PowerLEDOn: Bool {
+        isRunning && trueDriveEmulationConfigured
+    }
 
     let session = LibretroSession()
     let library = LibraryStore()
@@ -139,12 +145,37 @@ final class EmulatorModel: ObservableObject {
     private var configuredMouseIDs: Set<ObjectIdentifier> = []
     private var notificationTokens: [NSObjectProtocol] = []
     private var configuredMousePort = 0
+    private var driveLEDOffTask: Task<Void, Never>?
 
     init() {
         session.videoGeometryDidChange = { [weak self] aspectRatio in
             guard aspectRatio.isFinite, aspectRatio > 0 else { return }
             Task { @MainActor in
                 self?.videoAspectRatio = CGFloat(aspectRatio)
+            }
+        }
+        session.driveLEDStateDidChange = { [weak self] active in
+            Task { @MainActor in
+                guard let self else { return }
+                self.driveLEDOffTask?.cancel()
+                self.driveLEDOffTask = nil
+
+                guard self.trueDriveEmulationConfigured else {
+                    self.drive8ActivityLEDOn = false
+                    return
+                }
+
+                if active {
+                    self.drive8ActivityLEDOn = true
+                    return
+                }
+
+                self.driveLEDOffTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(160))
+                    guard !Task.isCancelled, let self else { return }
+                    self.drive8ActivityLEDOn = false
+                    self.driveLEDOffTask = nil
+                }
             }
         }
 
@@ -156,6 +187,7 @@ final class EmulatorModel: ObservableObject {
 
         FirmwareStore.prepareDirectoriesAndConfiguration()
         refreshFirmwareState()
+        refreshDriveConfigurationState()
         if !firmwareReady {
             status = "Firmware required"
         }
@@ -199,6 +231,7 @@ final class EmulatorModel: ObservableObject {
     func startEmpty() async {
         presentedError = nil
         refreshFirmwareState()
+        refreshDriveConfigurationState()
         guard firmwareReady else {
             isRunning = false
             isStarting = false
@@ -454,6 +487,7 @@ final class EmulatorModel: ObservableObject {
     func settingsDidClose(previousFirmwareFingerprint: String) async {
         FirmwareStore.prepareDirectoriesAndConfiguration()
         refreshFirmwareState()
+        refreshDriveConfigurationState()
 
         guard FirmwareStore.configurationFingerprint != previousFirmwareFingerprint else {
             return
@@ -476,6 +510,9 @@ final class EmulatorModel: ObservableObject {
     func stop() {
         session.stop()
         isRunning = false
+        driveLEDOffTask?.cancel()
+        driveLEDOffTask = nil
+        drive8ActivityLEDOn = false
         clearMediaState(removeTemporaryFiles: true)
         status = firmwareReady ? "Core stopped" : "Firmware required"
     }
@@ -1048,6 +1085,20 @@ final class EmulatorModel: ObservableObject {
         let title = url.deletingPathExtension().lastPathComponent
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return title.isEmpty ? url.lastPathComponent : title
+    }
+
+    private func refreshDriveConfigurationState() {
+        let defaults = UserDefaults.standard
+        let requested = defaults.object(forKey: C64DriveSettings.trueDriveEmulationKey) == nil
+            ? C64DriveSettings.defaultTrueDriveEmulation
+            : defaults.bool(forKey: C64DriveSettings.trueDriveEmulationKey)
+        trueDriveEmulationConfigured = requested
+            && FirmwareStore.status(for: C64DriveModel.selected.firmwareSlot).isValid
+        if !trueDriveEmulationConfigured {
+            driveLEDOffTask?.cancel()
+            driveLEDOffTask = nil
+            drive8ActivityLEDOn = false
+        }
     }
 
     private func refreshFirmwareState() {
