@@ -117,7 +117,10 @@ struct ContentView: View {
 
     private var emulatorArea: some View {
         GeometryReader { proxy in
-            let displaySize = Self.fittedC64Size(in: proxy.size)
+            let displaySize = Self.fittedC64Size(
+                in: proxy.size,
+                aspectRatio: emulator.videoAspectRatio
+            )
 
             ZStack {
                 Color.black
@@ -157,12 +160,17 @@ struct ContentView: View {
         .background(Color.black)
     }
 
-    private static func fittedC64Size(in availableSize: CGSize) -> CGSize {
-        guard availableSize.width > 0, availableSize.height > 0 else {
+    private static func fittedC64Size(
+        in availableSize: CGSize,
+        aspectRatio: CGFloat
+    ) -> CGSize {
+        guard availableSize.width > 0,
+              availableSize.height > 0,
+              aspectRatio.isFinite,
+              aspectRatio > 0 else {
             return .zero
         }
 
-        let aspectRatio: CGFloat = 4.0 / 3.0
         let widthFromHeight = availableSize.height * aspectRatio
 
         if widthFromHeight <= availableSize.width {

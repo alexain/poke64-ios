@@ -116,6 +116,7 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var firmwareReady = false
     @Published private(set) var isStarting = false
+    @Published private(set) var videoAspectRatio: CGFloat = 4.0 / 3.0
     @Published var presentedError: String?
     @Published private(set) var joyport1Assignment: JoyportAssignment = .none
     @Published private(set) var joyport2Assignment: JoyportAssignment = .none
@@ -140,6 +141,13 @@ final class EmulatorModel: ObservableObject {
     private var configuredMousePort = 0
 
     init() {
+        session.videoGeometryDidChange = { [weak self] aspectRatio in
+            guard aspectRatio.isFinite, aspectRatio > 0 else { return }
+            Task { @MainActor in
+                self?.videoAspectRatio = CGFloat(aspectRatio)
+            }
+        }
+
         Self.cleanTemporaryMediaDirectory()
         observeInputDevices()
         refreshPhysicalControllers()

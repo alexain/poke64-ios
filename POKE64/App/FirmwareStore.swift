@@ -71,6 +71,9 @@ struct FirmwareStatus: Identifiable {
 enum FirmwareStoreError: LocalizedError {
     case invalidSize(slot: FirmwareSlot, actual: Int)
     case unreadableFile
+    case invalidOpenROMsResponse
+    case openROMsDownloadFailed(String)
+    case previousFirmwareUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -78,11 +81,37 @@ enum FirmwareStoreError: LocalizedError {
             return "\(slot.title) must be exactly \(slot.requiredSize) bytes. The selected file is \(actual) bytes."
         case .unreadableFile:
             return "The selected firmware file could not be read."
+        case .invalidOpenROMsResponse:
+            return "The OpenROMs download returned an invalid response."
+        case .openROMsDownloadFailed(let message):
+            return "OpenROMs could not be installed: \(message)"
+        case .previousFirmwareUnavailable:
+            return "No complete previous firmware profile is available to restore."
         }
     }
 }
 
 enum FirmwareStore {
+    static let openROMsRevision = "ad178dbe4d48cd6a317737a8e0e7e662f7e33d32"
+    static let openROMsDisplayRevision = String(openROMsRevision.prefix(7))
+
+    private struct OpenROMsResource {
+        let slot: FirmwareSlot
+        let filename: String
+
+        var url: URL {
+            URL(
+                string: "https://raw.githubusercontent.com/MEGA65/open-roms/\(openROMsRevision)/bin/\(filename)"
+            )!
+        }
+    }
+
+    private static let openROMsResources = [
+        OpenROMsResource(slot: .basic, filename: "basic_generic.rom"),
+        OpenROMsResource(slot: .kernal, filename: "kernal_generic.rom"),
+        OpenROMsResource(slot: .chargen, filename: "chargen_openroms.rom")
+    ]
+
     static var statuses: [FirmwareStatus] {
         FirmwareSlot.allCases.map(status(for:))
     }
@@ -97,8 +126,41 @@ enum FirmwareStore {
         status(for: .drive1541II).isValid
     }
 
+    static var hasInstalledSystemFirmware: Bool {
+        [.basic, .kernal, .chargen].contains { status(for: $0).isInstalled }
+    }
+
+    static var isOpenROMsInstalled: Bool {
+        guard isBootReady,
+              let marker = try? String(contentsOf: openROMsMarkerURL(), encoding: .utf8) else {
+            return false
+        }
+        return marker.trimmingCharacters(in: .whitespacesAndNewlines) == openROMsRevision
+    }
+
+    static var canRestorePreviousFirmware: Bool {
+        do {
+            return try [FirmwareSlot.basic, .kernal, .chargen].allSatisfy { slot in
+                FileManager.default.fileExists(
+                    atPath: try previousFirmwareDirectory()
+                        .appendingPathComponent(slot.storedFilename, isDirectory: false)
+                        .path
+                )
+            }
+        } catch {
+            return false
+        }
+    }
+
+    static var activeProfileName: String {
+        if isOpenROMsInstalled {
+            return "MEGA65 OpenROMs"
+        }
+        return isBootReady ? "Custom firmware" : "Incomplete firmware"
+    }
+
     static var configurationFingerprint: String {
-        statuses.map { status in
+        let firmware = statuses.map { status in
             [
                 status.slot.rawValue,
                 status.fileSize.map(String.init) ?? "missing",
@@ -107,6 +169,14 @@ enum FirmwareStore {
             ].joined(separator: ":")
         }
         .joined(separator: "|")
+
+        return [
+            firmware,
+            "profile:\(activeProfileName)",
+            "machine:\(C64MachineModel.selected.rawValue)",
+            "video:\(C64VideoSettings.configurationFingerprint)",
+            "audio:\(C64AudioSettings.configurationFingerprint)"
+        ].joined(separator: "|")
     }
 
     static func prepareDirectoriesAndConfiguration() {
@@ -177,6 +247,9 @@ enum FirmwareStore {
         try data.write(to: temporary, options: [.atomic])
         try? FileManager.default.removeItem(at: destination)
         try FileManager.default.moveItem(at: temporary, to: destination)
+        if slot.isRequiredForBoot {
+            try clearOpenROMsMarker()
+        }
         try writeVicerc()
     }
 
@@ -185,6 +258,93 @@ enum FirmwareStore {
         if FileManager.default.fileExists(atPath: destination.path) {
             try FileManager.default.removeItem(at: destination)
         }
+        if slot.isRequiredForBoot {
+            try clearOpenROMsMarker()
+        }
+        try writeVicerc()
+    }
+
+    static func installOpenROMs() async throws {
+        var downloaded: [FirmwareSlot: Data] = [:]
+
+        do {
+            for resource in openROMsResources {
+                let (data, response) = try await URLSession.shared.data(from: resource.url)
+                guard let http = response as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode) else {
+                    throw FirmwareStoreError.invalidOpenROMsResponse
+                }
+                guard data.count == resource.slot.requiredSize else {
+                    throw FirmwareStoreError.invalidSize(
+                        slot: resource.slot,
+                        actual: data.count
+                    )
+                }
+                downloaded[resource.slot] = data
+            }
+        } catch let error as FirmwareStoreError {
+            throw error
+        } catch {
+            throw FirmwareStoreError.openROMsDownloadFailed(error.localizedDescription)
+        }
+
+        let requiredSlots: [FirmwareSlot] = [.basic, .kernal, .chargen]
+        var previousData: [FirmwareSlot: Data] = [:]
+        for slot in requiredSlots {
+            guard let url = try? fileURL(for: slot),
+                  let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else {
+                continue
+            }
+            previousData[slot] = data
+        }
+
+        if isBootReady && !isOpenROMsInstalled {
+            try savePreviousFirmwareProfile()
+        }
+
+        do {
+            for slot in requiredSlots {
+                guard let data = downloaded[slot] else {
+                    throw FirmwareStoreError.invalidOpenROMsResponse
+                }
+                try replaceFirmwareData(data, in: slot)
+            }
+            try openROMsRevision.write(
+                to: openROMsMarkerURL(),
+                atomically: true,
+                encoding: .utf8
+            )
+            try writeVicerc()
+        } catch {
+            for slot in requiredSlots {
+                let destination = try fileURL(for: slot)
+                try? FileManager.default.removeItem(at: destination)
+                if let data = previousData[slot] {
+                    try? data.write(to: destination, options: .atomic)
+                }
+            }
+            try? clearOpenROMsMarker()
+            try? writeVicerc()
+            throw error
+        }
+    }
+
+    static func restorePreviousFirmware() throws {
+        guard canRestorePreviousFirmware else {
+            throw FirmwareStoreError.previousFirmwareUnavailable
+        }
+
+        for slot in [FirmwareSlot.basic, .kernal, .chargen] {
+            let source = try previousFirmwareDirectory()
+                .appendingPathComponent(slot.storedFilename, isDirectory: false)
+            let data = try Data(contentsOf: source, options: [.mappedIfSafe])
+            guard data.count == slot.requiredSize else {
+                throw FirmwareStoreError.invalidSize(slot: slot, actual: data.count)
+            }
+            try replaceFirmwareData(data, in: slot)
+        }
+
+        try clearOpenROMsMarker()
         try writeVicerc()
     }
 
@@ -262,6 +422,61 @@ enum FirmwareStore {
 
     private static func fileURL(for slot: FirmwareSlot) throws -> URL {
         try firmwareDirectory().appendingPathComponent(slot.storedFilename, isDirectory: false)
+    }
+
+    private static func openROMsMarkerURL() throws -> URL {
+        try firmwareDirectory()
+            .appendingPathComponent("openroms-profile.txt", isDirectory: false)
+    }
+
+    private static func previousFirmwareDirectory() throws -> URL {
+        let directory = try firmwareDirectory()
+            .appendingPathComponent("PreviousProfile", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        return directory
+    }
+
+    private static func savePreviousFirmwareProfile() throws {
+        let directory = try previousFirmwareDirectory()
+        try? FileManager.default.removeItem(at: directory)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+
+        for slot in [FirmwareSlot.basic, .kernal, .chargen] {
+            let source = try fileURL(for: slot)
+            guard FileManager.default.fileExists(atPath: source.path) else { continue }
+            let destination = directory.appendingPathComponent(
+                slot.storedFilename,
+                isDirectory: false
+            )
+            try FileManager.default.copyItem(at: source, to: destination)
+        }
+    }
+
+    private static func replaceFirmwareData(_ data: Data, in slot: FirmwareSlot) throws {
+        guard data.count == slot.requiredSize else {
+            throw FirmwareStoreError.invalidSize(slot: slot, actual: data.count)
+        }
+        let destination = try fileURL(for: slot)
+        let temporary = destination.appendingPathExtension("tmp")
+        try? FileManager.default.removeItem(at: temporary)
+        try data.write(to: temporary, options: [.atomic])
+        try? FileManager.default.removeItem(at: destination)
+        try FileManager.default.moveItem(at: temporary, to: destination)
+    }
+
+    private static func clearOpenROMsMarker() throws {
+        let marker = try openROMsMarkerURL()
+        if FileManager.default.fileExists(atPath: marker.path) {
+            try FileManager.default.removeItem(at: marker)
+        }
     }
 
     private static func sha256(_ data: Data) -> String {

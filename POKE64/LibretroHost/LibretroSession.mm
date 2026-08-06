@@ -3,12 +3,14 @@
 #import "LibretroMinimal.h"
 
 #import <AVFoundation/AVFoundation.h>
+#import <dispatch/dispatch.h>
 #import <dlfcn.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <climits>
 #include <cstdarg>
@@ -147,6 +149,7 @@ struct KeyEvent {
 struct SessionImpl {
     void *coreHandle = nullptr;
     CoreAPI api;
+    __weak LibretroSession *owner = nil;
     __weak C64MetalView *videoView = nil;
     std::atomic<bool> running{false};
     std::atomic<int> resetModeRequested{-1};
@@ -193,6 +196,25 @@ struct SessionImpl {
     unsigned retroPortForC64Port(unsigned c64Port) const {
         const unsigned current = currentJoyport.load(std::memory_order_acquire);
         return c64Port == current ? 0u : 1u;
+    }
+
+    void updateVideoGeometry(const retro_game_geometry &geometry) {
+        double aspectRatio = geometry.aspect_ratio;
+        if (!(aspectRatio > 0.0) && geometry.base_height > 0) {
+            aspectRatio = static_cast<double>(geometry.base_width)
+                / static_cast<double>(geometry.base_height);
+        }
+        if (!std::isfinite(aspectRatio) || aspectRatio < 0.5 || aspectRatio > 3.0) {
+            return;
+        }
+
+        LibretroSession *session = owner;
+        void (^callback)(double) = session.videoGeometryDidChange;
+        if (!callback) return;
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            callback(aspectRatio);
+        });
     }
 
     void clearInputState() {
@@ -726,6 +748,117 @@ struct SessionImpl {
 
 static SessionImpl *gSession = nullptr;
 
+static NSString *validatedDefaultString(
+    NSString *key,
+    NSArray<NSString *> *allowedValues,
+    NSString *fallback
+) {
+    NSString *stored = [NSUserDefaults.standardUserDefaults stringForKey:key];
+    return [allowedValues containsObject:stored] ? stored : fallback;
+}
+
+static NSInteger validatedDefaultInteger(
+    NSString *key,
+    NSInteger fallback,
+    NSInteger minimum,
+    NSInteger maximum
+) {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![defaults objectForKey:key]) return fallback;
+    return std::clamp([defaults integerForKey:key], minimum, maximum);
+}
+
+static void assignCoreOption(
+    SessionImpl *session,
+    const char *coreKey,
+    NSString *value
+) {
+    auto found = session->variables.find(coreKey);
+    if (found == session->variables.end() || !value) return;
+    found->second = value.UTF8String;
+}
+
+static void applyStoredVideoOptions(SessionImpl *session) {
+    assignCoreOption(
+        session,
+        "vice_aspect_ratio",
+        validatedDefaultString(
+            @"poke64.video.aspectRatio",
+            @[@"auto", @"pal", @"ntsc", @"raw"],
+            @"auto"
+        )
+    );
+    assignCoreOption(
+        session,
+        "vice_crop",
+        validatedDefaultString(
+            @"poke64.video.crop",
+            @[@"disabled", @"small", @"medium", @"maximum", @"auto"],
+            @"disabled"
+        )
+    );
+    assignCoreOption(
+        session,
+        "vice_crop_delay",
+        [NSUserDefaults.standardUserDefaults objectForKey:@"poke64.video.cropDelay"] == nil
+            || [NSUserDefaults.standardUserDefaults boolForKey:@"poke64.video.cropDelay"]
+            ? @"enabled"
+            : @"disabled"
+    );
+    assignCoreOption(
+        session,
+        "vice_external_palette",
+        validatedDefaultString(
+            @"poke64.video.palette",
+            @[
+                @"default", @"vice", @"colodore", @"community-colors",
+                @"pepto-pal", @"pepto-ntsc", @"the64", @"rgb"
+            ],
+            @"default"
+        )
+    );
+    assignCoreOption(
+        session,
+        "vice_vicii_filter",
+        validatedDefaultString(
+            @"poke64.video.filter",
+            @[
+                @"disabled", @"enabled_noblur", @"enabled_lowblur",
+                @"enabled_medblur", @"enabled"
+            ],
+            @"disabled"
+        )
+    );
+
+    const struct {
+        NSString *defaultsKey;
+        const char *coreKey;
+        NSInteger fallback;
+        NSInteger minimum;
+        NSInteger maximum;
+    } integerOptions[] = {
+        {@"poke64.video.brightness", "vice_vicii_color_brightness", 1000, 20, 2000},
+        {@"poke64.video.contrast", "vice_vicii_color_contrast", 1000, 20, 2000},
+        {@"poke64.video.saturation", "vice_vicii_color_saturation", 1000, 20, 2000},
+        {@"poke64.video.gamma", "vice_vicii_color_gamma", 2800, 1000, 4000},
+        {@"poke64.video.tint", "vice_vicii_color_tint", 1000, 20, 2000}
+    };
+
+    for (const auto &option : integerOptions) {
+        const NSInteger value = validatedDefaultInteger(
+            option.defaultsKey,
+            option.fallback,
+            option.minimum,
+            option.maximum
+        );
+        assignCoreOption(
+            session,
+            option.coreKey,
+            [NSString stringWithFormat:@"%ld", static_cast<long>(value)]
+        );
+    }
+}
+
 static void frontendLog(enum retro_log_level level, const char *format, ...) {
     const char *prefix = "INFO";
     if (level == RETRO_LOG_DEBUG) prefix = "DEBUG";
@@ -743,6 +876,79 @@ static void frontendLog(enum retro_log_level level, const char *format, ...) {
         gSession->recordCoreMessage(buffer, level == RETRO_LOG_WARN || level == RETRO_LOG_ERROR);
     }
 }
+
+static void applyStoredAudioOptions(SessionImpl *session) {
+    assignCoreOption(
+        session,
+        "vice_sid_engine",
+        validatedDefaultString(
+            @"poke64.audio.sidEngine",
+            @[@"FastSID", @"ReSID", @"ReSID-FP"],
+            @"ReSID"
+        )
+    );
+    assignCoreOption(
+        session,
+        "vice_sid_model",
+        validatedDefaultString(
+            @"poke64.audio.sidModel",
+            @[@"default", @"6581", @"8580", @"8580RD"],
+            @"default"
+        )
+    );
+    assignCoreOption(
+        session,
+        "vice_resid_sampling",
+        validatedDefaultString(
+            @"poke64.audio.residSampling",
+            @[@"fast", @"interpolation", @"fast resampling", @"resampling"],
+            @"resampling"
+        )
+    );
+    assignCoreOption(
+        session,
+        "vice_sound_sample_rate",
+        validatedDefaultString(
+            @"poke64.audio.sampleRate",
+            @[@"44100", @"48000", @"96000"],
+            @"48000"
+        )
+    );
+
+    const NSInteger leakLevel = validatedDefaultInteger(
+        @"poke64.audio.leakLevel",
+        0,
+        0,
+        10
+    );
+    assignCoreOption(
+        session,
+        "vice_audio_leak_emulation",
+        leakLevel == 0
+            ? @"disabled"
+            : [NSString stringWithFormat:@"%ld", static_cast<long>(leakLevel)]
+    );
+
+    NSInteger datasetteSoundLevel = validatedDefaultInteger(
+        @"poke64.audio.datasetteSoundLevel",
+        0,
+        0,
+        100
+    );
+    datasetteSoundLevel = std::clamp(
+        static_cast<NSInteger>((datasetteSoundLevel + 2) / 5 * 5),
+        static_cast<NSInteger>(0),
+        static_cast<NSInteger>(100)
+    );
+    assignCoreOption(
+        session,
+        "vice_datasette_sound",
+        datasetteSoundLevel == 0
+            ? @"disabled"
+            : [NSString stringWithFormat:@"%ld%%", static_cast<long>(datasetteSoundLevel)]
+    );
+}
+
 
 static bool environmentCallback(unsigned command, void *data) {
     SessionImpl *session = gSession;
@@ -815,6 +1021,21 @@ static bool environmentCallback(unsigned command, void *data) {
             session->variables["vice_drive_true_emulation"] = "disabled";
             session->variables["vice_virtual_device_traps"] = "enabled";
             session->variables["vice_drive_sound_emulation"] = "disabled";
+
+            NSString *storedModel = [NSUserDefaults.standardUserDefaults
+                stringForKey:@"poke64.machineModel"];
+            static NSSet<NSString *> *supportedModels = [NSSet setWithArray:@[
+                @"C64 PAL",
+                @"C64 NTSC",
+                @"C64C PAL",
+                @"C64C NTSC"
+            ]];
+            NSString *selectedModel = [supportedModels containsObject:storedModel]
+                ? storedModel
+                : @"C64 PAL";
+            session->variables["vice_c64_model"] = selectedModel.UTF8String;
+            applyStoredVideoOptions(session);
+            applyStoredAudioOptions(session);
             return true;
         }
 
@@ -888,11 +1109,19 @@ static bool environmentCallback(unsigned command, void *data) {
             if (info) {
                 session->fps = info->timing.fps;
                 session->sampleRate = info->timing.sample_rate;
+                session->updateVideoGeometry(info->geometry);
             }
             return true;
         }
 
-        case RETRO_ENVIRONMENT_SET_GEOMETRY:
+        case RETRO_ENVIRONMENT_SET_GEOMETRY: {
+            const retro_game_geometry *geometry = static_cast<const retro_game_geometry *>(data);
+            if (geometry) {
+                session->updateVideoGeometry(*geometry);
+            }
+            return true;
+        }
+
         case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS:
         case RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL:
         case RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME:
@@ -1073,6 +1302,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
     api.retro_get_system_av_info(&avInfo);
     fps = avInfo.timing.fps > 1.0 ? avInfo.timing.fps : 50.0;
     sampleRate = avInfo.timing.sample_rate > 1000.0 ? avInfo.timing.sample_rate : 48000.0;
+    updateVideoGeometry(avInfo.geometry);
     startAudio();
 
     running.store(true, std::memory_order_release);
@@ -1161,6 +1391,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
     self = [super init];
     if (self) {
         _impl = std::make_unique<SessionImpl>();
+        _impl->owner = self;
     }
     return self;
 }
