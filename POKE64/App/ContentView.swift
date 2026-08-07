@@ -10,6 +10,8 @@ struct ContentView: View {
     private var printerEnabled = C64PrinterSettings.defaultEnabled
     @AppStorage(C64PrinterSettings.deviceKey)
     private var printerDevice = C64PrinterSettings.defaultDevice
+    @AppStorage(C64VirtualModemSettings.enabledKey)
+    private var virtualModemEnabled = C64VirtualModemSettings.defaultEnabled
     @AppStorage("poke64.toolbar.collapsed")
     private var toolbarCollapsed = false
     @State private var toolbarHeight: CGFloat = 62
@@ -17,6 +19,9 @@ struct ContentView: View {
     @State private var showKeyboard = false
     @State private var showDatasetteControls = false
     @State private var showPrinterControls = false
+    @State private var showVirtualModemControls = false
+    @State private var virtualModemActivityPulse = false
+    @State private var virtualModemActivitySequence = 0
     @State private var printerCapturedBytes: Int?
     @State private var printerActivityPulse = false
     @State private var printerActivitySequence = 0
@@ -127,6 +132,22 @@ struct ContentView: View {
                 printerActivityPulse = false
             }
         }
+        .onChange(of: virtualModemEnabled) { _, enabled in
+            if !enabled {
+                showVirtualModemControls = false
+                virtualModemActivityPulse = false
+            }
+        }
+        .onChange(of: emulator.virtualModemTXBytes) { previous, current in
+            if current > previous {
+                signalVirtualModemActivity()
+            }
+        }
+        .onChange(of: emulator.virtualModemRXBytes) { previous, current in
+            if current > previous {
+                signalVirtualModemActivity()
+            }
+        }
         .task {
             await emulator.startAutomatically()
         }
@@ -151,6 +172,18 @@ struct ContentView: View {
                 isPrinting: printerActivityPulse
             )
             .environmentObject(emulator)
+        }
+        .sheet(isPresented: $showVirtualModemControls) {
+            VirtualModemStatusSheet(
+                emulator: emulator,
+                activityPulse: virtualModemActivityPulse,
+                onOpenSettings: {
+                    showVirtualModemControls = false
+                    DispatchQueue.main.async {
+                        openSettings(.networking)
+                    }
+                }
+            )
         }
         .sheet(isPresented: $showNewDisk) {
             NewDiskView(
@@ -253,10 +286,24 @@ struct ContentView: View {
                 if sideMargin >= 72,
                    emulator.trueDriveEmulationConfigured
                     || emulator.mountedTapeSupportsPhysicalTransport
-                    || (printerEnabled && emulator.isRunning) {
+                    || (printerEnabled && emulator.isRunning)
+                    || (virtualModemEnabled && emulator.isRunning) {
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
                         VStack(spacing: 12) {
+                            if virtualModemEnabled, emulator.isRunning {
+                                NetworkStatusPanel(
+                                    connected: emulator.virtualModemConnected,
+                                    telemetryAvailable: emulator.virtualModemTelemetryAvailable,
+                                    txBytes: emulator.virtualModemTXBytes,
+                                    rxBytes: emulator.virtualModemRXBytes,
+                                    activityPulse: virtualModemActivityPulse,
+                                    onOpen: {
+                                        showVirtualModemControls = true
+                                    }
+                                )
+                            }
+
                             if emulator.trueDriveEmulationConfigured {
                                 DriveStatusPanel(
                                     drive8PowerOn: emulator.drive8PowerLEDOn,
@@ -690,6 +737,19 @@ struct ContentView: View {
             try? await Task.sleep(for: .milliseconds(1_250))
             guard sequence == printerActivitySequence else { return }
             printerActivityPulse = false
+        }
+    }
+
+    @MainActor
+    private func signalVirtualModemActivity() {
+        virtualModemActivitySequence += 1
+        let sequence = virtualModemActivitySequence
+        virtualModemActivityPulse = true
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(700))
+            guard sequence == virtualModemActivitySequence else { return }
+            virtualModemActivityPulse = false
         }
     }
 
@@ -1446,6 +1506,160 @@ private struct DatasetteControlDock: View {
         default:
             return false
         }
+    }
+}
+
+private struct NetworkStatusPanel: View {
+    let connected: Bool
+    let telemetryAvailable: Bool
+    let txBytes: UInt64
+    let rxBytes: UInt64
+    let activityPulse: Bool
+    let onOpen: () -> Void
+
+    private var statusTitle: String {
+        guard telemetryAvailable else { return "N/A" }
+        return connected ? "ONLINE" : "READY"
+    }
+
+    var body: some View {
+        Button(action: onOpen) {
+            VStack(spacing: 8) {
+                Image(systemName: "wifi")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.62))
+
+                networkActivityLED
+
+                Text(activityPulse ? "TX / RX" : statusTitle)
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(activityPulse ? .orange : .white.opacity(0.55))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+
+                VStack(spacing: 2) {
+                    Text("↑ \(txBytes)  ↓ \(rxBytes)")
+                        .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.45)
+                    Text("BYTES")
+                        .font(.system(size: 6, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.35))
+                }
+            }
+            .padding(.vertical, 11)
+            .padding(.horizontal, 7)
+            .frame(width: 64)
+            .background(
+                .white.opacity(activityPulse ? 0.075 : 0.045),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(
+                        activityPulse ? .orange.opacity(0.32) : .white.opacity(0.08),
+                        lineWidth: 1
+                    )
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "Virtual modem, \(connected ? "connected" : "waiting"), transmitted \(txBytes) bytes, received \(rxBytes) bytes"
+        )
+        .accessibilityHint("Opens Virtual Modem status")
+        .animation(.easeOut(duration: 0.15), value: activityPulse)
+    }
+
+    @ViewBuilder
+    private var networkActivityLED: some View {
+        if activityPulse {
+            TimelineView(.periodic(from: .now, by: 0.24)) { context in
+                let phase = Int(context.date.timeIntervalSinceReferenceDate / 0.24)
+                let illuminated = phase.isMultiple(of: 2)
+
+                Circle()
+                    .fill(.orange)
+                    .frame(width: 13, height: 13)
+                    .opacity(illuminated ? 1 : 0.42)
+                    .shadow(
+                        color: .orange.opacity(illuminated ? 0.95 : 0.3),
+                        radius: illuminated ? 8 : 3
+                    )
+                    .scaleEffect(illuminated ? 1.14 : 0.96)
+            }
+        } else {
+            Circle()
+                .fill(telemetryAvailable ? .green : .gray)
+                .frame(width: 13, height: 13)
+                .opacity(connected ? 1 : 0.62)
+                .shadow(
+                    color: telemetryAvailable ? .green.opacity(connected ? 0.8 : 0.35) : .clear,
+                    radius: connected ? 5 : 2
+                )
+        }
+    }
+}
+
+private struct VirtualModemStatusSheet: View {
+    @ObservedObject var emulator: EmulatorModel
+    let activityPulse: Bool
+    let onOpenSettings: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Connection") {
+                    LabeledContent(
+                        "Status",
+                        value: emulator.virtualModemConnected ? "Online" : "AT command mode"
+                    )
+                    LabeledContent("Interface", value: C64VirtualModemSettings.baud == 9600 ? "UP9600 / EZ232" : "User Port RS-232")
+                    LabeledContent("Baud", value: "\(C64VirtualModemSettings.baud)")
+                }
+
+                Section("Traffic") {
+                    LabeledContent("Transmitted", value: "\(emulator.virtualModemTXBytes) bytes")
+                    LabeledContent("Received", value: "\(emulator.virtualModemRXBytes) bytes")
+
+                    if activityPulse {
+                        Label("Network activity", systemImage: "arrow.up.arrow.down.circle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                }
+
+                Section("Virtual Modem") {
+                    Text("The modem is controlled entirely from C64 software. Use AT to test it and ATDT host:port to dial a TCP BBS. The TCP socket is created only after a successful dial command.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+
+                    Text("ATDT bbs.example.com:6400")
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+
+                    Button("Networking Settings", action: onOpenSettings)
+                }
+
+                Section("Terminal") {
+                    ContentUnavailableView(
+                        "Terminal coming later",
+                        systemImage: "terminal",
+                        description: Text("This area is reserved for a future modem terminal and BBS controls.")
+                    )
+                }
+            }
+            .navigationTitle("Virtual Modem")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 

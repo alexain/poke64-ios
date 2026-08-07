@@ -261,6 +261,10 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var datasetteCounter = 0
     @Published private(set) var datasetteMotorOn = false
     @Published private(set) var datasetteActivityLEDOn = false
+    @Published private(set) var virtualModemTelemetryAvailable = false
+    @Published private(set) var virtualModemConnected = false
+    @Published private(set) var virtualModemTXBytes: UInt64 = 0
+    @Published private(set) var virtualModemRXBytes: UInt64 = 0
 
     var drive8PowerLEDOn: Bool {
         isRunning && trueDriveEmulationConfigured
@@ -358,6 +362,15 @@ final class EmulatorModel: ObservableObject {
                 self.datasetteTransportState = DatasetteTransportState(control: control)
                 self.datasetteCounter = min(999, max(0, counter))
                 self.datasetteMotorOn = motorOn
+            }
+        }
+        session.virtualModemStateDidChange = { [weak self] available, connected, txBytes, rxBytes in
+            Task { @MainActor in
+                guard let self else { return }
+                self.virtualModemTelemetryAvailable = available
+                self.virtualModemConnected = connected
+                self.virtualModemTXBytes = txBytes
+                self.virtualModemRXBytes = rxBytes
             }
         }
 

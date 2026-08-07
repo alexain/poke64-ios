@@ -206,6 +206,7 @@ enum FirmwareStore {
             "reu:\(C64REUSettings.configurationFingerprint)",
             "tape:\(C64TapeSettings.configurationFingerprint)",
             "printer:\(C64PrinterSettings.configurationFingerprint)",
+            "network:\(C64VirtualModemSettings.configurationFingerprint)",
             "video:\(C64VideoSettings.configurationFingerprint)",
             "audio:\(C64AudioSettings.configurationFingerprint)",
             "drive:\(C64DriveSettings.configurationFingerprint)"

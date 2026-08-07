@@ -49,6 +49,12 @@ typedef NS_ENUM(NSInteger, C64DatasetteCommand) {
     NSInteger counter,
     BOOL motorOn
 );
+@property (nonatomic, copy, nullable) void (^virtualModemStateDidChange)(
+    BOOL telemetryAvailable,
+    BOOL connected,
+    uint64_t txBytes,
+    uint64_t rxBytes
+);
 @property (nonatomic, copy, readonly, nullable) NSString *lastErrorMessage;
 
 - (BOOL)startWithoutContent;

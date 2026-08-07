@@ -115,6 +115,9 @@ struct CoreAPI {
     void (*poke64_printer_set_output_directory)(const char *) = nullptr;
     int (*poke64_printer_snapshot)(unsigned int) = nullptr;
     void (*poke64_printer_configure_raw_capture)(unsigned int, int, const char *) = nullptr;
+    int (*poke64_modem_connected)(void) = nullptr;
+    unsigned long long (*poke64_modem_tx_bytes)(void) = nullptr;
+    unsigned long long (*poke64_modem_rx_bytes)(void) = nullptr;
     int *tape_enabled = nullptr;
     int *tape_control = nullptr;
     int *tape_counter = nullptr;
@@ -169,6 +172,8 @@ static bool storedDriveEnabled(unsigned int unit);
 static bool storedTrueDriveEmulationEnabled();
 static unsigned int storedPrinterDevice();
 static NSString *storedPrinterExportFormat();
+static bool storedVirtualModemEnabled();
+static int storedVirtualModemBaud();
 static int storedDriveTypeResourceValue(unsigned int unit);
 static int storedDriveSoundVolumeResourceValue();
 static const char *storedDriveROMResourceName(unsigned int unit);
@@ -224,6 +229,11 @@ struct SessionImpl {
     int lastDatasetteControl = 0;
     int lastDatasetteCounter = 0;
     int lastDatasetteMotor = 0;
+    bool virtualModemStateInitialized = false;
+    bool lastVirtualModemTelemetryAvailable = false;
+    bool lastVirtualModemConnected = false;
+    uint64_t lastVirtualModemTXBytes = 0;
+    uint64_t lastVirtualModemRXBytes = 0;
 
     SessionImpl() {
         clearInputState();
@@ -373,6 +383,62 @@ struct SessionImpl {
 
         dispatch_async(dispatch_get_main_queue(), ^{
             callback(NO, NO, 0, 0, NO);
+        });
+    }
+
+    void updateVirtualModemState(bool force = false) {
+        const bool telemetryAvailable = api.poke64_modem_connected
+            && api.poke64_modem_tx_bytes
+            && api.poke64_modem_rx_bytes;
+        const bool connected = telemetryAvailable
+            ? api.poke64_modem_connected() != 0
+            : false;
+        const uint64_t txBytes = telemetryAvailable
+            ? static_cast<uint64_t>(api.poke64_modem_tx_bytes())
+            : 0;
+        const uint64_t rxBytes = telemetryAvailable
+            ? static_cast<uint64_t>(api.poke64_modem_rx_bytes())
+            : 0;
+
+        if (!force
+            && virtualModemStateInitialized
+            && telemetryAvailable == lastVirtualModemTelemetryAvailable
+            && connected == lastVirtualModemConnected
+            && txBytes == lastVirtualModemTXBytes
+            && rxBytes == lastVirtualModemRXBytes) {
+            return;
+        }
+
+        virtualModemStateInitialized = true;
+        lastVirtualModemTelemetryAvailable = telemetryAvailable;
+        lastVirtualModemConnected = connected;
+        lastVirtualModemTXBytes = txBytes;
+        lastVirtualModemRXBytes = rxBytes;
+
+        LibretroSession *session = owner;
+        void (^callback)(BOOL, BOOL, uint64_t, uint64_t) =
+            session.virtualModemStateDidChange;
+        if (!callback) return;
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            callback(telemetryAvailable, connected, txBytes, rxBytes);
+        });
+    }
+
+    void clearVirtualModemState() {
+        virtualModemStateInitialized = false;
+        lastVirtualModemTelemetryAvailable = false;
+        lastVirtualModemConnected = false;
+        lastVirtualModemTXBytes = 0;
+        lastVirtualModemRXBytes = 0;
+
+        LibretroSession *session = owner;
+        void (^callback)(BOOL, BOOL, uint64_t, uint64_t) =
+            session.virtualModemStateDidChange;
+        if (!callback) return;
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            callback(NO, NO, 0, 0);
         });
     }
 
@@ -548,6 +614,15 @@ struct SessionImpl {
         api.poke64_printer_configure_raw_capture = reinterpret_cast<void (*)(unsigned int, int, const char *)>(
             dlsym(coreHandle, "poke64_printer_configure_raw_capture")
         );
+        api.poke64_modem_connected = reinterpret_cast<int (*)(void)>(
+            dlsym(coreHandle, "poke64_modem_connected")
+        );
+        api.poke64_modem_tx_bytes = reinterpret_cast<unsigned long long (*)(void)>(
+            dlsym(coreHandle, "poke64_modem_tx_bytes")
+        );
+        api.poke64_modem_rx_bytes = reinterpret_cast<unsigned long long (*)(void)>(
+            dlsym(coreHandle, "poke64_modem_rx_bytes")
+        );
         api.tape_enabled = reinterpret_cast<int *>(dlsym(coreHandle, "tape_enabled"));
         api.tape_control = reinterpret_cast<int *>(dlsym(coreHandle, "tape_control"));
         api.tape_counter = reinterpret_cast<int *>(dlsym(coreHandle, "tape_counter"));
@@ -653,6 +728,53 @@ struct SessionImpl {
             error = std::string("VICE could not set the runtime resource ") + name;
             return false;
         }
+        return true;
+    }
+
+    bool setRuntimeStringResource(
+        const char *name,
+        const std::string &value,
+        std::string &error
+    ) {
+        if (!api.resources_set_string) {
+            error = "The VICE core does not expose runtime string resource updates";
+            return false;
+        }
+        if (api.resources_set_string(name, value.c_str()) < 0) {
+            error = std::string("VICE could not set the runtime resource ") + name;
+            return false;
+        }
+        return true;
+    }
+
+    bool applyRuntimeVirtualModemConfiguration(std::string &error) {
+        if (!storedVirtualModemEnabled()) {
+            return setRuntimeIntegerResource("UserportDevice", 0, error);
+        }
+
+        const int baud = storedVirtualModemBaud();
+        const int up9600 = baud == 9600 ? 1 : 0;
+
+        // POKE64's patched rs232net recognizes this private logical device as
+        // a Hayes command-mode modem. ATDT creates the actual TCP socket; no
+        // destination is preconfigured by the native frontend. Device 2 is
+        // USERPORT_DEVICE_RS232_MODEM in this pinned VICE revision.
+        if (!setRuntimeIntegerResource("UserportDevice", 0, error)
+            || !setRuntimeStringResource("RsDevice1", "poke64-hayes", error)
+            || !setRuntimeIntegerResource("RsDevice1ip232", 0, error)
+            || !setRuntimeIntegerResource("RsUserDev", 0, error)
+            || !setRuntimeIntegerResource("RsUserBaud", baud, error)
+            || !setRuntimeIntegerResource("RsUserUP9600", up9600, error)
+            // Keep VICE's logical RTS/CTS polarity. The UP9600 emulation
+            // already models the interface signalling internally; forcing the
+            // resource inversion here prevents Hayes echo/result bytes from
+            // reaching CCGMS while it is in command mode.
+            || !setRuntimeIntegerResource("RsUserRTSInv", 0, error)
+            || !setRuntimeIntegerResource("RsUserCTSInv", 0, error)
+            || !setRuntimeIntegerResource("UserportDevice", 2, error)) {
+            return false;
+        }
+
         return true;
     }
 
@@ -1264,6 +1386,7 @@ struct SessionImpl {
         }
         clearDriveLED();
         clearDatasetteState();
+        clearVirtualModemState();
         stopAudio();
     }
 
@@ -1485,6 +1608,29 @@ static NSString *storedPrinterExportFormat() {
         @[@"pdf", @"png", @"raw", @"pdf+raw"],
         @"pdf"
     );
+}
+
+static bool storedVirtualModemEnabled() {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    return [defaults objectForKey:@"poke64.network.virtualModem.enabled"] != nil
+        && [defaults boolForKey:@"poke64.network.virtualModem.enabled"];
+}
+
+static int storedVirtualModemBaud() {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSInteger baud = [defaults objectForKey:@"poke64.network.virtualModem.baud"] == nil
+        ? 9600
+        : [defaults integerForKey:@"poke64.network.virtualModem.baud"];
+    switch (baud) {
+        case 300:
+        case 600:
+        case 1200:
+        case 2400:
+        case 9600:
+            return static_cast<int>(baud);
+        default:
+            return 9600;
+    }
 }
 
 static NSString *storedDriveModel(unsigned int unit) {
@@ -2127,8 +2273,15 @@ bool SessionImpl::start(const char *path, std::string &error) {
             drainKeyEvents();
             api.retro_run();
             updateDatasetteState(firstIteration);
+            updateVirtualModemState(firstIteration);
 
             if (firstIteration) {
+                {
+                    std::string modemError;
+                    if (!applyRuntimeVirtualModemConfiguration(modemError)) {
+                        recordCoreMessage(modemError.c_str(), true);
+                    }
+                }
                 {
                     std::string printerError;
                     if (!applyRuntimePrinterConfiguration(printerError)) {
