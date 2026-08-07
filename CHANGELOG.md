@@ -2,8 +2,19 @@
 
 ## Unreleased
 
+No unreleased changes yet.
+
+## 0.7.5 — 2026-08-07
+
 ### Added
 
+- Added a Virtual Hayes modem on the C64 User Port using VICE `rs232net`, with 9600-baud UP9600/EZ232 as the recommended mode.
+- Added Hayes command-mode support including `AT`, `ATDT`, `CONNECT`, `NO CARRIER`, hang-up/resume commands and PETSCII-aware command editing.
+- Added selectable raw TCP and Telnet transport, including Telnet negotiation/filtering for BBS connections.
+- Added a compact Wi-Fi modem status panel with Ready/Online state, activity indication and TX/RX byte counters.
+- Added a Virtual Modem dashboard with endpoint/protocol status, native Hang Up, persistent BBS directory and native Dial actions.
+- Added a read-only Virtual Modem traffic monitor with text and hexadecimal views backed by a bounded diagnostic ring buffer.
+- Added external `.reu` image import with automatic REU-size detection, sandbox-safe copying and optional write-back to the imported working copy.
 - Added G64 disk-image support to the Library and disk-mount workflow, with drive-model compatibility validation.
 - Added SHA-256 duplicate detection plus explicit duplicate and filename-conflict import handling.
 - Added automatic multi-disk set detection, grouped Library presentation and disk swapping from Devices without resetting the C64.
@@ -26,6 +37,9 @@
 
 ### Changed
 
+- Enabled the VICE RS-232 network backend on iOS without enabling VICE netplay/binary-monitor networking.
+- Made 9600-baud UP9600/EZ232 the recommended virtual-modem configuration while retaining legacy 300–2400 baud choices for compatibility testing.
+- When an external REU image is mounted, POKE64 derives the REU capacity from the image and prevents conflicting manual size selection.
 - Improved Library sidebar hit targets for more reliable touch selection on iPad.
 - Reorganized Library details so the disk directory and screenshot remain immediately visible while technical metadata and editing controls live in separate sheets.
 - Redesigned the emulator toolbar with a compact two-line layout and an optional collapsible mode that animates the emulator area as the toolbar opens and closes.
@@ -36,6 +50,16 @@
 - Set the default datasette sound level to 20%, matching the default mechanical drive-noise level.
 - Limited T64 controls to operations that do not imply a physical reel position; T64 fast transport and counter reset are disabled.
 - Updated the roadmap to mark datasette transport as complete and retain writable TAP recording/export as future work.
+
+### Fixed
+
+- Fixed libretro/VICE build conflicts exposed by enabling `rs232net`, including ACIA duplicate symbols and stale generated socket adapters.
+- Fixed dispatch of the POKE64 Hayes pseudo-device so VICE routes it through `rs232net` instead of the unavailable physical serial backend on iOS.
+- Fixed C64 PETSCII DEL/backspace handling while editing Hayes dial strings.
+
+### Documentation
+
+- Updated README, roadmap, VICE revision notes and third-party notices for the Virtual Modem, BBS diagnostics and external REU-image workflow.
 
 ## 0.7.0 — 2026-08-06
 

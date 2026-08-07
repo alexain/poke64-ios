@@ -1,6 +1,6 @@
-# VICE/libretro revision used by POKE64 0.7.0
+# VICE/libretro revision used by POKE64 0.7.5
 
-POKE64 0.7.0 builds its `vice_x64sc` libretro core from the following
+POKE64 0.7.5 builds its `vice_x64sc` libretro core from the following
 upstream `vice-libretro` revision:
 
 ```text
@@ -15,7 +15,8 @@ applying the local POKE64 patches, including:
 - the sandbox-safe POKE64 raster-printer backend;
 - iOS compatibility changes;
 - retention and verification of the exported printer bridge symbols;
-- iOS VICE RS-232-over-TCP support and POKE64 modem telemetry exports.
+- iOS VICE RS-232-over-TCP support without enabling VICE netplay;
+- the POKE64 Virtual Hayes modem with raw TCP/Telnet handling, modem state/telemetry, native dialing and diagnostic traffic exports.
 
 The build does not contain proprietary Commodore firmware. Commodore
 system ROMs, drive ROMs and the MPS-803 printer ROM must be supplied
