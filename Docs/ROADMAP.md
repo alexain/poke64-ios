@@ -99,6 +99,18 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 - Treat a ground-up POKE64 C64 core as a separate research project rather than a planned migration target.
 - Preserve and document all GPL/source-distribution obligations associated with VICE regardless of whether libretro remains in the stack.
 
+### Physical Commodore hardware bridge
+
+Experimental research only; do not tie this work to a specific release until the iPadOS transport requirements and hardware compatibility are validated on real devices.
+
+- Investigate class-compliant USB HID adapters such as Keyrah for using original Commodore keyboards and DE9 joysticks as physical POKE64 input devices.
+- Investigate XUM1541/ZoomFloppy as a USB-to-IEC bridge for original 1541/1571/1581 drives and IEC printers, reusing VICE/OpenCBM real-device support where practical.
+- Evaluate an iPadOS USBDriverKit transport for custom XUM1541-class devices on supported M-series iPads, including Apple entitlement and distribution constraints.
+- Explore physical-drive workflows both as live emulated devices and as media tools for reading real disks into D64/G64 images and writing compatible images back to disk.
+- Explore real IEC printer output through the same physical bus bridge, including MPS-series devices.
+- Investigate class-compliant USB-audio Datasette interfaces for tape capture/import and XUM-style tape adapters for deeper motor/button/data integration.
+- Keep physical-hardware support optional and isolated from the normal emulator path so unsupported adapters never affect standard iPad-only operation.
+
 ### SuperCPU
 
 - Investigate technical and licensing feasibility for CMD SuperCPU emulation.
