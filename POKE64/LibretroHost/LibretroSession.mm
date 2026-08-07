@@ -118,6 +118,15 @@ struct CoreAPI {
     int (*poke64_modem_connected)(void) = nullptr;
     unsigned long long (*poke64_modem_tx_bytes)(void) = nullptr;
     unsigned long long (*poke64_modem_rx_bytes)(void) = nullptr;
+    int (*poke64_modem_ready)(void) = nullptr;
+    int (*poke64_modem_command_mode)(void) = nullptr;
+    int (*poke64_modem_telnet_enabled)(void) = nullptr;
+    const char *(*poke64_modem_endpoint)(void) = nullptr;
+    const char *(*poke64_modem_last_result)(void) = nullptr;
+    int (*poke64_modem_dial)(const char *, int) = nullptr;
+    int (*poke64_modem_hangup)(void) = nullptr;
+    unsigned int (*poke64_modem_trace_snapshot)(uint8_t *, uint8_t *, unsigned int) = nullptr;
+    void (*poke64_modem_trace_clear)(void) = nullptr;
     int *tape_enabled = nullptr;
     int *tape_control = nullptr;
     int *tape_counter = nullptr;
@@ -148,6 +157,9 @@ enum class MediaCommandType {
     DatasetteControl,
     PrinterFormFeed,
     PrinterSnapshot,
+    ModemDial,
+    ModemHangup,
+    ModemClearTraffic,
     EjectCartridge,
     EjectAllAndReset
 };
@@ -234,6 +246,11 @@ struct SessionImpl {
     bool lastVirtualModemConnected = false;
     uint64_t lastVirtualModemTXBytes = 0;
     uint64_t lastVirtualModemRXBytes = 0;
+    bool lastVirtualModemReady = false;
+    bool lastVirtualModemCommandMode = true;
+    bool lastVirtualModemTelnetEnabled = true;
+    std::string lastVirtualModemEndpoint;
+    std::string lastVirtualModemResult;
 
     SessionImpl() {
         clearInputState();
@@ -399,13 +416,35 @@ struct SessionImpl {
         const uint64_t rxBytes = telemetryAvailable
             ? static_cast<uint64_t>(api.poke64_modem_rx_bytes())
             : 0;
+        const bool ready = api.poke64_modem_ready
+            ? api.poke64_modem_ready() != 0
+            : false;
+        const bool commandMode = api.poke64_modem_command_mode
+            ? api.poke64_modem_command_mode() != 0
+            : true;
+        const bool telnetEnabled = api.poke64_modem_telnet_enabled
+            ? api.poke64_modem_telnet_enabled() != 0
+            : true;
+        const char *endpointCString = api.poke64_modem_endpoint
+            ? api.poke64_modem_endpoint()
+            : "";
+        const char *lastResultCString = api.poke64_modem_last_result
+            ? api.poke64_modem_last_result()
+            : "";
+        const std::string endpointValue = endpointCString ?: "";
+        const std::string lastResultValue = lastResultCString ?: "";
 
         if (!force
             && virtualModemStateInitialized
             && telemetryAvailable == lastVirtualModemTelemetryAvailable
             && connected == lastVirtualModemConnected
             && txBytes == lastVirtualModemTXBytes
-            && rxBytes == lastVirtualModemRXBytes) {
+            && rxBytes == lastVirtualModemRXBytes
+            && ready == lastVirtualModemReady
+            && commandMode == lastVirtualModemCommandMode
+            && telnetEnabled == lastVirtualModemTelnetEnabled
+            && endpointValue == lastVirtualModemEndpoint
+            && lastResultValue == lastVirtualModemResult) {
             return;
         }
 
@@ -414,14 +453,53 @@ struct SessionImpl {
         lastVirtualModemConnected = connected;
         lastVirtualModemTXBytes = txBytes;
         lastVirtualModemRXBytes = rxBytes;
+        lastVirtualModemReady = ready;
+        lastVirtualModemCommandMode = commandMode;
+        lastVirtualModemTelnetEnabled = telnetEnabled;
+        lastVirtualModemEndpoint = endpointValue;
+        lastVirtualModemResult = lastResultValue;
 
         LibretroSession *session = owner;
-        void (^callback)(BOOL, BOOL, uint64_t, uint64_t) =
+        void (^stateCallback)(BOOL, BOOL, uint64_t, uint64_t) =
             session.virtualModemStateDidChange;
-        if (!callback) return;
+        if (stateCallback) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                stateCallback(telemetryAvailable, connected, txBytes, rxBytes);
+            });
+        }
+
+        void (^diagnosticsCallback)(BOOL, BOOL, BOOL, NSString *, NSString *, NSData *, NSData *) =
+            session.virtualModemDiagnosticsDidChange;
+        if (!diagnosticsCallback) return;
+
+        NSString *endpoint = [NSString stringWithUTF8String:endpointValue.c_str()] ?: @"";
+        NSString *lastResult = [NSString stringWithUTF8String:lastResultValue.c_str()] ?: @"";
+
+        constexpr unsigned int kTraceSnapshotCapacity = 8192;
+        std::array<uint8_t, kTraceSnapshotCapacity> traceBytes{};
+        std::array<uint8_t, kTraceSnapshotCapacity> traceDirections{};
+        unsigned int traceCount = 0;
+        if (api.poke64_modem_trace_snapshot) {
+            traceCount = api.poke64_modem_trace_snapshot(
+                traceDirections.data(),
+                traceBytes.data(),
+                kTraceSnapshotCapacity
+            );
+            traceCount = std::min(traceCount, kTraceSnapshotCapacity);
+        }
+        NSData *bytesData = [NSData dataWithBytes:traceBytes.data() length:traceCount];
+        NSData *directionsData = [NSData dataWithBytes:traceDirections.data() length:traceCount];
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            callback(telemetryAvailable, connected, txBytes, rxBytes);
+            diagnosticsCallback(
+                ready,
+                commandMode,
+                telnetEnabled,
+                endpoint,
+                lastResult,
+                bytesData,
+                directionsData
+            );
         });
     }
 
@@ -431,15 +509,28 @@ struct SessionImpl {
         lastVirtualModemConnected = false;
         lastVirtualModemTXBytes = 0;
         lastVirtualModemRXBytes = 0;
+        lastVirtualModemReady = false;
+        lastVirtualModemCommandMode = true;
+        lastVirtualModemTelnetEnabled = true;
+        lastVirtualModemEndpoint.clear();
+        lastVirtualModemResult.clear();
 
         LibretroSession *session = owner;
-        void (^callback)(BOOL, BOOL, uint64_t, uint64_t) =
+        void (^stateCallback)(BOOL, BOOL, uint64_t, uint64_t) =
             session.virtualModemStateDidChange;
-        if (!callback) return;
+        if (stateCallback) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                stateCallback(NO, NO, 0, 0);
+            });
+        }
 
-        dispatch_async(dispatch_get_main_queue(), ^{
-            callback(NO, NO, 0, 0);
-        });
+        void (^diagnosticsCallback)(BOOL, BOOL, BOOL, NSString *, NSString *, NSData *, NSData *) =
+            session.virtualModemDiagnosticsDidChange;
+        if (diagnosticsCallback) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                diagnosticsCallback(NO, YES, YES, @"", @"", [NSData data], [NSData data]);
+            });
+        }
     }
 
     void clearInputState() {
@@ -622,6 +713,33 @@ struct SessionImpl {
         );
         api.poke64_modem_rx_bytes = reinterpret_cast<unsigned long long (*)(void)>(
             dlsym(coreHandle, "poke64_modem_rx_bytes")
+        );
+        api.poke64_modem_ready = reinterpret_cast<int (*)(void)>(
+            dlsym(coreHandle, "poke64_modem_ready")
+        );
+        api.poke64_modem_command_mode = reinterpret_cast<int (*)(void)>(
+            dlsym(coreHandle, "poke64_modem_command_mode")
+        );
+        api.poke64_modem_telnet_enabled = reinterpret_cast<int (*)(void)>(
+            dlsym(coreHandle, "poke64_modem_telnet_enabled")
+        );
+        api.poke64_modem_endpoint = reinterpret_cast<const char *(*)(void)>(
+            dlsym(coreHandle, "poke64_modem_endpoint")
+        );
+        api.poke64_modem_last_result = reinterpret_cast<const char *(*)(void)>(
+            dlsym(coreHandle, "poke64_modem_last_result")
+        );
+        api.poke64_modem_dial = reinterpret_cast<int (*)(const char *, int)>(
+            dlsym(coreHandle, "poke64_modem_dial")
+        );
+        api.poke64_modem_hangup = reinterpret_cast<int (*)(void)>(
+            dlsym(coreHandle, "poke64_modem_hangup")
+        );
+        api.poke64_modem_trace_snapshot = reinterpret_cast<unsigned int (*)(uint8_t *, uint8_t *, unsigned int)>(
+            dlsym(coreHandle, "poke64_modem_trace_snapshot")
+        );
+        api.poke64_modem_trace_clear = reinterpret_cast<void (*)(void)>(
+            dlsym(coreHandle, "poke64_modem_trace_clear")
         );
         api.tape_enabled = reinterpret_cast<int *>(dlsym(coreHandle, "tape_enabled"));
         api.tape_control = reinterpret_cast<int *>(dlsym(coreHandle, "tape_control"));
@@ -1269,6 +1387,49 @@ struct SessionImpl {
                 return true;
             }
 
+
+            case MediaCommandType::ModemDial:
+                if (!api.poke64_modem_dial) {
+                    error = "The installed VICE core does not expose native modem dialing";
+                    return false;
+                }
+                if (command->path.empty()) {
+                    error = "A BBS host and port are required";
+                    return false;
+                }
+                switch (api.poke64_modem_dial(command->path.c_str(), command->unit ? 1 : 0)) {
+                    case 0:
+                        updateVirtualModemState(true);
+                        return true;
+                    case -2:
+                        error = "Start a C64 terminal program and open the User Port modem before dialing from POKE64";
+                        return false;
+                    default:
+                        updateVirtualModemState(true);
+                        error = "The virtual modem could not connect to the selected BBS";
+                        return false;
+                }
+
+            case MediaCommandType::ModemHangup:
+                if (!api.poke64_modem_hangup) {
+                    error = "The installed VICE core does not expose native modem hangup";
+                    return false;
+                }
+                if (api.poke64_modem_hangup() < 0) {
+                    error = "The virtual modem is not ready";
+                    return false;
+                }
+                updateVirtualModemState(true);
+                return true;
+
+            case MediaCommandType::ModemClearTraffic:
+                if (!api.poke64_modem_trace_clear) {
+                    error = "The installed VICE core does not expose modem traffic capture";
+                    return false;
+                }
+                api.poke64_modem_trace_clear();
+                updateVirtualModemState(true);
+                return true;
 
             case MediaCommandType::EjectCartridge:
                 if (!api.cartridge_detach_image) {
@@ -2522,6 +2683,58 @@ bool SessionImpl::start(const char *path, std::string &error) {
         MediaCommandType::PrinterSnapshot,
         nullptr,
         static_cast<int>(device),
+        message
+    );
+    if (!success) {
+        self.lastErrorMessage = [NSString stringWithUTF8String:message.c_str()];
+    }
+    return success;
+}
+
+
+- (BOOL)dialVirtualModemTarget:(NSString *)target telnet:(BOOL)telnet {
+    self.lastErrorMessage = nil;
+    NSString *trimmed = [target stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (trimmed.length == 0) {
+        self.lastErrorMessage = @"A BBS host and port are required";
+        return NO;
+    }
+
+    std::string message;
+    const bool success = _impl->performMediaCommand(
+        MediaCommandType::ModemDial,
+        trimmed.UTF8String,
+        telnet ? 1 : 0,
+        message
+    );
+    if (!success) {
+        self.lastErrorMessage = [NSString stringWithUTF8String:message.c_str()];
+    }
+    return success;
+}
+
+- (BOOL)hangUpVirtualModem {
+    self.lastErrorMessage = nil;
+    std::string message;
+    const bool success = _impl->performMediaCommand(
+        MediaCommandType::ModemHangup,
+        nullptr,
+        0,
+        message
+    );
+    if (!success) {
+        self.lastErrorMessage = [NSString stringWithUTF8String:message.c_str()];
+    }
+    return success;
+}
+
+- (BOOL)clearVirtualModemTraffic {
+    self.lastErrorMessage = nil;
+    std::string message;
+    const bool success = _impl->performMediaCommand(
+        MediaCommandType::ModemClearTraffic,
+        nullptr,
+        0,
         message
     );
     if (!success) {

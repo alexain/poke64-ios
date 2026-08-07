@@ -2657,7 +2657,7 @@ private struct VirtualModemSettingsView: View {
             }
 
             Section("Hayes Commands") {
-                Text("Use your C64 terminal program to control the modem. No destination is configured in POKE64.")
+                Text("Use your C64 terminal program to control the modem with AT commands, or open the Virtual Modem sheet for the BBS directory, native Dial/Hang Up controls, and read-only traffic diagnostics.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
@@ -2665,7 +2665,7 @@ private struct VirtualModemSettingsView: View {
                     .font(.system(.body, design: .monospaced))
                     .textSelection(.enabled)
 
-                Text("Supported in this first Hayes layer: AT, ATZ, AT&F, ATE0/1, ATV0/1, ATQ0/1, ATI, ATDT/ATDP host:port, +++, ATO and ATH. Common X, &C, &D, &K and S0=0 initialization commands are accepted for compatibility.")
+                Text("Supported: AT, ATZ, AT&F, ATE0/1, ATV0/1, ATQ0/1, ATI, ATDT/ATDP host:port, ATNET0/1, +++, ATO and ATH. Common X, &C, &D, &K and S0=0 initialization commands are accepted for compatibility.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

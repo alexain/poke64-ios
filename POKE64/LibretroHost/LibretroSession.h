@@ -55,6 +55,15 @@ typedef NS_ENUM(NSInteger, C64DatasetteCommand) {
     uint64_t txBytes,
     uint64_t rxBytes
 );
+@property (nonatomic, copy, nullable) void (^virtualModemDiagnosticsDidChange)(
+    BOOL ready,
+    BOOL commandMode,
+    BOOL telnetEnabled,
+    NSString *endpoint,
+    NSString *lastResult,
+    NSData *traceBytes,
+    NSData *traceDirections
+);
 @property (nonatomic, copy, readonly, nullable) NSString *lastErrorMessage;
 
 - (BOOL)startWithoutContent;
@@ -70,6 +79,10 @@ typedef NS_ENUM(NSInteger, C64DatasetteCommand) {
 - (BOOL)ejectDiskFromDriveUnit:(NSInteger)unit NS_SWIFT_NAME(ejectDisk(fromDriveUnit:));
 - (BOOL)ejectTape;
 - (BOOL)controlDatasette:(C64DatasetteCommand)command;
+- (BOOL)dialVirtualModemTarget:(NSString *)target
+                       telnet:(BOOL)telnet NS_SWIFT_NAME(dialVirtualModem(target:telnet:));
+- (BOOL)hangUpVirtualModem;
+- (BOOL)clearVirtualModemTraffic;
 - (BOOL)flushPrinterAtDevice:(NSInteger)device NS_SWIFT_NAME(flushPrinter(atDevice:));
 - (BOOL)snapshotPrinterAtDevice:(NSInteger)device NS_SWIFT_NAME(snapshotPrinter(atDevice:));
 - (BOOL)ejectCartridge;

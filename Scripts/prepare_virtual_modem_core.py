@@ -203,7 +203,16 @@ def main() -> None:
         "   LDFLAGS     += -Wl,-u,_poke64_printer_configure_raw_capture\n"
         "   LDFLAGS     += -Wl,-u,_poke64_modem_connected\n"
         "   LDFLAGS     += -Wl,-u,_poke64_modem_tx_bytes\n"
-        "   LDFLAGS     += -Wl,-u,_poke64_modem_rx_bytes\n",
+        "   LDFLAGS     += -Wl,-u,_poke64_modem_rx_bytes\n"
+        "   LDFLAGS     += -Wl,-u,_poke64_modem_ready\n"
+        "   LDFLAGS     += -Wl,-u,_poke64_modem_command_mode\n"
+        "   LDFLAGS     += -Wl,-u,_poke64_modem_telnet_enabled\n"
+        "   LDFLAGS     += -Wl,-u,_poke64_modem_endpoint\n"
+        "   LDFLAGS     += -Wl,-u,_poke64_modem_last_result\n"
+        "   LDFLAGS     += -Wl,-u,_poke64_modem_dial\n"
+        "   LDFLAGS     += -Wl,-u,_poke64_modem_hangup\n"
+        "   LDFLAGS     += -Wl,-u,_poke64_modem_trace_snapshot\n"
+        "   LDFLAGS     += -Wl,-u,_poke64_modem_trace_clear\n",
         "Darwin modem runtime symbol preservation",
     )
 

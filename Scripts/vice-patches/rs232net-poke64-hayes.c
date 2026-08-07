@@ -113,6 +113,8 @@ typedef struct rs232net {
     uint8_t telnet_command;
     char hayes_command[256];
     size_t hayes_command_len;
+    char hayes_target[256];
+    char hayes_last_result[32];
     uint8_t hayes_response[1024];
     size_t hayes_response_head;
     size_t hayes_response_tail;
@@ -127,6 +129,10 @@ static log_t rs232net_log = LOG_DEFAULT;
 #define POKE64_HAYES_DEVICE "poke64-hayes"
 #define POKE64_HAYES_COMMAND_MAX 255
 #define POKE64_HAYES_RESPONSE_MAX 1024
+#define POKE64_MODEM_TRACE_MAX 32768
+
+#define POKE64_MODEM_TRACE_TX 0
+#define POKE64_MODEM_TRACE_RX 1
 
 #define POKE64_TELNET_IAC 255
 #define POKE64_TELNET_DONT 254
@@ -152,6 +158,45 @@ enum poke64_telnet_state {
  * the TCP socket, including IP232 control bytes when that mode is enabled. */
 static unsigned long long poke64_modem_tx_count = 0;
 static unsigned long long poke64_modem_rx_count = 0;
+static uint8_t poke64_modem_trace_bytes[POKE64_MODEM_TRACE_MAX];
+static uint8_t poke64_modem_trace_directions[POKE64_MODEM_TRACE_MAX];
+static size_t poke64_modem_trace_head = 0;
+static size_t poke64_modem_trace_count = 0;
+
+static int poke64_modem_active_fd(void)
+{
+    int i;
+
+    for (i = 0; i < RS232_NUM_DEVICES; i++) {
+        if (fds[i].inuse && fds[i].poke64_hayes) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void poke64_modem_trace_append(uint8_t direction, uint8_t value)
+{
+    size_t index;
+
+    if (poke64_modem_trace_count < POKE64_MODEM_TRACE_MAX) {
+        index = (poke64_modem_trace_head + poke64_modem_trace_count)
+            % POKE64_MODEM_TRACE_MAX;
+        poke64_modem_trace_count++;
+    } else {
+        index = poke64_modem_trace_head;
+        poke64_modem_trace_head = (poke64_modem_trace_head + 1)
+            % POKE64_MODEM_TRACE_MAX;
+    }
+
+    poke64_modem_trace_directions[index] = direction;
+    poke64_modem_trace_bytes[index] = value;
+}
+
+int poke64_modem_ready(void)
+{
+    return poke64_modem_active_fd() >= 0;
+}
 
 int poke64_modem_connected(void)
 {
@@ -173,6 +218,62 @@ unsigned long long poke64_modem_tx_bytes(void)
 unsigned long long poke64_modem_rx_bytes(void)
 {
     return poke64_modem_rx_count;
+}
+
+int poke64_modem_command_mode(void)
+{
+    int fd = poke64_modem_active_fd();
+    return fd >= 0 ? fds[fd].hayes_command_mode : 1;
+}
+
+int poke64_modem_telnet_enabled(void)
+{
+    int fd = poke64_modem_active_fd();
+    return fd >= 0 ? fds[fd].hayes_telnet : 1;
+}
+
+const char *poke64_modem_endpoint(void)
+{
+    int fd = poke64_modem_active_fd();
+    return fd >= 0 ? fds[fd].hayes_target : "";
+}
+
+const char *poke64_modem_last_result(void)
+{
+    int fd = poke64_modem_active_fd();
+    return fd >= 0 ? fds[fd].hayes_last_result : "";
+}
+
+unsigned int poke64_modem_trace_snapshot(
+    uint8_t *directions, uint8_t *bytes, unsigned int capacity)
+{
+    size_t count;
+    size_t start;
+    size_t i;
+
+    if (!directions || !bytes || capacity == 0) {
+        return 0;
+    }
+
+    count = poke64_modem_trace_count;
+    if (count > capacity) {
+        count = capacity;
+    }
+    start = (poke64_modem_trace_head + poke64_modem_trace_count - count)
+        % POKE64_MODEM_TRACE_MAX;
+
+    for (i = 0; i < count; i++) {
+        size_t index = (start + i) % POKE64_MODEM_TRACE_MAX;
+        directions[i] = poke64_modem_trace_directions[index];
+        bytes[i] = poke64_modem_trace_bytes[index];
+    }
+    return (unsigned int)count;
+}
+
+void poke64_modem_trace_clear(void)
+{
+    poke64_modem_trace_head = 0;
+    poke64_modem_trace_count = 0;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -214,6 +315,13 @@ static int poke64_hayes_dequeue_byte(int fd, uint8_t *b)
 
 static void poke64_hayes_result(int fd, const char *verbose, const char *numeric)
 {
+    strncpy(
+        fds[fd].hayes_last_result,
+        verbose,
+        sizeof(fds[fd].hayes_last_result) - 1
+    );
+    fds[fd].hayes_last_result[sizeof(fds[fd].hayes_last_result) - 1] = '\0';
+
     if (fds[fd].hayes_quiet) {
         return;
     }
@@ -279,6 +387,8 @@ static void poke64_hayes_dial(int fd, const char *target)
     }
     memcpy(dial_target, target, length);
     dial_target[length] = '\0';
+    strncpy(fds[fd].hayes_target, dial_target, sizeof(fds[fd].hayes_target) - 1);
+    fds[fd].hayes_target[sizeof(fds[fd].hayes_target) - 1] = '\0';
 
     if (fds[fd].fd) {
         rs232net_closesocket(fd);
@@ -303,6 +413,37 @@ static void poke64_hayes_dial(int fd, const char *target)
     fds[fd].telnet_state = POKE64_TELNET_DATA;
     fds[fd].telnet_command = 0;
     poke64_hayes_result(fd, "CONNECT", "1");
+}
+
+int poke64_modem_dial(const char *target, int telnet_enabled)
+{
+    int fd = poke64_modem_active_fd();
+
+    if (fd < 0 || !target || !*target) {
+        return -2;
+    }
+
+    fds[fd].hayes_telnet = telnet_enabled ? 1 : 0;
+    fds[fd].hayes_command_mode = 1;
+    poke64_hayes_dial(fd, target);
+    return fds[fd].fd ? 0 : -1;
+}
+
+int poke64_modem_hangup(void)
+{
+    int fd = poke64_modem_active_fd();
+
+    if (fd < 0) {
+        return -2;
+    }
+
+    if (fds[fd].fd) {
+        poke64_hayes_disconnect(fd, 1);
+    } else {
+        fds[fd].hayes_command_mode = 1;
+        poke64_hayes_result(fd, "OK", "0");
+    }
+    return 0;
 }
 
 static void poke64_hayes_execute_command(int fd)
@@ -743,6 +884,7 @@ int rs232net_putc(int fd, uint8_t b)
     /* Frontend TX telemetry is serial-side activity: count every byte the C64
      * hands to the virtual modem, including Hayes command-mode traffic. */
     poke64_modem_tx_count += 1;
+    poke64_modem_trace_append(POKE64_MODEM_TRACE_TX, b);
 
     if (fds[fd].poke64_hayes) {
         if (fds[fd].hayes_command_mode) {
@@ -810,6 +952,7 @@ int rs232net_getc(int fd, uint8_t * b)
             /* Frontend RX telemetry is serial-side activity: this includes
              * Hayes echo/result bytes as well as online TCP payload. */
             poke64_modem_rx_count += 1;
+            poke64_modem_trace_append(POKE64_MODEM_TRACE_RX, *b);
             return 1;
         }
         if (fds[fd].hayes_command_mode) {
@@ -830,6 +973,7 @@ tryagain:
         }
         if (ret > 0) {
             poke64_modem_rx_count += (unsigned long long)ret;
+            poke64_modem_trace_append(POKE64_MODEM_TRACE_RX, *b);
         }
         return ret;
     }
@@ -851,6 +995,7 @@ tryagain:
 
     if (ret > 0) {
         poke64_modem_rx_count += (unsigned long long)ret;
+        poke64_modem_trace_append(POKE64_MODEM_TRACE_RX, *b);
     }
     return ret;
 }

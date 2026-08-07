@@ -1603,52 +1603,175 @@ private struct NetworkStatusPanel: View {
     }
 }
 
+private enum VirtualModemSheetSection: String, CaseIterable, Identifiable {
+    case status = "Status"
+    case directory = "BBS"
+    case traffic = "Traffic"
+
+    var id: String { rawValue }
+}
+
+private enum BBSConnectionProtocol: String, Codable, CaseIterable, Identifiable {
+    case raw = "RAW TCP"
+    case telnet = "TELNET"
+
+    var id: String { rawValue }
+    var usesTelnet: Bool { self == .telnet }
+}
+
+private struct BBSDirectoryEntry: Codable, Identifiable, Equatable {
+    var id: UUID = UUID()
+    var name: String
+    var host: String
+    var port: Int
+    var connectionProtocol: BBSConnectionProtocol
+    var notes: String = ""
+
+    var target: String { "\(host):\(port)" }
+}
+
+private enum BBSDirectoryStore {
+    static let key = "poke64.network.bbsDirectory.v1"
+
+    static let defaults: [BBSDirectoryEntry] = [
+        BBSDirectoryEntry(
+            name: "Cottonwood BBS",
+            host: "cottonwoodbbs.dyndns.org",
+            port: 6502,
+            connectionProtocol: .telnet,
+            notes: "Commodore / PETSCII"
+        ),
+        BBSDirectoryEntry(
+            name: "Borderline BBS",
+            host: "borderlinebbs.dyndns.org",
+            port: 6400,
+            connectionProtocol: .telnet,
+            notes: "Commodore / PETSCII"
+        ),
+        BBSDirectoryEntry(
+            name: "RetroCampus",
+            host: "bbs.retrocampus.com",
+            port: 6510,
+            connectionProtocol: .raw,
+            notes: "Italian C64 / PETSCII endpoint"
+        )
+    ]
+
+    static func load() -> [BBSDirectoryEntry] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let entries = try? JSONDecoder().decode([BBSDirectoryEntry].self, from: data) else {
+            return defaults
+        }
+        return entries
+    }
+
+    static func save(_ entries: [BBSDirectoryEntry]) {
+        guard let data = try? JSONEncoder().encode(entries) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+}
+
+private struct BBSEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: BBSDirectoryEntry
+    let isNew: Bool
+    let onSave: (BBSDirectoryEntry) -> Void
+
+    init(entry: BBSDirectoryEntry, isNew: Bool, onSave: @escaping (BBSDirectoryEntry) -> Void) {
+        _draft = State(initialValue: entry)
+        self.isNew = isNew
+        self.onSave = onSave
+    }
+
+    private var canSave: Bool {
+        !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !draft.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (1...65535).contains(draft.port)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("BBS") {
+                    TextField("Name", text: $draft.name)
+                    TextField("Host", text: $draft.host)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Port", value: $draft.port, format: .number)
+                        .keyboardType(.numberPad)
+                    Picker("Protocol", selection: $draft.connectionProtocol) {
+                        ForEach(BBSConnectionProtocol.allCases) { item in
+                            Text(item.rawValue).tag(item)
+                        }
+                    }
+                }
+
+                Section("Notes") {
+                    TextField("Optional notes", text: $draft.notes, axis: .vertical)
+                        .lineLimit(2...5)
+                }
+            }
+            .navigationTitle(isNew ? "Add BBS" : "Edit BBS")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        draft.name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        draft.host = draft.host.trimmingCharacters(in: .whitespacesAndNewlines)
+                        onSave(draft)
+                        dismiss()
+                    }
+                    .disabled(!canSave)
+                }
+            }
+        }
+    }
+}
+
 private struct VirtualModemStatusSheet: View {
     @ObservedObject var emulator: EmulatorModel
     let activityPulse: Bool
     let onOpenSettings: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedSection: VirtualModemSheetSection = .status
+    @State private var entries = BBSDirectoryStore.load()
+    @State private var editorEntry: BBSDirectoryEntry?
+    @State private var editorIsNew = false
+    @State private var trafficHexMode = false
+    @State private var actionError: String?
+
+    private var statusTitle: String {
+        if emulator.virtualModemConnected { return "Online" }
+        if emulator.virtualModemReady { return "AT command mode" }
+        return "Waiting for C64 terminal"
+    }
+
+    private var protocolTitle: String {
+        emulator.virtualModemTelnetEnabled ? "TELNET" : "RAW TCP"
+    }
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("Connection") {
-                    LabeledContent(
-                        "Status",
-                        value: emulator.virtualModemConnected ? "Online" : "AT command mode"
-                    )
-                    LabeledContent("Interface", value: C64VirtualModemSettings.baud == 9600 ? "UP9600 / EZ232" : "User Port RS-232")
-                    LabeledContent("Baud", value: "\(C64VirtualModemSettings.baud)")
-                }
-
-                Section("Traffic") {
-                    LabeledContent("Transmitted", value: "\(emulator.virtualModemTXBytes) bytes")
-                    LabeledContent("Received", value: "\(emulator.virtualModemRXBytes) bytes")
-
-                    if activityPulse {
-                        Label("Network activity", systemImage: "arrow.up.arrow.down.circle.fill")
-                            .foregroundStyle(.orange)
+            VStack(spacing: 0) {
+                Picker("Virtual Modem", selection: $selectedSection) {
+                    ForEach(VirtualModemSheetSection.allCases) { section in
+                        Text(section.rawValue).tag(section)
                     }
                 }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 10)
 
-                Section("Virtual Modem") {
-                    Text("The modem is controlled entirely from C64 software. Use AT to test it and ATDT host:port to dial a TCP BBS. The TCP socket is created only after a successful dial command.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-
-                    Text("ATDT bbs.example.com:6400")
-                        .font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled)
-
-                    Button("Networking Settings", action: onOpenSettings)
-                }
-
-                Section("Terminal") {
-                    ContentUnavailableView(
-                        "Terminal coming later",
-                        systemImage: "terminal",
-                        description: Text("This area is reserved for a future modem terminal and BBS controls.")
-                    )
+                switch selectedSection {
+                case .status:
+                    statusList
+                case .directory:
+                    directoryList
+                case .traffic:
+                    trafficView
                 }
             }
             .navigationTitle("Virtual Modem")
@@ -1660,6 +1783,284 @@ private struct VirtualModemStatusSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .sheet(item: $editorEntry) { entry in
+            BBSEditorSheet(entry: entry, isNew: editorIsNew) { saved in
+                if let index = entries.firstIndex(where: { $0.id == saved.id }) {
+                    entries[index] = saved
+                } else {
+                    entries.append(saved)
+                }
+                BBSDirectoryStore.save(entries)
+            }
+        }
+        .alert(
+            "Virtual Modem",
+            isPresented: Binding(
+                get: { actionError != nil },
+                set: { if !$0 { actionError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: {
+            Text(actionError ?? "Unknown modem error")
+        }
+    }
+
+    private var statusList: some View {
+        List {
+            Section("Connection") {
+                LabeledContent("Status", value: statusTitle)
+                if !emulator.virtualModemEndpoint.isEmpty {
+                    LabeledContent("Endpoint", value: emulator.virtualModemEndpoint)
+                        .textSelection(.enabled)
+                }
+                LabeledContent("Protocol", value: protocolTitle)
+                LabeledContent(
+                    "Interface",
+                    value: C64VirtualModemSettings.baud == 9600
+                        ? "UP9600 / EZ232"
+                        : "User Port RS-232"
+                )
+                LabeledContent("Baud", value: "\(C64VirtualModemSettings.baud)")
+                if !emulator.virtualModemLastResult.isEmpty {
+                    LabeledContent("Last result", value: emulator.virtualModemLastResult)
+                }
+            }
+
+            Section("Traffic") {
+                LabeledContent("Transmitted", value: byteCount(emulator.virtualModemTXBytes))
+                LabeledContent("Received", value: byteCount(emulator.virtualModemRXBytes))
+
+                if activityPulse {
+                    Label("Modem activity", systemImage: "arrow.up.arrow.down.circle.fill")
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    do {
+                        try emulator.hangUpVirtualModem()
+                    } catch {
+                        actionError = error.localizedDescription
+                    }
+                } label: {
+                    Label("Hang Up", systemImage: "phone.down.fill")
+                }
+                .disabled(!emulator.virtualModemConnected)
+
+                Button("Networking Settings", action: onOpenSettings)
+            } footer: {
+                Text("Dial from C64 software with ATDT host:port, or use the BBS directory. Native Dial still reports CONNECT/NO CARRIER back to the C64 terminal.")
+            }
+        }
+    }
+
+    private var directoryList: some View {
+        List {
+            Section {
+                if entries.isEmpty {
+                    ContentUnavailableView(
+                        "No BBS entries",
+                        systemImage: "list.bullet.rectangle",
+                        description: Text("Add a BBS host and port to dial it directly from POKE64.")
+                    )
+                } else {
+                    ForEach(entries) { entry in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .firstTextBaseline) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(entry.name)
+                                        .font(.headline)
+                                    Text(entry.target)
+                                        .font(.system(.caption, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                    if !entry.notes.isEmpty {
+                                        Text(entry.notes)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer(minLength: 12)
+                                Text(entry.connectionProtocol.rawValue)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            HStack {
+                                Button {
+                                    dial(entry)
+                                } label: {
+                                    Label("Dial", systemImage: "phone.arrow.up.right")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(!emulator.isRunning || !C64VirtualModemSettings.enabled)
+
+                                Button("Edit") {
+                                    editorIsNew = false
+                                    editorEntry = entry
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                entries.removeAll { $0.id == entry.id }
+                                BBSDirectoryStore.save(entries)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("BBS Directory")
+                    Spacer()
+                    Button {
+                        editorIsNew = true
+                        editorEntry = BBSDirectoryEntry(
+                            name: "",
+                            host: "",
+                            port: 23,
+                            connectionProtocol: .telnet
+                        )
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                    }
+                    .textCase(nil)
+                }
+            } footer: {
+                if !emulator.virtualModemReady {
+                    Text("Open the modem in a C64 terminal such as CCGMS first. Once the User Port device is ready, Dial can open the selected BBS without typing ATDT manually.")
+                } else {
+                    Text("Dial uses the same Hayes/rs232net backend as ATDT. The selected RAW/TELNET mode applies only to that call.")
+                }
+            }
+        }
+    }
+
+    private var trafficView: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Picker("Traffic format", selection: $trafficHexMode) {
+                    Text("Text").tag(false)
+                    Text("Hex").tag(true)
+                }
+                .pickerStyle(.segmented)
+
+                Button("Clear") {
+                    do {
+                        try emulator.clearVirtualModemTraffic()
+                    } catch {
+                        actionError = error.localizedDescription
+                    }
+                }
+                .disabled(emulator.virtualModemTraceBytes.isEmpty)
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+
+            Divider()
+
+            if emulator.virtualModemTraceBytes.isEmpty {
+                ContentUnavailableView(
+                    "No traffic captured",
+                    systemImage: "waveform.path.ecg",
+                    description: Text("AT commands and online C64 RX/TX bytes will appear here without being consumed by the monitor.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView([.vertical, .horizontal]) {
+                    Text(trafficHexMode ? trafficHexText : trafficText)
+                        .font(.system(size: 12, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding()
+                }
+                .background(.black.opacity(0.18))
+            }
+        }
+    }
+
+    private func dial(_ entry: BBSDirectoryEntry) {
+        do {
+            try emulator.dialVirtualModem(
+                host: entry.host,
+                port: entry.port,
+                telnet: entry.connectionProtocol.usesTelnet
+            )
+            selectedSection = .status
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func byteCount(_ value: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .file)
+    }
+
+    private var tracePairs: [(direction: UInt8, byte: UInt8)] {
+        Array(zip(emulator.virtualModemTraceDirections, emulator.virtualModemTraceBytes))
+            .map { (direction: $0.0, byte: $0.1) }
+    }
+
+    private var trafficText: String {
+        guard !tracePairs.isEmpty else { return "" }
+        var output = ""
+        var lastDirection: UInt8?
+
+        for item in tracePairs {
+            if item.direction != lastDirection {
+                if !output.isEmpty && !output.hasSuffix("\n") { output.append("\n") }
+                output.append(item.direction == 0 ? "TX  " : "RX  ")
+                lastDirection = item.direction
+            }
+
+            switch item.byte {
+            case 13:
+                output.append("␍\n")
+                lastDirection = nil
+            case 10:
+                output.append("␊\n")
+                lastDirection = nil
+            case 32...126:
+                output.append(Character(UnicodeScalar(item.byte)))
+            default:
+                output.append("·")
+            }
+        }
+        return output
+    }
+
+    private var trafficHexText: String {
+        guard !tracePairs.isEmpty else { return "" }
+        var lines: [String] = []
+        var currentDirection: UInt8?
+        var currentBytes: [UInt8] = []
+
+        func flush() {
+            guard let direction = currentDirection, !currentBytes.isEmpty else { return }
+            var offset = 0
+            while offset < currentBytes.count {
+                let chunk = currentBytes[offset..<min(offset + 16, currentBytes.count)]
+                let values = chunk.map { String(format: "%02X", $0) }.joined(separator: " ")
+                lines.append("\(direction == 0 ? "TX" : "RX")  \(values)")
+                offset += 16
+            }
+            currentBytes.removeAll(keepingCapacity: true)
+        }
+
+        for item in tracePairs {
+            if currentDirection != item.direction {
+                flush()
+                currentDirection = item.direction
+            }
+            currentBytes.append(item.byte)
+        }
+        flush()
+        return lines.joined(separator: "\n")
     }
 }
 

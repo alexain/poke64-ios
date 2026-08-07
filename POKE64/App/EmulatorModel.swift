@@ -265,6 +265,13 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var virtualModemConnected = false
     @Published private(set) var virtualModemTXBytes: UInt64 = 0
     @Published private(set) var virtualModemRXBytes: UInt64 = 0
+    @Published private(set) var virtualModemReady = false
+    @Published private(set) var virtualModemCommandMode = true
+    @Published private(set) var virtualModemTelnetEnabled = true
+    @Published private(set) var virtualModemEndpoint = ""
+    @Published private(set) var virtualModemLastResult = ""
+    @Published private(set) var virtualModemTraceBytes: [UInt8] = []
+    @Published private(set) var virtualModemTraceDirections: [UInt8] = []
 
     var drive8PowerLEDOn: Bool {
         isRunning && trueDriveEmulationConfigured
@@ -371,6 +378,18 @@ final class EmulatorModel: ObservableObject {
                 self.virtualModemConnected = connected
                 self.virtualModemTXBytes = txBytes
                 self.virtualModemRXBytes = rxBytes
+            }
+        }
+        session.virtualModemDiagnosticsDidChange = { [weak self] ready, commandMode, telnetEnabled, endpoint, lastResult, traceBytes, traceDirections in
+            Task { @MainActor in
+                guard let self else { return }
+                self.virtualModemReady = ready
+                self.virtualModemCommandMode = commandMode
+                self.virtualModemTelnetEnabled = telnetEnabled
+                self.virtualModemEndpoint = endpoint
+                self.virtualModemLastResult = lastResult
+                self.virtualModemTraceBytes = Array(traceBytes)
+                self.virtualModemTraceDirections = Array(traceDirections)
             }
         }
 
@@ -830,6 +849,44 @@ final class EmulatorModel: ObservableObject {
         )
         status = "Printer paper ejected"
         return outputURLs
+    }
+
+    func dialVirtualModem(host: String, port: Int, telnet: Bool) throws {
+        guard isRunning else {
+            throw EmulatorModelError.coreFailure("The C64 core is not running")
+        }
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty, (1...65535).contains(port) else {
+            throw EmulatorModelError.coreFailure("Enter a valid BBS host and TCP port")
+        }
+        let target = "\(trimmedHost):\(port)"
+        guard session.dialVirtualModem(target: target, telnet: telnet) else {
+            throw EmulatorModelError.coreFailure(
+                session.lastErrorMessage ?? "Unable to dial the selected BBS"
+            )
+        }
+        status = "Dialing \(target)"
+    }
+
+    func hangUpVirtualModem() throws {
+        guard isRunning else { return }
+        guard session.hangUpVirtualModem() else {
+            throw EmulatorModelError.coreFailure(
+                session.lastErrorMessage ?? "Unable to hang up the virtual modem"
+            )
+        }
+        status = "Virtual modem hung up"
+    }
+
+    func clearVirtualModemTraffic() throws {
+        guard isRunning else { return }
+        guard session.clearVirtualModemTraffic() else {
+            throw EmulatorModelError.coreFailure(
+                session.lastErrorMessage ?? "Unable to clear modem traffic"
+            )
+        }
+        virtualModemTraceBytes = []
+        virtualModemTraceDirections = []
     }
 
     func stop() {

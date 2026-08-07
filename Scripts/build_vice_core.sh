@@ -93,7 +93,16 @@ for symbol in \
   poke64_printer_configure_raw_capture \
   poke64_modem_connected \
   poke64_modem_tx_bytes \
-  poke64_modem_rx_bytes; do
+  poke64_modem_rx_bytes \
+  poke64_modem_ready \
+  poke64_modem_command_mode \
+  poke64_modem_telnet_enabled \
+  poke64_modem_endpoint \
+  poke64_modem_last_result \
+  poke64_modem_dial \
+  poke64_modem_hangup \
+  poke64_modem_trace_snapshot \
+  poke64_modem_trace_clear; do
   if ! grep -Eq "[[:space:]]_${symbol}$" "${POKE64_SYMBOLS_FILE}"; then
     echo "Missing required POKE64 core symbol: ${symbol}" >&2
     echo "Available POKE64 bridge symbols:" >&2
