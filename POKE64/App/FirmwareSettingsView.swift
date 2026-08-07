@@ -1,13 +1,41 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+private enum FirmwareProfileNamePrompt: Identifiable {
+    case create
+    case rename(FirmwareProfile)
+
+    var id: String {
+        switch self {
+        case .create:
+            return "create"
+        case .rename(let profile):
+            return "rename-\(profile.id.uuidString)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .create:
+            return "New Firmware Profile"
+        case .rename:
+            return "Rename Firmware Profile"
+        }
+    }
+}
+
 struct FirmwareSettingsView: View {
     @State private var statuses = FirmwareStore.statuses
+    @State private var firmwareProfiles = FirmwareProfileStore.loadProfiles()
     @State private var pendingSlot: FirmwareSlot?
     @State private var showImporter = false
     @State private var errorMessage: String?
     @State private var showOpenROMsConfirmation = false
     @State private var isInstallingOpenROMs = false
+    @State private var profileNamePrompt: FirmwareProfileNamePrompt?
+    @State private var profileNameDraft = ""
+    @State private var pendingDeleteProfile: FirmwareProfile?
+    @State private var pendingApplyProfile: FirmwareProfile?
 
     var body: some View {
         Form {
@@ -22,8 +50,51 @@ struct FirmwareSettingsView: View {
                     .foregroundStyle(FirmwareStore.isBootReady ? .green : .orange)
 
                     LabeledContent("Active profile", value: FirmwareStore.activeProfileName)
+
+                    if FirmwareProfileStore.activeProfileIsModified {
+                        Label("Active firmware profile has unsaved changes", systemImage: "pencil.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                 } header: {
                     Text("Firmware")
+                }
+
+                Section {
+                    if firmwareProfiles.isEmpty {
+                        Text("No firmware profiles yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(firmwareProfiles) { profile in
+                            firmwareProfileRow(profile)
+                        }
+                    }
+
+                    Button {
+                        profileNameDraft = FirmwareStore.detectedProfileName
+                        profileNamePrompt = .create
+                    } label: {
+                        Label("New Profile from Current Firmware", systemImage: "plus")
+                    }
+                    .disabled(!FirmwareStore.hasAnyInstalledFirmware)
+
+                    if let active = FirmwareProfileStore.activeProfile,
+                       FirmwareProfileStore.activeProfileIsModified {
+                        Button {
+                            do {
+                                try FirmwareProfileStore.updateProfile(active.id)
+                                refresh()
+                            } catch {
+                                errorMessage = error.localizedDescription
+                            }
+                        } label: {
+                            Label("Update \"\(active.name)\"", systemImage: "square.and.arrow.down")
+                        }
+                    }
+                } header: {
+                    Text("Firmware Profiles")
+                } footer: {
+                    Text("Each firmware profile stores one shared ROM set. Emulation profiles can reference these profiles without duplicating ROM files. Importing or removing ROMs changes the active working set; update the active profile when you want to keep those changes.")
                 }
 
                 Section {
@@ -158,13 +229,190 @@ struct FirmwareSettingsView: View {
         } message: {
             Text("OpenROMs will replace the active BASIC, KERNAL and character ROMs. If the current system ROM set is complete, POKE64 will preserve it so it can be restored later.")
         }
-        .alert("Firmware import failed", isPresented: Binding(
+        .alert(
+            profileNamePrompt?.title ?? "Firmware Profile",
+            isPresented: Binding(
+                get: { profileNamePrompt != nil },
+                set: { if !$0 { profileNamePrompt = nil } }
+            )
+        ) {
+            TextField("Profile name", text: $profileNameDraft)
+            Button("Save") {
+                submitProfileName()
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Unsaved firmware changes",
+            isPresented: Binding(
+                get: { pendingApplyProfile != nil },
+                set: { if !$0 { pendingApplyProfile = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let target = pendingApplyProfile {
+                if let active = FirmwareProfileStore.activeProfile {
+                    Button("Update \"\(active.name)\" and Switch") {
+                        do {
+                            try FirmwareProfileStore.updateProfile(active.id)
+                            try FirmwareProfileStore.applyProfile(target.id)
+                            pendingApplyProfile = nil
+                            refresh()
+                        } catch {
+                            pendingApplyProfile = nil
+                            errorMessage = error.localizedDescription
+                        }
+                    }
+                }
+                Button("Discard Changes and Switch", role: .destructive) {
+                    do {
+                        try FirmwareProfileStore.applyProfile(target.id)
+                        pendingApplyProfile = nil
+                        refresh()
+                    } catch {
+                        pendingApplyProfile = nil
+                        errorMessage = error.localizedDescription
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingApplyProfile = nil
+            }
+        } message: {
+            Text("The active firmware profile has changes that are not saved in its profile copy.")
+        }
+        .alert(
+            "Delete Firmware Profile?",
+            isPresented: Binding(
+                get: { pendingDeleteProfile != nil },
+                set: { if !$0 { pendingDeleteProfile = nil } }
+            )
+        ) {
+            Button("Delete", role: .destructive) {
+                guard let profile = pendingDeleteProfile else { return }
+                do {
+                    try FirmwareProfileStore.deleteProfile(profile.id)
+                    pendingDeleteProfile = nil
+                    refresh()
+                } catch {
+                    pendingDeleteProfile = nil
+                    errorMessage = error.localizedDescription
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteProfile = nil
+            }
+        } message: {
+            Text("The stored ROM copies for this firmware profile will be removed. The currently active ROM files are not deleted.")
+        }
+        .alert("Firmware operation failed", isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(errorMessage ?? "Unknown error")
+        }
+    }
+
+    @ViewBuilder
+    private func firmwareProfileRow(_ profile: FirmwareProfile) -> some View {
+        let isActive = FirmwareProfileStore.activeProfileID == profile.id
+        let isModified = isActive && FirmwareProfileStore.activeProfileIsModified
+
+        HStack(spacing: 12) {
+            Button {
+                requestApply(profile)
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(profile.name)
+                            .foregroundStyle(.primary)
+                        Text(profile.compactSummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if isModified {
+                        Text("Modified")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    } else if isActive {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isActive)
+
+            Menu {
+                if isActive && isModified {
+                    Button("Update from Current Firmware") {
+                        do {
+                            try FirmwareProfileStore.updateProfile(profile.id)
+                            refresh()
+                        } catch {
+                            errorMessage = error.localizedDescription
+                        }
+                    }
+                }
+
+                Button("Duplicate") {
+                    do {
+                        _ = try FirmwareProfileStore.duplicateProfile(profile.id)
+                        refresh()
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                }
+
+                Button("Rename") {
+                    profileNameDraft = profile.name
+                    profileNamePrompt = .rename(profile)
+                }
+
+                Button("Delete", role: .destructive) {
+                    pendingDeleteProfile = profile
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
+    private func requestApply(_ profile: FirmwareProfile) {
+        guard FirmwareProfileStore.activeProfileID != profile.id else { return }
+
+        if FirmwareProfileStore.activeProfileIsModified {
+            pendingApplyProfile = profile
+            return
+        }
+
+        do {
+            try FirmwareProfileStore.applyProfile(profile.id)
+            refresh()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func submitProfileName() {
+        guard let prompt = profileNamePrompt else { return }
+        do {
+            switch prompt {
+            case .create:
+                _ = try FirmwareProfileStore.createProfile(named: profileNameDraft)
+            case .rename(let profile):
+                _ = try FirmwareProfileStore.renameProfile(profile.id, to: profileNameDraft)
+            }
+            profileNamePrompt = nil
+            refresh()
+        } catch {
+            profileNamePrompt = nil
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -264,5 +512,6 @@ struct FirmwareSettingsView: View {
 
     private func refresh() {
         statuses = FirmwareStore.statuses
+        firmwareProfiles = FirmwareProfileStore.loadProfiles()
     }
 }
