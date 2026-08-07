@@ -443,6 +443,10 @@ final class EmulatorModel: ObservableObject {
         session.videoView = videoView
     }
 
+    func captureCurrentVideoFrame() -> Data? {
+        session.videoView?.captureCurrentFramePNGData()
+    }
+
     func startAutomatically() async {
         guard !didAttemptAutomaticStart else { return }
         didAttemptAutomaticStart = true

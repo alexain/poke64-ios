@@ -152,6 +152,18 @@ struct LibraryMediaSetDescriptor: Hashable {
     }
 }
 
+enum LibraryArtworkKind: String, Codable, CaseIterable, Hashable {
+    case cover
+    case screenshot
+
+    var displayName: String {
+        switch self {
+        case .cover: return "Cover"
+        case .screenshot: return "Screenshot"
+        }
+    }
+}
+
 struct LibraryItem: Identifiable, Codable, Hashable {
     let id: UUID
     var title: String
@@ -163,6 +175,9 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     let importedAt: Date
     var lastOpenedAt: Date?
     var isFavorite: Bool
+    var notes: String? = nil
+    var coverArtworkFilename: String? = nil
+    var screenshotArtworkFilename: String? = nil
 
     var mediaSetDescriptor: LibraryMediaSetDescriptor? {
         guard mediaType.isDiskImage else { return nil }
@@ -418,6 +433,7 @@ final class LibraryStore: ObservableObject {
     private let fileManager: FileManager
     private let rootURL: URL
     private let mediaDirectoryURL: URL
+    private let artworkDirectoryURL: URL
     private let indexURL: URL
 
     init(fileManager: FileManager = .default) {
@@ -434,6 +450,7 @@ final class LibraryStore: ObservableObject {
             .appendingPathComponent("POKE64", isDirectory: true)
             .appendingPathComponent("Library", isDirectory: true)
         mediaDirectoryURL = rootURL.appendingPathComponent("Media", isDirectory: true)
+        artworkDirectoryURL = rootURL.appendingPathComponent("Artwork", isDirectory: true)
         indexURL = rootURL.appendingPathComponent("library.json", isDirectory: false)
 
         do {
@@ -636,7 +653,10 @@ final class LibraryStore: ObservableObject {
             sha256: Self.sha256(replacementData),
             importedAt: Date(),
             lastOpenedAt: previousItem.lastOpenedAt,
-            isFavorite: previousItem.isFavorite
+            isFavorite: previousItem.isFavorite,
+            notes: previousItem.notes,
+            coverArtworkFilename: previousItem.coverArtworkFilename,
+            screenshotArtworkFilename: previousItem.screenshotArtworkFilename
         )
 
         try replacementData.write(to: destinationURL, options: .atomic)
@@ -788,6 +808,85 @@ final class LibraryStore: ObservableObject {
         try persist()
     }
 
+    func updateNotes(_ item: LibraryItem, notes: String) throws {
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else {
+            throw LibraryStoreError.itemMissing
+        }
+
+        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        items[index].notes = trimmed.isEmpty ? nil : trimmed
+        try persist()
+    }
+
+    func artworkData(for item: LibraryItem, kind: LibraryArtworkKind) -> Data? {
+        guard let filename = artworkFilename(for: item, kind: kind) else { return nil }
+        let url = artworkDirectoryURL.appendingPathComponent(filename, isDirectory: false)
+        return try? Data(contentsOf: url, options: [.mappedIfSafe])
+    }
+
+    func setArtwork(_ data: Data, for item: LibraryItem, kind: LibraryArtworkKind) throws {
+        guard !data.isEmpty else { return }
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else {
+            throw LibraryStoreError.itemMissing
+        }
+
+        try prepareStorage()
+        let filename = "\(item.id.uuidString.lowercased())-\(kind.rawValue).image"
+        let url = artworkDirectoryURL.appendingPathComponent(filename, isDirectory: false)
+        try data.write(to: url, options: .atomic)
+
+        let oldFilename = artworkFilename(for: items[index], kind: kind)
+        switch kind {
+        case .cover:
+            items[index].coverArtworkFilename = filename
+        case .screenshot:
+            items[index].screenshotArtworkFilename = filename
+        }
+
+        do {
+            try persist()
+            if let oldFilename, oldFilename != filename {
+                try? fileManager.removeItem(
+                    at: artworkDirectoryURL.appendingPathComponent(oldFilename, isDirectory: false)
+                )
+            }
+        } catch {
+            try? fileManager.removeItem(at: url)
+            throw error
+        }
+    }
+
+    func removeArtwork(for item: LibraryItem, kind: LibraryArtworkKind) throws {
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else {
+            throw LibraryStoreError.itemMissing
+        }
+
+        let filename = artworkFilename(for: items[index], kind: kind)
+        switch kind {
+        case .cover:
+            items[index].coverArtworkFilename = nil
+        case .screenshot:
+            items[index].screenshotArtworkFilename = nil
+        }
+        try persist()
+
+        if let filename {
+            try? fileManager.removeItem(
+                at: artworkDirectoryURL.appendingPathComponent(filename, isDirectory: false)
+            )
+        }
+    }
+
+    private func artworkFilename(
+        for item: LibraryItem,
+        kind: LibraryArtworkKind
+    ) -> String? {
+        switch kind {
+        case .cover: return item.coverArtworkFilename
+        case .screenshot: return item.screenshotArtworkFilename
+        }
+    }
+
     func delete(_ item: LibraryItem) throws {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else {
             throw LibraryStoreError.itemMissing
@@ -798,6 +897,12 @@ final class LibraryStore: ObservableObject {
             try fileManager.removeItem(at: url)
         }
 
+        for filename in [item.coverArtworkFilename, item.screenshotArtworkFilename].compactMap({ $0 }) {
+            try? fileManager.removeItem(
+                at: artworkDirectoryURL.appendingPathComponent(filename, isDirectory: false)
+            )
+        }
+
         items.remove(at: index)
         try persist()
     }
@@ -805,6 +910,11 @@ final class LibraryStore: ObservableObject {
     private func prepareStorage() throws {
         try fileManager.createDirectory(
             at: mediaDirectoryURL,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        try fileManager.createDirectory(
+            at: artworkDirectoryURL,
             withIntermediateDirectories: true,
             attributes: nil
         )
@@ -841,7 +951,10 @@ final class LibraryStore: ObservableObject {
                 sha256: Self.sha256(data),
                 importedAt: item.importedAt,
                 lastOpenedAt: item.lastOpenedAt,
-                isFavorite: item.isFavorite
+                isFavorite: item.isFavorite,
+                notes: item.notes,
+                coverArtworkFilename: item.coverArtworkFilename,
+                screenshotArtworkFilename: item.screenshotArtworkFilename
             )
             upgradedMetadata = true
         }

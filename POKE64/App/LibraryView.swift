@@ -1,5 +1,7 @@
 import CoreGraphics
+import PhotosUI
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 
@@ -60,6 +62,12 @@ private enum LibraryFilter: String, CaseIterable, Identifiable {
     case all
     case favorites
     case recent
+    case disks
+    case tapes
+    case cartridges
+
+    static let primaryFilters: [LibraryFilter] = [.all, .favorites, .recent]
+    static let mediaTypeFilters: [LibraryFilter] = [.disks, .tapes, .cartridges]
 
     var id: String { rawValue }
 
@@ -71,6 +79,12 @@ private enum LibraryFilter: String, CaseIterable, Identifiable {
             return "Favorites"
         case .recent:
             return "Recent"
+        case .disks:
+            return "Disks"
+        case .tapes:
+            return "Tapes"
+        case .cartridges:
+            return "Cartridges"
         }
     }
 
@@ -82,6 +96,12 @@ private enum LibraryFilter: String, CaseIterable, Identifiable {
             return "star.fill"
         case .recent:
             return "clock.fill"
+        case .disks:
+            return "externaldrive.fill"
+        case .tapes:
+            return "recordingtape"
+        case .cartridges:
+            return "shippingbox.fill"
         }
     }
 }
@@ -303,27 +323,15 @@ struct LibraryView: View {
             }
 
             Section("Library") {
-                ForEach(LibraryFilter.allCases) { candidate in
-                    Button {
-                        filter = candidate
-                        normalizeSelection()
-                    } label: {
-                        HStack(spacing: 12) {
-                            Label(candidate.title, systemImage: candidate.systemImage)
-                            Spacer(minLength: 12)
-                            Text(count(for: candidate), format: .number)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
-                    .listRowBackground(
-                        filter == candidate
-                            ? Color.accentColor.opacity(0.16)
-                            : Color.clear
-                    )
+                ForEach(LibraryFilter.primaryFilters) { candidate in
+                    sidebarFilterButton(candidate)
+                }
+
+                Divider()
+                    .padding(.vertical, 4)
+
+                ForEach(LibraryFilter.mediaTypeFilters) { candidate in
+                    sidebarFilterButton(candidate)
                 }
             }
 
@@ -334,6 +342,29 @@ struct LibraryView: View {
             }
         }
         .navigationTitle("POKE64")
+    }
+
+    private func sidebarFilterButton(_ candidate: LibraryFilter) -> some View {
+        Button {
+            filter = candidate
+            normalizeSelection()
+        } label: {
+            HStack(spacing: 12) {
+                Label(candidate.title, systemImage: candidate.systemImage)
+                Spacer(minLength: 12)
+                Text(count(for: candidate), format: .number)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .listRowBackground(
+            filter == candidate
+                ? Color.accentColor.opacity(0.16)
+                : Color.clear
+        )
     }
 
     private var itemList: some View {
@@ -404,8 +435,13 @@ struct LibraryView: View {
                 onMediaSetAction: { member, action in
                     beginMediaRequest(for: member, preferredAction: action)
                 },
+                loadArtwork: { kind in library.artworkData(for: item, kind: kind) },
+                captureCurrentScreenshot: { emulator.captureCurrentVideoFrame() },
                 onToggleFavorite: { toggleFavorite(item) },
                 onRename: { title in rename(item, to: title) },
+                onUpdateNotes: { notes in updateNotes(item, notes: notes) },
+                onSetArtwork: { kind, data in setArtwork(data, for: item, kind: kind) },
+                onRemoveArtwork: { kind in removeArtwork(for: item, kind: kind) },
                 onDelete: { deletionCandidate = item }
             )
             .id(item.id)
@@ -426,6 +462,12 @@ struct LibraryView: View {
             return library.favoriteItems
         case .recent:
             return library.recentItems
+        case .disks:
+            return library.allItems.filter { $0.mediaType.isDiskImage }
+        case .tapes:
+            return library.allItems.filter { $0.mediaType == .tap || $0.mediaType == .t64 }
+        case .cartridges:
+            return library.allItems.filter { $0.mediaType == .crt }
         }
     }
 
@@ -582,6 +624,12 @@ struct LibraryView: View {
             return "No Favorites"
         case .recent:
             return "No Recent Media"
+        case .disks:
+            return "No Disks"
+        case .tapes:
+            return "No Tapes"
+        case .cartridges:
+            return "No Cartridges"
         }
     }
 
@@ -593,6 +641,12 @@ struct LibraryView: View {
             return "star"
         case .recent:
             return "clock"
+        case .disks:
+            return "externaldrive"
+        case .tapes:
+            return "recordingtape"
+        case .cartridges:
+            return "shippingbox"
         }
     }
 
@@ -608,6 +662,12 @@ struct LibraryView: View {
             return "Mark library items as favorites to collect them here."
         case .recent:
             return "Media appears here after it has been launched."
+        case .disks:
+            return "D64, D71, D81 and G64 images are collected here automatically."
+        case .tapes:
+            return "TAP and T64 media are collected here automatically."
+        case .cartridges:
+            return "CRT cartridges are collected here automatically."
         }
     }
 
@@ -619,6 +679,12 @@ struct LibraryView: View {
             return library.favoriteItems.count
         case .recent:
             return library.recentItems.count
+        case .disks:
+            return library.allItems.filter { $0.mediaType.isDiskImage }.count
+        case .tapes:
+            return library.allItems.filter { $0.mediaType == .tap || $0.mediaType == .t64 }.count
+        case .cartridges:
+            return library.allItems.filter { $0.mediaType == .crt }.count
         }
     }
 
@@ -798,6 +864,37 @@ struct LibraryView: View {
     private func rename(_ item: LibraryItem, to title: String) {
         do {
             try library.rename(item, to: title)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func updateNotes(_ item: LibraryItem, notes: String) {
+        do {
+            try library.updateNotes(item, notes: notes)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func setArtwork(
+        _ data: Data,
+        for item: LibraryItem,
+        kind: LibraryArtworkKind
+    ) {
+        do {
+            try library.setArtwork(data, for: item, kind: kind)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func removeArtwork(
+        for item: LibraryItem,
+        kind: LibraryArtworkKind
+    ) {
+        do {
+            try library.removeArtwork(for: item, kind: kind)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1291,6 +1388,14 @@ private struct LibraryMediaIcon: View {
     }
 }
 
+private enum LibraryDetailSheet: String, Identifiable {
+    case edit
+    case information
+    case mediaSet
+
+    var id: String { rawValue }
+}
+
 private struct LibraryDetailView: View {
     let item: LibraryItem
     let isActive: Bool
@@ -1300,14 +1405,26 @@ private struct LibraryDetailView: View {
     let onAction: (MediaAction) -> Void
     let onSelectMediaSetItem: (LibraryItem) -> Void
     let onMediaSetAction: (LibraryItem, MediaAction) -> Void
+    let loadArtwork: (LibraryArtworkKind) -> Data?
+    let captureCurrentScreenshot: () -> Data?
     let onToggleFavorite: () -> Void
     let onRename: (String) -> Void
+    let onUpdateNotes: (String) -> Void
+    let onSetArtwork: (LibraryArtworkKind, Data) -> Void
+    let onRemoveArtwork: (LibraryArtworkKind) -> Void
     let onDelete: () -> Void
 
     @State private var editedTitle: String
+    @State private var editedNotes: String
+    @State private var coverArtworkData: Data?
+    @State private var screenshotArtworkData: Data?
+    @State private var selectedCoverPhoto: PhotosPickerItem?
+    @State private var selectedScreenshotPhoto: PhotosPickerItem?
     @State private var mediaInspection: LibraryMediaInspection?
     @State private var mediaInspectionError: String?
     @State private var isInspectingMedia = false
+    @State private var screenshotCaptureError: String?
+    @State private var presentedSheet: LibraryDetailSheet?
 
     init(
         item: LibraryItem,
@@ -1318,8 +1435,13 @@ private struct LibraryDetailView: View {
         onAction: @escaping (MediaAction) -> Void,
         onSelectMediaSetItem: @escaping (LibraryItem) -> Void,
         onMediaSetAction: @escaping (LibraryItem, MediaAction) -> Void,
+        loadArtwork: @escaping (LibraryArtworkKind) -> Data?,
+        captureCurrentScreenshot: @escaping () -> Data?,
         onToggleFavorite: @escaping () -> Void,
         onRename: @escaping (String) -> Void,
+        onUpdateNotes: @escaping (String) -> Void,
+        onSetArtwork: @escaping (LibraryArtworkKind, Data) -> Void,
+        onRemoveArtwork: @escaping (LibraryArtworkKind) -> Void,
         onDelete: @escaping () -> Void
     ) {
         self.item = item
@@ -1330,17 +1452,37 @@ private struct LibraryDetailView: View {
         self.onAction = onAction
         self.onSelectMediaSetItem = onSelectMediaSetItem
         self.onMediaSetAction = onMediaSetAction
+        self.loadArtwork = loadArtwork
+        self.captureCurrentScreenshot = captureCurrentScreenshot
         self.onToggleFavorite = onToggleFavorite
         self.onRename = onRename
+        self.onUpdateNotes = onUpdateNotes
+        self.onSetArtwork = onSetArtwork
+        self.onRemoveArtwork = onRemoveArtwork
         self.onDelete = onDelete
         _editedTitle = State(initialValue: item.title)
+        _editedNotes = State(initialValue: item.notes ?? "")
+        _coverArtworkData = State(initialValue: loadArtwork(.cover))
+        _screenshotArtworkData = State(initialValue: loadArtwork(.screenshot))
     }
 
     var body: some View {
         Form {
             Section {
                 HStack(spacing: 16) {
-                    LibraryMediaIcon(mediaType: item.mediaType, size: 64)
+                    if let coverArtworkData, let coverImage = UIImage(data: coverArtworkData) {
+                        Image(uiImage: coverImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 64, height: 82)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(.white.opacity(0.12), lineWidth: 1)
+                            }
+                    } else {
+                        LibraryMediaIcon(mediaType: item.mediaType, size: 64)
+                    }
 
                     VStack(alignment: .leading, spacing: 5) {
                         Text(item.title)
@@ -1360,151 +1502,512 @@ private struct LibraryDetailView: View {
                 .padding(.vertical, 6)
 
                 mediaActionButtons
-            }
 
-            Section("Title") {
-                TextField("Title", text: $editedTitle)
-                    .textInputAutocapitalization(.words)
-                    .submitLabel(.done)
-                    .onSubmit {
-                        onRename(editedTitle)
+                screenshotPreview
+
+                if let notes = item.notes, !notes.isEmpty {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Label("Notes", systemImage: "note.text")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(notes)
+                            .font(.callout)
+                            .lineLimit(3)
                     }
-
-                Button("Save Title") {
-                    onRename(editedTitle)
+                    .padding(.top, 4)
                 }
-                .disabled(
-                    editedTitle.trimmingCharacters(in: .whitespacesAndNewlines) == item.title
-                )
             }
 
             diskDirectoryPresentationSection
 
-            Section("Media") {
-                LabeledContent("Original file", value: item.originalFilename)
-                LabeledContent("Format", value: item.mediaType.displayName)
-                LabeledContent(
-                    "Size",
-                    value: Self.fileSizeFormatter.string(fromByteCount: item.fileSize)
-                )
-
-                if let driveRequirement = item.mediaType.driveRequirementDescription {
-                    LabeledContent("Compatible drive", value: driveRequirement)
-                }
-
-                if let descriptor = item.mediaSetDescriptor {
-                    LabeledContent("Detected set", value: descriptor.displayName)
-                    LabeledContent("Set member", value: descriptor.memberLabel)
-                }
-
-                if let hash = item.sha256 {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("SHA-256")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(hash)
-                            .font(.caption2)
-                            .monospaced()
-                            .textSelection(.enabled)
-                    }
-                }
-
-                LabeledContent("Imported", value: item.importedAt.formatted(date: .abbreviated, time: .shortened))
-                LabeledContent(
-                    "Last opened",
-                    value: item.lastOpenedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Never"
-                )
-            }
-
-            mediaTechnicalInspectionSections
-
             if mediaSetItems.count > 1 {
-                Section {
-                    ForEach(mediaSetItems) { member in
-                        HStack(spacing: 10) {
-                            Button {
-                                onSelectMediaSetItem(member)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Image(
-                                        systemName: member.id == item.id
-                                            ? "checkmark.circle.fill"
-                                            : "circle"
-                                    )
-                                    .foregroundStyle(
-                                        member.id == item.id
-                                            ? Color.accentColor
-                                            : Color.secondary
-                                    )
+                Section("Multi-Disk Set") {
+                    Button {
+                        presentedSheet = .mediaSet
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "square.stack.3d.up.fill")
+                                .foregroundStyle(.tint)
 
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(member.mediaSetDescriptor?.memberLabel ?? member.title)
-                                            .foregroundStyle(.primary)
-                                        Text(member.originalFilename)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-
-                                    Spacer()
-                                }
-                                .contentShape(Rectangle())
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.mediaSetDescriptor?.displayName ?? "Multi-disk set")
+                                    .foregroundStyle(.primary)
+                                Text("\(mediaSetItems.count) disks · \(item.mediaSetDescriptor?.memberLabel ?? item.title)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
-                            .buttonStyle(.plain)
 
-                            Menu {
-                                ForEach(availableDriveUnits, id: \.self) { unit in
-                                    Button {
-                                        onMediaSetAction(member, .insertDisk(unit))
-                                    } label: {
-                                        Label(
-                                            "Insert in Drive \(unit)",
-                                            systemImage: "externaldrive.fill"
-                                        )
-                                    }
-                                }
-                            } label: {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                    .frame(width: 32, height: 32)
-                            }
-                            .accessibilityLabel("Insert \(member.title)")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
                         }
+                        .contentShape(Rectangle())
                     }
-                } header: {
-                    Text("Multi-disk Set")
-                } footer: {
-                    Text("POKE64 groups disks automatically when filenames use labels such as Disk 1, Disk 2, Side A or Side B. Select a member, then insert it in the required drive.")
+                    .buttonStyle(.plain)
                 }
             }
 
-            Section {
+            Section("Details") {
                 Button {
-                    onToggleFavorite()
+                    presentedSheet = .information
                 } label: {
-                    Label(
-                        item.isFavorite ? "Remove from Favorites" : "Add to Favorites",
-                        systemImage: item.isFavorite ? "star.slash" : "star"
-                    )
+                    Label("Media Information", systemImage: "info.circle")
                 }
 
-                Button(role: .destructive) {
-                    onDelete()
+                Button {
+                    presentedSheet = .edit
                 } label: {
-                    Label("Delete from Library", systemImage: "trash")
-                }
-                .disabled(isActive)
-            } footer: {
-                if isActive {
-                    Text("Active media cannot be deleted. Eject, reset or replace it first.")
+                    Label("Edit Library Entry", systemImage: "pencil")
                 }
             }
         }
         .navigationTitle("Media Details")
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    onToggleFavorite()
+                } label: {
+                    Image(systemName: item.isFavorite ? "star.fill" : "star")
+                }
+                .accessibilityLabel(item.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+
+                Menu {
+                    Button {
+                        presentedSheet = .edit
+                    } label: {
+                        Label("Edit Library Entry", systemImage: "pencil")
+                    }
+
+                    Button {
+                        presentedSheet = .information
+                    } label: {
+                        Label("Media Information", systemImage: "info.circle")
+                    }
+
+                    if mediaSetItems.count > 1 {
+                        Button {
+                            presentedSheet = .mediaSet
+                        } label: {
+                            Label("Multi-Disk Set", systemImage: "square.stack.3d.up")
+                        }
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        onDelete()
+                    } label: {
+                        Label("Delete from Library", systemImage: "trash")
+                    }
+                    .disabled(isActive)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel("More library actions")
+            }
+        }
+        .sheet(item: $presentedSheet) { sheet in
+            switch sheet {
+            case .edit:
+                editLibraryEntrySheet
+            case .information:
+                mediaInformationSheet
+            case .mediaSet:
+                multiDiskSetSheet
+            }
+        }
         .task(id: item.id) {
             await loadMediaInspectionIfNeeded()
         }
         .onChange(of: item.title) { _, newValue in
             editedTitle = newValue
+        }
+        .onChange(of: item.notes) { _, newValue in
+            editedNotes = newValue ?? ""
+        }
+        .onChange(of: item.coverArtworkFilename) { _, _ in
+            coverArtworkData = loadArtwork(.cover)
+        }
+        .onChange(of: item.screenshotArtworkFilename) { _, _ in
+            screenshotArtworkData = loadArtwork(.screenshot)
+        }
+        .onChange(of: selectedCoverPhoto) { _, newValue in
+            importArtwork(from: newValue, kind: .cover)
+        }
+        .onChange(of: selectedScreenshotPhoto) { _, newValue in
+            importArtwork(from: newValue, kind: .screenshot)
+        }
+        .alert(
+            "Screenshot unavailable",
+            isPresented: Binding(
+                get: { screenshotCaptureError != nil },
+                set: { if !$0 { screenshotCaptureError = nil } }
+            )
+        ) {
+            Button("OK") {
+                screenshotCaptureError = nil
+            }
+        } message: {
+            Text(screenshotCaptureError ?? "Unable to capture the current C64 frame.")
+        }
+    }
+
+    private var editLibraryEntrySheet: some View {
+        NavigationStack {
+            Form {
+                Section("Title") {
+                    TextField("Title", text: $editedTitle)
+                        .textInputAutocapitalization(.words)
+                        .submitLabel(.done)
+                        .onSubmit {
+                            saveEditedMetadata()
+                        }
+                }
+
+                Section("Notes") {
+                    TextEditor(text: $editedNotes)
+                        .frame(minHeight: 110)
+                    Text("Notes are stored locally with this Library entry.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                artworkEditorSection(
+                    title: "Cover",
+                    kind: .cover,
+                    data: coverArtworkData,
+                    selection: $selectedCoverPhoto,
+                    aspectRatio: 3.0 / 4.0
+                )
+
+                artworkEditorSection(
+                    title: "Screenshot",
+                    kind: .screenshot,
+                    data: screenshotArtworkData,
+                    selection: $selectedScreenshotPhoto,
+                    aspectRatio: 4.0 / 3.0
+                )
+
+                Section("Library") {
+                    Button {
+                        onToggleFavorite()
+                    } label: {
+                        Label(
+                            item.isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                            systemImage: item.isFavorite ? "star.slash" : "star"
+                        )
+                    }
+                }
+            }
+            .navigationTitle("Edit Library Entry")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        editedTitle = item.title
+                        editedNotes = item.notes ?? ""
+                        presentedSheet = nil
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        saveEditedMetadata()
+                        presentedSheet = nil
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private var mediaInformationSheet: some View {
+        NavigationStack {
+            Form {
+                Section("Media") {
+                    LabeledContent("Original file", value: item.originalFilename)
+                    LabeledContent("Format", value: item.mediaType.displayName)
+                    LabeledContent(
+                        "Size",
+                        value: Self.fileSizeFormatter.string(fromByteCount: item.fileSize)
+                    )
+
+                    if let driveRequirement = item.mediaType.driveRequirementDescription {
+                        LabeledContent("Compatible drive", value: driveRequirement)
+                    }
+
+                    if let descriptor = item.mediaSetDescriptor {
+                        LabeledContent("Detected set", value: descriptor.displayName)
+                        LabeledContent("Set member", value: descriptor.memberLabel)
+                    }
+
+                    LabeledContent(
+                        "Imported",
+                        value: item.importedAt.formatted(date: .abbreviated, time: .shortened)
+                    )
+                    LabeledContent(
+                        "Last opened",
+                        value: item.lastOpenedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Never"
+                    )
+                }
+
+                if let hash = item.sha256 {
+                    Section {
+                        Text(hash)
+                            .font(.caption2)
+                            .monospaced()
+                            .textSelection(.enabled)
+                    } header: {
+                        Text("SHA-256")
+                    }
+                }
+
+                mediaTechnicalInspectionSections
+            }
+            .navigationTitle("Media Information")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        presentedSheet = nil
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private var multiDiskSetSheet: some View {
+        NavigationStack {
+            List {
+                ForEach(mediaSetItems) { member in
+                    HStack(spacing: 10) {
+                        Button {
+                            onSelectMediaSetItem(member)
+                            presentedSheet = nil
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(
+                                    systemName: member.id == item.id
+                                        ? "checkmark.circle.fill"
+                                        : "circle"
+                                )
+                                .foregroundStyle(
+                                    member.id == item.id
+                                        ? Color.accentColor
+                                        : Color.secondary
+                                )
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(member.mediaSetDescriptor?.memberLabel ?? member.title)
+                                        .foregroundStyle(.primary)
+                                    Text(member.originalFilename)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+
+                                Spacer()
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        Menu {
+                            ForEach(availableDriveUnits, id: \.self) { unit in
+                                Button {
+                                    onMediaSetAction(member, .insertDisk(unit))
+                                    presentedSheet = nil
+                                } label: {
+                                    Label(
+                                        "Insert in Drive \(unit)",
+                                        systemImage: "externaldrive.fill"
+                                    )
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .frame(width: 32, height: 32)
+                        }
+                        .accessibilityLabel("Insert \(member.title)")
+                    }
+                }
+            }
+            .navigationTitle(item.mediaSetDescriptor?.displayName ?? "Multi-Disk Set")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        presentedSheet = nil
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func saveEditedMetadata() {
+        let trimmedTitle = editedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedTitle.isEmpty {
+            editedTitle = item.title
+        } else if trimmedTitle != item.title {
+            onRename(trimmedTitle)
+        }
+
+        let normalizedNotes = editedNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalizedNotes != (item.notes ?? "") {
+            onUpdateNotes(editedNotes)
+        }
+    }
+
+    @ViewBuilder
+    private func artworkEditorSection(
+        title: String,
+        kind: LibraryArtworkKind,
+        data: Data?,
+        selection: Binding<PhotosPickerItem?>,
+        aspectRatio: CGFloat
+    ) -> some View {
+        Section(title) {
+            if let data, let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .aspectRatio(aspectRatio, contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: 240)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
+            if kind == .screenshot {
+                Button {
+                    captureCurrentScreenshotArtwork()
+                } label: {
+                    Label(
+                        data == nil ? "Capture Current Screen" : "Replace with Current Screen",
+                        systemImage: "camera.viewfinder"
+                    )
+                }
+                .disabled(!isActive)
+
+                if !isActive {
+                    Text("Mount or run this Library entry before capturing the current C64 screen.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            PhotosPicker(selection: selection, matching: .images) {
+                Label(
+                    data == nil ? "Choose Image…" : "Replace Image…",
+                    systemImage: "photo.on.rectangle"
+                )
+            }
+
+            if data != nil {
+                Button(role: .destructive) {
+                    onRemoveArtwork(kind)
+                    switch kind {
+                    case .cover:
+                        coverArtworkData = nil
+                        selectedCoverPhoto = nil
+                    case .screenshot:
+                        screenshotArtworkData = nil
+                        selectedScreenshotPhoto = nil
+                    }
+                } label: {
+                    Label("Remove \(title)", systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    private func captureCurrentScreenshotArtwork() {
+        guard isActive else { return }
+        guard let frameData = captureCurrentScreenshot(),
+              let normalized = Self.normalizedArtworkData(frameData, kind: .screenshot) else {
+            screenshotCaptureError = "POKE64 could not read the current emulator framebuffer. Return to the emulator, let it render a frame, then try again."
+            return
+        }
+
+        onSetArtwork(.screenshot, normalized)
+        screenshotArtworkData = normalized
+        selectedScreenshotPhoto = nil
+    }
+
+    private func importArtwork(
+        from pickerItem: PhotosPickerItem?,
+        kind: LibraryArtworkKind
+    ) {
+        guard let pickerItem else { return }
+
+        Task {
+            guard let data = try? await pickerItem.loadTransferable(type: Data.self),
+                  let normalized = Self.normalizedArtworkData(data, kind: kind) else {
+                return
+            }
+
+            await MainActor.run {
+                onSetArtwork(kind, normalized)
+                switch kind {
+                case .cover:
+                    coverArtworkData = normalized
+                case .screenshot:
+                    screenshotArtworkData = normalized
+                }
+            }
+        }
+    }
+
+    private static func normalizedArtworkData(
+        _ data: Data,
+        kind: LibraryArtworkKind
+    ) -> Data? {
+        guard let image = UIImage(data: data), image.size.width > 0, image.size.height > 0 else {
+            return nil
+        }
+
+        let maximumDimension: CGFloat = kind == .cover ? 1_200 : 1_600
+        let largestDimension = max(image.size.width, image.size.height)
+        let scale = min(1, maximumDimension / largestDimension)
+        let targetSize = CGSize(
+            width: max(1, image.size.width * scale),
+            height: max(1, image.size.height * scale)
+        )
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+        let rendered = renderer.image { context in
+            UIColor.black.setFill()
+            context.cgContext.fill(CGRect(origin: .zero, size: targetSize))
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+        return rendered.jpegData(compressionQuality: 0.86)
+    }
+
+    @ViewBuilder
+    private var screenshotPreview: some View {
+        if let screenshotArtworkData,
+           let screenshotImage = UIImage(data: screenshotArtworkData) {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Screenshot", systemImage: "photo")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Image(uiImage: screenshotImage)
+                    .resizable()
+                    .scaledToFit()
+                    .aspectRatio(4.0 / 3.0, contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: 320)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(.white.opacity(0.08), lineWidth: 1)
+                    }
+                    .accessibilityLabel("Screenshot for \(item.title)")
+            }
+            .padding(.top, 4)
         }
     }
 

@@ -1,5 +1,7 @@
 #import "C64MetalView.h"
 
+#import <UIKit/UIKit.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <memory>
@@ -133,6 +135,54 @@ struct C64MetalState {
     dispatch_async(dispatch_get_main_queue(), ^{
         [self setNeedsDisplay];
     });
+}
+
+- (nullable NSData *)captureCurrentFramePNGData {
+    std::vector<uint8_t> pixels;
+    NSUInteger width = 0;
+    NSUInteger height = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(_state->mutex);
+        pixels = _state->pixels;
+        width = _state->width;
+        height = _state->height;
+    }
+
+    if (pixels.empty() || width == 0 || height == 0) {
+        return nil;
+    }
+
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    if (!colorSpace) {
+        return nil;
+    }
+
+    CGBitmapInfo bitmapInfo = (CGBitmapInfo)(kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+    CGContextRef context = CGBitmapContextCreate(
+        pixels.data(),
+        width,
+        height,
+        8,
+        width * 4,
+        colorSpace,
+        bitmapInfo
+    );
+    CGColorSpaceRelease(colorSpace);
+
+    if (!context) {
+        return nil;
+    }
+
+    CGImageRef imageRef = CGBitmapContextCreateImage(context);
+    CGContextRelease(context);
+    if (!imageRef) {
+        return nil;
+    }
+
+    UIImage *image = [UIImage imageWithCGImage:imageRef scale:1.0 orientation:UIImageOrientationUp];
+    CGImageRelease(imageRef);
+    return UIImagePNGRepresentation(image);
 }
 
 - (void)drawInMTKView:(MTKView *)view {
