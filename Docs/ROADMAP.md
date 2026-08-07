@@ -111,6 +111,19 @@ Experimental research only; do not tie this work to a specific release until the
 - Investigate class-compliant USB-audio Datasette interfaces for tape capture/import and XUM-style tape adapters for deeper motor/button/data integration.
 - Keep physical-hardware support optional and isolated from the normal emulator path so unsupported adapters never affect standard iPad-only operation.
 
+#### C64 Reloaded MK2 companion and real-hardware development target
+
+- Investigate the C64 Reloaded MK2 USB serial/debug interface as a dedicated POKE64 companion target rather than treating it only as another peripheral bridge.
+- Research direct USB-C communication with the MK2 through its PL2303-based serial interface, including an optional USBDriverKit transport on supported M-series iPads and the associated entitlement/distribution requirements.
+- Detect and display the attached real machine configuration where the MK2 interface exposes it, including VIC-II/PAL-NTSC and installed SID information, and offer an explicit action to match a POKE64 emulation profile to the detected hardware.
+- Add a development workflow for sending PRG payloads to the real C64 Reloaded MK2, resetting the machine and launching the transferred program, building on the capabilities demonstrated by the MK2 remote interface and mk2codenet-style workflows.
+- Investigate safe remote reset, CPU halt/continue, memory read/write and memory-inspection commands as optional development tools.
+- Explore emulator-versus-real-hardware validation: run controlled test programs in POKE64 and on the MK2, capture selected RAM/register-visible state, and compare results to help diagnose compatibility, timing and peripheral issues.
+- Consider a dedicated "Run on Real C64" action from the Library or future development workspace, while keeping physical execution clearly separate from normal emulation.
+- Investigate whether keyboard/joystick state can be obtained through the existing MK2 controller/debug channel and forwarded to POKE64 as an input bridge; do not assume the MK2 can become a native USB HID device without additional hardware/firmware support.
+- Treat the original C64 Reloaded separately unless a comparable programmable/debug interface is identified; prioritize the MK2-specific integration where documented remote-control capabilities exist.
+- Keep all real-hardware write/control operations opt-in, explicit and recoverable; never issue reset, memory-write or firmware-related commands merely because an MK2 is connected.
+
 ### SuperCPU
 
 - Investigate technical and licensing feasibility for CMD SuperCPU emulation.
