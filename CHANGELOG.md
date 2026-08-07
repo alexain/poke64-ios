@@ -4,6 +4,14 @@
 
 ### Added
 
+- Added G64 disk-image support to the Library and disk-mount workflow, with drive-model compatibility validation.
+- Added SHA-256 duplicate detection plus explicit duplicate and filename-conflict import handling.
+- Added automatic multi-disk set detection, grouped Library presentation and disk swapping from Devices without resetting the C64.
+- Added D64, D71 and D81 disk inspection with disk name, ID, DOS type, geometry, free blocks and Commodore directory contents.
+- Added a C64-style `LOAD "$",8` directory preview rendered from the active character ROM, including PETSCII graphics and reverse-video disk headers.
+- Added Library notes, optional cover artwork and screenshots, including direct capture of the current C64 framebuffer.
+- Added automatic Library filters for disks, tapes and cartridges.
+- Added dedicated Library detail sheets for metadata editing, media information and multi-disk management.
 - Added Commodore MPS-803 text and bit-image rendering through a locally patched VICE printer core.
 - Added PDF output as the default virtual-printer format, plus PNG pages and optional PDF + RAW export.
 - Added live paper preview, dot-intensity controls and multi-file sharing for completed print jobs.
@@ -18,6 +26,9 @@
 
 ### Changed
 
+- Improved Library sidebar hit targets for more reliable touch selection on iPad.
+- Reorganized Library details so the disk directory and screenshot remain immediately visible while technical metadata and editing controls live in separate sheets.
+- Redesigned the emulator toolbar with a compact two-line layout and an optional collapsible mode that animates the emulator area as the toolbar opens and closes.
 - Changed printer paper eject and discard to operate without restarting the C64 or detaching mounted media.
 - Added selection between IEC printer devices 4 and 5.
 - Moved datasette control access from the main toolbar to the tappable tape counter/status panel beside the emulator.
