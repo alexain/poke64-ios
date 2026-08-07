@@ -52,6 +52,8 @@ This document lists only work that is still pending. Completed Library, keyboard
 - Add scanlines, shadow mask, curvature, bloom, vignette and phosphor-persistence controls.
 - Add reusable performance/quality presets for iPad hardware classes.
 - Add SID filter controls, stereo output and supported dual-SID configurations.
+- Add external-display mode for connected monitors/TVs: move the C64 video output to the external screen at full screen while keeping the iPad as the control surface for the keyboard, datasette, Devices and other emulator controls.
+- Add an explicit move/return display action, preserve the running emulation while switching screens, and handle external-display connection/disconnection gracefully.
 
 ## 7. Printer
 
@@ -88,6 +90,16 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 
 ## 11. Long-term and experimental work
 
+### Core abstraction and direct VICE integration
+
+- Keep libretro as the production backend while reducing direct dependencies on `LibretroSession` in new frontend features.
+- Define POKE64-owned session interfaces for lifecycle, video, audio, input, media operations and device state so the frontend is not tied permanently to one core host.
+- Investigate an experimental `ViceSession` backend that embeds VICE directly through a POKE64 platform/bridge layer, without the libretro translation layer.
+- Allow `LibretroSession` and `ViceSession` to coexist during migration and compare compatibility, timing, performance, save states and peripheral behavior on real iPad hardware.
+- Consider removing libretro only after the direct VICE backend has reached feature and compatibility parity and offers a clear maintenance or capability advantage.
+- Treat a ground-up POKE64 C64 core as a separate research project rather than a planned migration target.
+- Preserve and document all GPL/source-distribution obligations associated with VICE regardless of whether libretro remains in the stack.
+
 ### SuperCPU
 
 - Investigate technical and licensing feasibility for CMD SuperCPU emulation.
@@ -111,7 +123,7 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 ```text
 Library inspection, duplicate handling and metadata
 → firmware profiles and diagnostics
-→ advanced CRT graphics and SID options
+→ advanced CRT graphics, SID options and external-display support
 → printer validation and networking
 → save states, multidisk and additional drives
 → release engineering and App Store preparation
