@@ -1251,6 +1251,7 @@ enum C64VirtualModemSettings {
 }
 
 enum SettingsPanel: String, CaseIterable, Identifiable {
+    case profiles
     case system
     case graphics
     case audio
@@ -1265,6 +1266,7 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .profiles: "Emulation Profiles"
         case .system: "System"
         case .graphics: "Graphics"
         case .audio: "Audio"
@@ -1279,6 +1281,7 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .profiles: "square.stack.3d.up"
         case .system: "cpu"
         case .graphics: "display"
         case .audio: "waveform"
@@ -1293,6 +1296,8 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
 
     var summary: String {
         switch self {
+        case .profiles:
+            "Save and recall complete emulator configurations."
         case .system:
             "C64 model, timing and memory expansion."
         case .graphics:
@@ -1319,7 +1324,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selection: SettingsPanel
 
-    init(initialPanel: SettingsPanel = .system) {
+    init(initialPanel: SettingsPanel = .profiles) {
         _selection = State(initialValue: initialPanel)
     }
 
@@ -1389,6 +1394,8 @@ private struct SettingsPanelDetail: View {
     var body: some View {
         Group {
             switch panel {
+            case .profiles:
+                EmulationProfilesSettingsView()
             case .system:
                 SystemSettingsView()
             case .graphics:
@@ -1413,6 +1420,466 @@ private struct SettingsPanelDetail: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 }
+
+private struct EmulationProfilesSettingsView: View {
+    @State private var profiles = EmulationProfileStore.loadProfiles()
+    @State private var selectedProfileID = EmulationProfileStore.selectedProfileID
+    @State private var defaultProfileID = EmulationProfileStore.defaultProfileID
+    @State private var applyDefaultProfileAtLaunch = EmulationProfileStore.applyDefaultProfileAtLaunch
+    @State private var nameEditor: ProfileNameEditor?
+    @State private var pendingDeleteProfile: EmulationProfile?
+    @State private var pendingSwitchProfileID: UUID?
+    @State private var errorMessage: String?
+    @State private var statusMessage: String?
+
+    private var selectedProfile: EmulationProfile? {
+        guard let selectedProfileID else { return nil }
+        return profiles.first { $0.id == selectedProfileID }
+    }
+
+    private var selectedProfileMatchesCurrent: Bool {
+        guard let selectedProfile else { return false }
+        return EmulationProfileStore.matchesCurrentConfiguration(selectedProfile)
+    }
+
+    private var currentProfileTitle: String {
+        guard let selectedProfile else { return "Custom configuration" }
+        return selectedProfileMatchesCurrent
+            ? selectedProfile.name
+            : "\(selectedProfile.name) — Modified"
+    }
+
+    private var defaultProfileTitle: String {
+        guard let defaultProfileID,
+              let profile = profiles.first(where: { $0.id == defaultProfileID }) else {
+            return "None"
+        }
+        return profile.name
+    }
+
+    private func firmwareProfileName(for profile: EmulationProfile) -> String {
+        guard let firmwareProfileID = profile.firmwareProfileID else {
+            return "Current firmware"
+        }
+        return FirmwareProfileStore.loadProfiles()
+            .first(where: { $0.id == firmwareProfileID })?.name
+            ?? "Missing firmware profile"
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("Current profile", value: currentProfileTitle)
+                LabeledContent(
+                    "Firmware profile",
+                    value: FirmwareProfileStore.activeProfile?.name ?? FirmwareStore.activeProfileName
+                )
+
+                if let selectedProfile, !selectedProfileMatchesCurrent {
+                    Label(
+                        "Settings have changed since this profile was applied.",
+                        systemImage: "pencil.and.outline"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                    Button("Update \"\(selectedProfile.name)\" from Current Settings") {
+                        updateProfile(selectedProfile.id)
+                    }
+                }
+
+                if let statusMessage {
+                    Label(statusMessage, systemImage: "checkmark.circle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.green)
+                }
+            } header: {
+                Text("Current Configuration")
+            } footer: {
+                Text("Applying a profile updates POKE64 settings immediately. Hardware-affecting changes restart the C64 when Settings is closed.")
+            }
+
+            Section {
+                LabeledContent("Default profile", value: defaultProfileTitle)
+
+                Toggle("Apply default profile at launch", isOn: Binding(
+                    get: { applyDefaultProfileAtLaunch },
+                    set: { enabled in
+                        applyDefaultProfileAtLaunch = enabled
+                        EmulationProfileStore.applyDefaultProfileAtLaunch = enabled
+                    }
+                ))
+            } header: {
+                Text("Startup")
+            } footer: {
+                Text("When enabled, POKE64 applies the default emulation profile before starting VICE. When disabled, the last configuration remains active.")
+            }
+
+            Section {
+                ForEach(profiles) { profile in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Text(profile.name)
+                                        .font(.headline)
+
+                                    if defaultProfileID == profile.id {
+                                        Image(systemName: "star.fill")
+                                            .foregroundStyle(.yellow)
+                                            .accessibilityLabel("Default profile")
+                                    }
+
+                                    if selectedProfileID == profile.id
+                                        && EmulationProfileStore.matchesCurrentConfiguration(profile) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(.green)
+                                            .accessibilityLabel("Active profile")
+                                    }
+                                }
+
+                                Text(profile.settings.compactSummary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer(minLength: 12)
+
+                            Button("Apply") {
+                                requestProfileSwitch(profile.id)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .disabled(
+                                selectedProfileID == profile.id
+                                    && EmulationProfileStore.matchesCurrentConfiguration(profile)
+                            )
+
+                            Menu {
+                                Button("Duplicate") {
+                                    duplicateProfile(profile.id)
+                                }
+                                Button("Rename") {
+                                    nameEditor = ProfileNameEditor(
+                                        mode: .rename(profile.id),
+                                        name: profile.name
+                                    )
+                                }
+                                if defaultProfileID != profile.id {
+                                    Button("Set as Default") {
+                                        setDefaultProfile(profile.id)
+                                    }
+                                }
+                                Divider()
+                                Button("Delete", role: .destructive) {
+                                    pendingDeleteProfile = profile
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .font(.title3)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+
+                        Label(
+                            "Firmware: \(firmwareProfileName(for: profile))",
+                            systemImage: "memorychip"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        if let reuImageName = profile.settings.reuImageName {
+                            Label("REU image: \(reuImageName)", systemImage: "memorychip")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Button {
+                    nameEditor = ProfileNameEditor(mode: .create, name: "")
+                } label: {
+                    Label("New Profile from Current Settings", systemImage: "plus.circle.fill")
+                }
+            } header: {
+                Text("Profiles")
+            } footer: {
+                Text("Profiles include machine, drives, REU, tape, printer, modem, video and audio settings. Mounted PRG/D64/G64/TAP/CRT media are not stored in a profile.")
+            }
+
+            Section("Profile Scope") {
+                Label(
+                    "Imported .reu images are snapshotted into the profile. Apply restores a working copy; Update Profile captures later changes.",
+                    systemImage: "memorychip"
+                )
+                Label(
+                    "Each emulation profile references a Firmware Profile by ID. ROM files remain stored once in Firmware Profiles and are restored when the emulation profile is applied.",
+                    systemImage: "memorychip.fill"
+                )
+                Label(
+                    "The BBS directory and runtime physical-controller assignments remain global; profiles store the modem state and baud rate only.",
+                    systemImage: "network"
+                )
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+        }
+        .sheet(item: $nameEditor) { editor in
+            ProfileNameEditorSheet(editor: editor) { mode, name in
+                switch mode {
+                case .create:
+                    createProfile(named: name)
+                case .rename(let profileID):
+                    renameProfile(profileID, to: name)
+                }
+            }
+        }
+        .confirmationDialog(
+            pendingDeleteProfile.map { "Delete \"\($0.name)\"?" } ?? "Delete Profile?",
+            isPresented: Binding(
+                get: { pendingDeleteProfile != nil },
+                set: { if !$0 { pendingDeleteProfile = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let profile = pendingDeleteProfile {
+                Button("Delete Profile", role: .destructive) {
+                    deleteProfile(profile.id)
+                    pendingDeleteProfile = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteProfile = nil
+            }
+        } message: {
+            Text("This removes the saved configuration and any REU image snapshot stored with the profile. Mounted Library media is not affected.")
+        }
+        .confirmationDialog(
+            "Unsaved Profile Changes",
+            isPresented: Binding(
+                get: { pendingSwitchProfileID != nil },
+                set: { if !$0 { pendingSwitchProfileID = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let targetID = pendingSwitchProfileID {
+                Button("Save Current Changes and Switch") {
+                    updateCurrentProfileAndSwitch(to: targetID)
+                    pendingSwitchProfileID = nil
+                }
+                Button("Discard Changes and Switch", role: .destructive) {
+                    performProfileSwitch(targetID)
+                    pendingSwitchProfileID = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingSwitchProfileID = nil
+            }
+        } message: {
+            Text("The current emulation profile or its firmware profile has unsaved changes. Saving firmware changes updates the shared Firmware Profile.")
+        }
+        .alert(
+            "Emulation Profile Error",
+            isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "Unknown profile error")
+        }
+        .onAppear {
+            reloadProfiles()
+        }
+    }
+
+    private func reloadProfiles() {
+        profiles = EmulationProfileStore.loadProfiles()
+        selectedProfileID = EmulationProfileStore.selectedProfileID
+        defaultProfileID = EmulationProfileStore.defaultProfileID
+        applyDefaultProfileAtLaunch = EmulationProfileStore.applyDefaultProfileAtLaunch
+    }
+
+    private func createProfile(named name: String) {
+        do {
+            let profile = try EmulationProfileStore.createProfile(named: name)
+            reloadProfiles()
+            statusMessage = "Saved \"\(profile.name)\"."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func renameProfile(_ profileID: UUID, to name: String) {
+        do {
+            let profile = try EmulationProfileStore.renameProfile(profileID, to: name)
+            reloadProfiles()
+            statusMessage = "Renamed profile to \"\(profile.name)\"."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func duplicateProfile(_ profileID: UUID) {
+        do {
+            let profile = try EmulationProfileStore.duplicateProfile(profileID)
+            reloadProfiles()
+            statusMessage = "Created \"\(profile.name)\"."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func deleteProfile(_ profileID: UUID) {
+        do {
+            try EmulationProfileStore.deleteProfile(profileID)
+            reloadProfiles()
+            statusMessage = "Profile deleted."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func requestProfileSwitch(_ profileID: UUID) {
+        if let selectedProfile, !selectedProfileMatchesCurrent {
+            pendingSwitchProfileID = profileID
+            return
+        }
+        performProfileSwitch(profileID)
+    }
+
+    private func updateCurrentProfileAndSwitch(to profileID: UUID) {
+        guard let selectedProfileID else {
+            performProfileSwitch(profileID)
+            return
+        }
+
+        do {
+            if FirmwareProfileStore.activeProfileIsModified,
+               let activeFirmwareProfileID = FirmwareProfileStore.activeProfileID {
+                _ = try FirmwareProfileStore.updateProfile(activeFirmwareProfileID)
+            }
+            _ = try EmulationProfileStore.updateProfile(selectedProfileID)
+            try EmulationProfileStore.applyProfile(profileID)
+            reloadProfiles()
+            if let profile = profiles.first(where: { $0.id == profileID }) {
+                statusMessage = "Applied \(profile.name)."
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func performProfileSwitch(_ profileID: UUID) {
+        do {
+            try EmulationProfileStore.applyProfile(profileID)
+            reloadProfiles()
+            if let profile = profiles.first(where: { $0.id == profileID }) {
+                statusMessage = "Applied \(profile.name)."
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func setDefaultProfile(_ profileID: UUID) {
+        do {
+            try EmulationProfileStore.setDefaultProfile(profileID)
+            reloadProfiles()
+            statusMessage = "Default profile updated."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func updateProfile(_ profileID: UUID) {
+        do {
+            let profile = try EmulationProfileStore.updateProfile(profileID)
+            reloadProfiles()
+            statusMessage = "Updated \"\(profile.name)\" from the current configuration."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct ProfileNameEditor: Identifiable {
+    enum Mode {
+        case create
+        case rename(UUID)
+    }
+
+    let id = UUID()
+    let mode: Mode
+    let name: String
+}
+
+private struct ProfileNameEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let editor: ProfileNameEditor
+    let onSave: (ProfileNameEditor.Mode, String) -> Void
+
+    @State private var name: String
+
+    init(
+        editor: ProfileNameEditor,
+        onSave: @escaping (ProfileNameEditor.Mode, String) -> Void
+    ) {
+        self.editor = editor
+        self.onSave = onSave
+        _name = State(initialValue: editor.name)
+    }
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var title: String {
+        switch editor.mode {
+        case .create:
+            return "New Emulation Profile"
+        case .rename:
+            return "Rename Profile"
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Profile Name") {
+                    TextField("Name", text: $name)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                }
+
+                Section {
+                    Text("The profile stores emulator configuration only. Mounted media remains part of the current session or Library item.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(editor.mode, trimmedName)
+                        dismiss()
+                    }
+                    .disabled(trimmedName.isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
 
 private struct SystemSettingsView: View {
     @AppStorage(C64MachineModel.defaultsKey)

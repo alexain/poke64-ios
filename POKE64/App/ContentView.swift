@@ -35,8 +35,11 @@ struct ContentView: View {
     @State private var deviceImportTarget: DeviceImportTarget?
     @State private var mediaActionPrompt: MediaActionPromptState?
     @State private var showSettings = false
-    @State private var settingsInitialPanel: SettingsPanel = .system
+    @State private var settingsInitialPanel: SettingsPanel = .profiles
     @State private var settingsFirmwareFingerprint = FirmwareStore.configurationFingerprint
+    @State private var emulationProfiles = EmulationProfileStore.loadProfiles()
+    @State private var selectedEmulationProfileID = EmulationProfileStore.selectedProfileID
+    @State private var pendingToolbarProfileSwitchID: UUID?
 
     var body: some View {
         ZStack {
@@ -115,6 +118,7 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.2), value: showDatasetteControls)
         .onAppear {
             toolbarHeight = toolbarCollapsed ? 0 : 62
+            reloadToolbarProfiles()
         }
         .onChange(of: emulator.mountedTape?.id) { previousID, currentID in
             guard previousID != currentID else { return }
@@ -149,12 +153,43 @@ struct ContentView: View {
             }
         }
         .task {
+            do {
+                _ = try EmulationProfileStore.applyDefaultProfileAtLaunchIfEnabled()
+                reloadToolbarProfiles()
+            } catch {
+                emulator.presentMediaError(error)
+            }
             await emulator.startAutomatically()
         }
         .task(id: printerEnabled) {
             await monitorPrinterCapture()
         }
+        .confirmationDialog(
+            "Unsaved Profile Changes",
+            isPresented: Binding(
+                get: { pendingToolbarProfileSwitchID != nil },
+                set: { if !$0 { pendingToolbarProfileSwitchID = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let targetID = pendingToolbarProfileSwitchID {
+                Button("Save Current Changes and Switch") {
+                    updateCurrentToolbarProfileAndSwitch(to: targetID)
+                    pendingToolbarProfileSwitchID = nil
+                }
+                Button("Discard Changes and Switch", role: .destructive) {
+                    performToolbarProfileSwitch(targetID)
+                    pendingToolbarProfileSwitchID = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingToolbarProfileSwitchID = nil
+            }
+        } message: {
+            Text("The current emulation profile or its firmware profile has unsaved changes. Saving firmware changes updates the shared Firmware Profile.")
+        }
         .fullScreenCover(isPresented: $showSettings, onDismiss: {
+            reloadToolbarProfiles()
             Task {
                 await emulator.settingsDidClose(
                     previousFirmwareFingerprint: settingsFirmwareFingerprint
@@ -479,8 +514,36 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .disabled(!emulator.isRunning)
 
+            Menu {
+                ForEach(emulationProfiles) { profile in
+                    Button {
+                        requestToolbarProfileSwitch(profile.id)
+                    } label: {
+                        Label(
+                            profile.name,
+                            systemImage: toolbarProfileIcon(for: profile)
+                        )
+                    }
+                }
+
+                Divider()
+
+                Button {
+                    openSettings(.profiles)
+                } label: {
+                    Label("Manage Profiles…", systemImage: "slider.horizontal.3")
+                }
+            } label: {
+                ToolbarStatusLabel(
+                    title: "Profile",
+                    systemImage: "square.stack.3d.up",
+                    detail: toolbarProfileDetail
+                )
+            }
+            .buttonStyle(.bordered)
+
             Button {
-                openSettings(.system)
+                openSettings(.profiles)
             } label: {
                 toolbarLabel("Settings", systemImage: "gearshape")
             }
@@ -636,6 +699,79 @@ struct ContentView: View {
             withAnimation(.easeInOut(duration: 0.32)) {
                 toolbarHeight = 62
             }
+        }
+    }
+
+    private var toolbarSelectedProfile: EmulationProfile? {
+        guard let selectedEmulationProfileID else { return nil }
+        return emulationProfiles.first { $0.id == selectedEmulationProfileID }
+    }
+
+    private var toolbarProfileDetail: String {
+        guard let profile = toolbarSelectedProfile else {
+            return "Custom"
+        }
+        return EmulationProfileStore.matchesCurrentConfiguration(profile)
+            ? profile.name
+            : "\(profile.name) · Modified"
+    }
+
+    private func toolbarProfileIcon(for profile: EmulationProfile) -> String {
+        guard selectedEmulationProfileID == profile.id else {
+            return "circle"
+        }
+        return EmulationProfileStore.matchesCurrentConfiguration(profile)
+            ? "checkmark.circle.fill"
+            : "pencil.circle"
+    }
+
+    private func reloadToolbarProfiles() {
+        emulationProfiles = EmulationProfileStore.loadProfiles()
+        selectedEmulationProfileID = EmulationProfileStore.selectedProfileID
+    }
+
+    private func requestToolbarProfileSwitch(_ profileID: UUID) {
+        if let selected = toolbarSelectedProfile,
+           !EmulationProfileStore.matchesCurrentConfiguration(selected) {
+            pendingToolbarProfileSwitchID = profileID
+            return
+        }
+        performToolbarProfileSwitch(profileID)
+    }
+
+    private func updateCurrentToolbarProfileAndSwitch(to profileID: UUID) {
+        guard let selectedEmulationProfileID else {
+            performToolbarProfileSwitch(profileID)
+            return
+        }
+
+        do {
+            if FirmwareProfileStore.activeProfileIsModified,
+               let activeFirmwareProfileID = FirmwareProfileStore.activeProfileID {
+                _ = try FirmwareProfileStore.updateProfile(activeFirmwareProfileID)
+            }
+            _ = try EmulationProfileStore.updateProfile(selectedEmulationProfileID)
+            performToolbarProfileSwitch(profileID)
+        } catch {
+            emulator.presentMediaError(error)
+        }
+    }
+
+    private func performToolbarProfileSwitch(_ profileID: UUID) {
+        let previousFingerprint = FirmwareStore.configurationFingerprint
+
+        do {
+            try EmulationProfileStore.applyProfile(profileID)
+            reloadToolbarProfiles()
+
+            Task {
+                await emulator.settingsDidClose(
+                    previousFirmwareFingerprint: previousFingerprint
+                )
+                reloadToolbarProfiles()
+            }
+        } catch {
+            emulator.presentMediaError(error)
         }
     }
 
