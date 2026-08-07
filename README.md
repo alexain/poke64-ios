@@ -92,6 +92,12 @@ Created by [Alessandro Capano](https://www.alexain.it/poke64) in 2026.
 
 The POKE64 application code in this repository is licensed under the MIT License. See the [LICENSE](LICENSE) file for the full text.
 
+The software license applies to the POKE64 source code, not to the project identity. The **POKE64** name, logo, application icon, banner and associated visual branding are reserved to the project owner unless permission is granted separately. Redistribution or modification of the source code does not by itself grant permission to present a derivative application as **POKE64**, as an official POKE64 build, or using POKE64 branding in a way that may imply such an association.
+
+Original POKE64 visual assets, including the logo, application icon, banner and other project artwork, remain separately protected by copyright unless an individual asset explicitly states a different license.
+
+Forks and derivative applications should therefore use their own name, icon and visual identity. References to POKE64 for attribution, compatibility information or a factual description of the project's origin are not intended to be restricted by this notice.
+
 VICE and `vice-libretro` are separate GPL-2.0-or-later components, subject to the notices in the exact source revision used for a build. A distributor shipping a VICE-derived core must satisfy the corresponding GPL requirements, including providing the applicable license notices and complete corresponding source in an allowed form.
 
 The libretro API header subset used by POKE64 is MIT-licensed. OpenROMs, XcodeGen and other third-party components retain their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
