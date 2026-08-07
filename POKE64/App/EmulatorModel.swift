@@ -324,6 +324,8 @@ final class EmulatorModel: ObservableObject {
     private var notificationTokens: [NSObjectProtocol] = []
     private var configuredMousePort = 0
     private var driveLEDOffTask: Task<Void, Never>?
+    private var persistentCheckpointTask: Task<Void, Never>?
+    private var persistentSessionRestoreAttempted = false
 
     init() {
         session.videoGeometryDidChange = { [weak self] aspectRatio in
@@ -482,8 +484,18 @@ final class EmulatorModel: ObservableObject {
     func startAutomatically() async {
         guard !didAttemptAutomaticStart else { return }
         didAttemptAutomaticStart = true
-        refreshFirmwareState()
 
+        if await restorePersistentSessionIfAvailable() {
+            return
+        }
+
+        do {
+            _ = try EmulationProfileStore.applyDefaultProfileAtLaunchIfEnabled()
+        } catch {
+            present(error)
+        }
+
+        refreshFirmwareState()
         guard firmwareReady else {
             status = "Import BASIC, KERNAL and character ROMs"
             return
@@ -514,6 +526,7 @@ final class EmulatorModel: ObservableObject {
             clearMediaState(removeTemporaryFiles: true)
             isRunning = true
             syncInputConfiguration()
+            startPersistentCheckpointLoop()
             status = "C64 started"
         } else {
             isRunning = false
@@ -889,7 +902,213 @@ final class EmulatorModel: ObservableObject {
         virtualModemTraceDirections = []
     }
 
+    func handleScenePhase(_ phase: ScenePhase) async {
+        switch phase {
+        case .active:
+            guard isRunning else { return }
+            session.setSuspended(false)
+
+        case .inactive:
+            guard isRunning else { return }
+            session.setSuspended(true)
+
+        case .background:
+            guard isRunning else { return }
+            session.setSuspended(true)
+            checkpointPersistentSession(reportFailure: false)
+
+        @unknown default:
+            break
+        }
+    }
+
+    func checkpointPersistentSession(reportFailure: Bool = false) {
+        guard isRunning else { return }
+
+        do {
+            let disks = try mountedDisks.keys.sorted().compactMap { unit -> PersistentSessionDiskDescriptor? in
+                guard let media = mountedDisks[unit] else { return nil }
+                return PersistentSessionDiskDescriptor(
+                    unit: unit,
+                    media: try PersistentSessionStore.descriptor(for: media)
+                )
+            }
+            let tape = try mountedTape.map(PersistentSessionStore.descriptor(for:))
+            let cartridge = try mountedCartridge.map(PersistentSessionStore.descriptor(for:))
+            let program = try activeProgram.map(PersistentSessionStore.descriptor(for:))
+
+            guard let state = session.serializeState() else {
+                throw EmulatorModelError.coreFailure(
+                    session.lastErrorMessage ?? "Unable to save the current POKE64 session"
+                )
+            }
+
+            let metadata = PersistentSessionMetadata(
+                version: PersistentSessionMetadata.schemaVersion,
+                savedAt: Date(),
+                appVersion: PersistentSessionStore.currentAppVersion,
+                configurationFingerprint: FirmwareStore.configurationFingerprint,
+                emulationProfileID: EmulationProfileStore.selectedProfileID,
+                firmwareProfileID: FirmwareProfileStore.activeProfileID,
+                disks: disks,
+                tape: tape,
+                cartridge: cartridge,
+                activeProgram: program,
+                stateByteCount: state.count
+            )
+            try PersistentSessionStore.save(state: state, metadata: metadata)
+        } catch {
+            if reportFailure {
+                present(error)
+            } else {
+                print("Unable to checkpoint persistent POKE64 session: \(error)")
+            }
+        }
+    }
+
+    private func startPersistentCheckpointLoop() {
+        persistentCheckpointTask?.cancel()
+        persistentCheckpointTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard !Task.isCancelled, let self, self.isRunning else { continue }
+                self.checkpointPersistentSession(reportFailure: false)
+            }
+        }
+    }
+
+    private func restorePersistentSessionIfAvailable() async -> Bool {
+        guard !persistentSessionRestoreAttempted else { return false }
+        persistentSessionRestoreAttempted = true
+
+        let archive: PersistentSessionArchive
+        do {
+            guard let loaded = try PersistentSessionStore.load() else { return false }
+            archive = loaded
+        } catch {
+            print("Ignoring invalid previous POKE64 session: \(error)")
+            PersistentSessionStore.clear()
+            return false
+        }
+
+        guard archive.metadata.appVersion == PersistentSessionStore.currentAppVersion else {
+            PersistentSessionStore.clear()
+            return false
+        }
+
+        FirmwareStore.prepareDirectoriesAndConfiguration()
+        refreshFirmwareState()
+        refreshDriveConfigurationState()
+
+        guard firmwareReady,
+              archive.metadata.configurationFingerprint == FirmwareStore.configurationFingerprint else {
+            PersistentSessionStore.clear()
+            return false
+        }
+
+        do {
+            let restoredDisks = try Dictionary(uniqueKeysWithValues: archive.metadata.disks.map { descriptor in
+                (descriptor.unit, try persistentMediaReference(from: descriptor.media))
+            })
+            let restoredTape = try archive.metadata.tape.map(persistentMediaReference(from:))
+            let restoredCartridge = try archive.metadata.cartridge.map(persistentMediaReference(from:))
+            let restoredProgram = try archive.metadata.activeProgram.map(persistentMediaReference(from:))
+
+            isStarting = true
+            status = "Restoring previous session…"
+            defer { isStarting = false }
+
+            await Task.yield()
+            guard session.startWithoutContent() else {
+                throw EmulatorModelError.coreFailure(
+                    session.lastErrorMessage ?? "Unable to start VICE for session restore"
+                )
+            }
+
+            for unit in restoredDisks.keys.sorted() {
+                guard let media = restoredDisks[unit],
+                      session.attachDisk(at: media.url, driveUnit: unit) else {
+                    throw EmulatorModelError.coreFailure(
+                        session.lastErrorMessage ?? "Unable to restore Drive \(unit) media"
+                    )
+                }
+            }
+            if let restoredTape, !session.attachTape(at: restoredTape.url) {
+                throw EmulatorModelError.coreFailure(
+                    session.lastErrorMessage ?? "Unable to restore the mounted tape"
+                )
+            }
+            if let restoredCartridge, !session.attachCartridge(at: restoredCartridge.url) {
+                throw EmulatorModelError.coreFailure(
+                    session.lastErrorMessage ?? "Unable to restore the mounted cartridge"
+                )
+            }
+
+            guard session.unserializeState(archive.state) else {
+                throw EmulatorModelError.coreFailure(
+                    session.lastErrorMessage ?? "Unable to restore the previous POKE64 session"
+                )
+            }
+
+            mountedDisks = restoredDisks
+            mountedTape = restoredTape
+            mountedCartridge = restoredCartridge
+            activeProgram = restoredProgram
+            resetDatasettePresentation(for: restoredTape)
+            isRunning = true
+            syncInputConfiguration()
+
+            // Network sockets cannot be serialized across process launches.
+            // Ensure a restored terminal sees a disconnected virtual modem.
+            _ = session.hangUpVirtualModem()
+
+            session.setSuspended(false)
+            startPersistentCheckpointLoop()
+            status = "Previous session restored"
+            return true
+        } catch {
+            print("Unable to restore previous POKE64 session: \(error)")
+            session.stop()
+            isRunning = false
+            clearMediaState(removeTemporaryFiles: false)
+            PersistentSessionStore.clear()
+            return false
+        }
+    }
+
+    private func persistentMediaReference(
+        from descriptor: PersistentSessionMediaDescriptor
+    ) throws -> MediaReference {
+        let url: URL
+        let isTemporary: Bool
+
+        if let libraryItemID = descriptor.libraryItemID {
+            guard let item = library.item(withID: libraryItemID) else {
+                throw PersistentSessionStoreError.mediaUnavailable(descriptor.originalFilename)
+            }
+            url = try library.mediaURL(for: item)
+            isTemporary = false
+        } else {
+            url = try PersistentSessionStore.mediaURL(for: descriptor)
+            isTemporary = false
+        }
+
+        return MediaReference(
+            id: descriptor.id,
+            title: descriptor.title,
+            originalFilename: descriptor.originalFilename,
+            mediaType: descriptor.mediaType,
+            url: url,
+            isTemporary: isTemporary,
+            libraryItemID: descriptor.libraryItemID,
+            addedLibraryItemID: nil
+        )
+    }
+
     func stop() {
+        persistentCheckpointTask?.cancel()
+        persistentCheckpointTask = nil
+        PersistentSessionStore.clear()
         session.stop()
         isRunning = false
         driveLEDOffTask?.cancel()

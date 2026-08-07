@@ -83,6 +83,9 @@ typedef NS_ENUM(NSInteger, C64DatasetteCommand) {
                        telnet:(BOOL)telnet NS_SWIFT_NAME(dialVirtualModem(target:telnet:));
 - (BOOL)hangUpVirtualModem;
 - (BOOL)clearVirtualModemTraffic;
+- (nullable NSData *)serializeState;
+- (BOOL)unserializeState:(NSData *)state;
+- (void)setSuspended:(BOOL)suspended;
 - (BOOL)flushPrinterAtDevice:(NSInteger)device NS_SWIFT_NAME(flushPrinter(atDevice:));
 - (BOOL)snapshotPrinterAtDevice:(NSInteger)device NS_SWIFT_NAME(snapshotPrinter(atDevice:));
 - (BOOL)ejectCartridge;

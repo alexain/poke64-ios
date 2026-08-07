@@ -102,6 +102,9 @@ struct CoreAPI {
     void (*retro_unload_game)(void) = nullptr;
     void (*retro_run)(void) = nullptr;
     void (*retro_reset)(void) = nullptr;
+    size_t (*retro_serialize_size)(void) = nullptr;
+    bool (*retro_serialize)(void *, size_t) = nullptr;
+    bool (*retro_unserialize)(const void *, size_t) = nullptr;
     void (*emu_reset)(int) = nullptr;
     int (*file_system_attach_disk)(unsigned int, unsigned int, const char *) = nullptr;
     void (*file_system_detach_disk)(unsigned int, unsigned int) = nullptr;
@@ -175,6 +178,21 @@ struct MediaCommand {
     std::string error;
 };
 
+enum class StateCommandType {
+    Serialize,
+    Unserialize
+};
+
+struct StateCommand {
+    StateCommandType type;
+    std::vector<uint8_t> data;
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool completed = false;
+    bool success = false;
+    std::string error;
+};
+
 struct KeyEvent {
     bool down;
     unsigned key;
@@ -210,6 +228,11 @@ struct SessionImpl {
     std::vector<KeyEvent> keyEvents;
     std::mutex mediaCommandMutex;
     std::deque<std::shared_ptr<MediaCommand>> mediaCommands;
+    std::mutex stateCommandMutex;
+    std::deque<std::shared_ptr<StateCommand>> stateCommands;
+    std::atomic<bool> suspended{false};
+    std::mutex suspendMutex;
+    std::condition_variable suspendCondition;
     retro_keyboard_event_t keyboardCallback = nullptr;
     retro_pixel_format pixelFormat = RETRO_PIXEL_FORMAT_0RGB1555;
     retro_disk_control_callback diskControl{};
@@ -658,6 +681,9 @@ struct SessionImpl {
         LOAD_CORE_SYMBOL(retro_unload_game);
         LOAD_CORE_SYMBOL(retro_run);
         LOAD_CORE_SYMBOL(retro_reset);
+        LOAD_CORE_SYMBOL(retro_serialize_size);
+        LOAD_CORE_SYMBOL(retro_serialize);
+        LOAD_CORE_SYMBOL(retro_unserialize);
 #undef LOAD_CORE_SYMBOL
 
         // VICE-libretro exposes emu_reset() from libretro-core.c. It allows
@@ -1539,8 +1565,166 @@ struct SessionImpl {
         return command->success;
     }
 
+    void completeStateCommand(
+        const std::shared_ptr<StateCommand> &command,
+        bool success,
+        const std::string &error
+    ) {
+        {
+            std::lock_guard<std::mutex> lock(command->mutex);
+            command->success = success;
+            command->error = error;
+            command->completed = true;
+        }
+        command->condition.notify_all();
+    }
+
+    void failPendingStateCommands(const char *message) {
+        std::deque<std::shared_ptr<StateCommand>> pending;
+        {
+            std::lock_guard<std::mutex> lock(stateCommandMutex);
+            pending.swap(stateCommands);
+        }
+        for (const auto &command : pending) {
+            completeStateCommand(command, false, message ?: "The core stopped");
+        }
+    }
+
+    bool executeStateCommand(const std::shared_ptr<StateCommand> &command, std::string &error) {
+        switch (command->type) {
+            case StateCommandType::Serialize: {
+                const size_t size = api.retro_serialize_size ? api.retro_serialize_size() : 0;
+                if (size == 0) {
+                    error = "The VICE core reported an empty save-state size";
+                    return false;
+                }
+                command->data.assign(size, 0);
+                if (!api.retro_serialize || !api.retro_serialize(command->data.data(), command->data.size())) {
+                    command->data.clear();
+                    error = "VICE could not serialize the current session";
+                    return false;
+                }
+                return true;
+            }
+
+            case StateCommandType::Unserialize:
+                if (command->data.empty()) {
+                    error = "The saved session state is empty";
+                    return false;
+                }
+                if (!api.retro_unserialize ||
+                    !api.retro_unserialize(command->data.data(), command->data.size())) {
+                    error = "VICE could not restore the saved session";
+                    return false;
+                }
+                audioRing.clear();
+                updateDatasetteState(true);
+                updateVirtualModemState(true);
+                return true;
+        }
+        error = "Unknown save-state command";
+        return false;
+    }
+
+    bool hasPendingStateCommands() {
+        std::lock_guard<std::mutex> lock(stateCommandMutex);
+        return !stateCommands.empty();
+    }
+
+    void drainStateCommands() {
+        std::deque<std::shared_ptr<StateCommand>> pending;
+        {
+            std::lock_guard<std::mutex> lock(stateCommandMutex);
+            pending.swap(stateCommands);
+        }
+        for (const auto &command : pending) {
+            std::string error;
+            const bool success = executeStateCommand(command, error);
+            completeStateCommand(command, success, error);
+        }
+    }
+
+    bool performStateCommand(
+        StateCommandType type,
+        const uint8_t *input,
+        size_t inputSize,
+        std::vector<uint8_t> &output,
+        std::string &error
+    ) {
+        if (!running.load(std::memory_order_acquire)) {
+            error = "The C64 core is not running";
+            return false;
+        }
+
+        auto command = std::make_shared<StateCommand>();
+        command->type = type;
+        if (input && inputSize > 0) {
+            command->data.assign(input, input + inputSize);
+        }
+        {
+            std::lock_guard<std::mutex> lock(stateCommandMutex);
+            stateCommands.push_back(command);
+        }
+        suspendCondition.notify_all();
+
+        std::unique_lock<std::mutex> lock(command->mutex);
+        bool completed = command->condition.wait_for(
+            lock,
+            std::chrono::seconds(3),
+            [&command] { return command->completed; }
+        );
+        if (!completed) {
+            lock.unlock();
+
+            bool removedBeforeExecution = false;
+            {
+                std::lock_guard<std::mutex> queueLock(stateCommandMutex);
+                const auto iterator = std::find(stateCommands.begin(), stateCommands.end(), command);
+                if (iterator != stateCommands.end()) {
+                    stateCommands.erase(iterator);
+                    removedBeforeExecution = true;
+                }
+            }
+            if (removedBeforeExecution) {
+                error = "VICE did not begin the save-state operation in time";
+                return false;
+            }
+
+            lock.lock();
+            completed = command->condition.wait_for(
+                lock,
+                std::chrono::seconds(12),
+                [&command] { return command->completed; }
+            );
+            if (!completed) {
+                error = "VICE did not complete the save-state operation in time";
+                return false;
+            }
+        }
+        error = command->error;
+        if (command->success && type == StateCommandType::Serialize) {
+            output = std::move(command->data);
+        }
+        return command->success;
+    }
+
+    void setSuspended(bool value) {
+        const bool previous = suspended.exchange(value, std::memory_order_acq_rel);
+        if (previous == value) return;
+
+        if (value) {
+            stopAudio();
+        } else if (running.load(std::memory_order_acquire)) {
+            startAudio();
+        }
+        suspendCondition.notify_all();
+    }
+
     void stop() {
         running.store(false, std::memory_order_release);
+        suspended.store(false, std::memory_order_release);
+        suspendCondition.notify_all();
+        failPendingStateCommands("The core stopped before completing the save-state operation");
         failPendingMediaCommands("The core stopped before completing the media operation");
         if (coreThread.joinable() && coreThread.get_id() != std::this_thread::get_id()) {
             coreThread.join();
@@ -2352,6 +2536,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
     gSession = this;
     clearCoreDiagnostics();
     shutdownRequested.store(false, std::memory_order_release);
+    suspended.store(false, std::memory_order_release);
     {
         std::lock_guard<std::mutex> lock(startupMutex);
         firstRunCompleted = false;
@@ -2420,6 +2605,19 @@ bool SessionImpl::start(const char *path, std::string &error) {
         bool firstIteration = true;
         while (running.load(std::memory_order_acquire) &&
                !shutdownRequested.load(std::memory_order_acquire)) {
+            drainStateCommands();
+
+            if (suspended.load(std::memory_order_acquire)) {
+                std::unique_lock<std::mutex> lock(suspendMutex);
+                suspendCondition.wait_for(lock, std::chrono::milliseconds(50), [this] {
+                    return !running.load(std::memory_order_acquire) ||
+                           !suspended.load(std::memory_order_acquire) ||
+                           hasPendingStateCommands();
+                });
+                nextFrame = clock::now();
+                continue;
+            }
+
             drainMediaCommands();
             const int resetMode = resetModeRequested.exchange(-1, std::memory_order_acq_rel);
             if (resetMode >= 0) {
@@ -2492,6 +2690,7 @@ bool SessionImpl::start(const char *path, std::string &error) {
             startupCondition.notify_all();
         }
         running.store(false, std::memory_order_release);
+        failPendingStateCommands("The core stopped before completing the save-state operation");
         failPendingMediaCommands("The core stopped before completing the media operation");
     });
 
@@ -2743,6 +2942,50 @@ bool SessionImpl::start(const char *path, std::string &error) {
     return success;
 }
 
+
+- (NSData * _Nullable)serializeState {
+    self.lastErrorMessage = nil;
+    std::vector<uint8_t> bytes;
+    std::string message;
+    const bool success = _impl->performStateCommand(
+        StateCommandType::Serialize,
+        nullptr,
+        0,
+        bytes,
+        message
+    );
+    if (!success) {
+        self.lastErrorMessage = [NSString stringWithUTF8String:message.c_str()];
+        return nil;
+    }
+    return [NSData dataWithBytes:bytes.data() length:bytes.size()];
+}
+
+- (BOOL)unserializeState:(NSData *)state {
+    self.lastErrorMessage = nil;
+    if (state.length == 0) {
+        self.lastErrorMessage = @"The saved session state is empty";
+        return NO;
+    }
+
+    std::vector<uint8_t> unused;
+    std::string message;
+    const bool success = _impl->performStateCommand(
+        StateCommandType::Unserialize,
+        static_cast<const uint8_t *>(state.bytes),
+        state.length,
+        unused,
+        message
+    );
+    if (!success) {
+        self.lastErrorMessage = [NSString stringWithUTF8String:message.c_str()];
+    }
+    return success;
+}
+
+- (void)setSuspended:(BOOL)suspended {
+    _impl->setSuspended(suspended);
+}
 
 - (BOOL)ejectCartridge {
     return [self performMediaCommand:MediaCommandType::EjectCartridge URL:nil driveUnit:0];

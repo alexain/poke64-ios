@@ -153,13 +153,8 @@ struct ContentView: View {
             }
         }
         .task {
-            do {
-                _ = try EmulationProfileStore.applyDefaultProfileAtLaunchIfEnabled()
-                reloadToolbarProfiles()
-            } catch {
-                emulator.presentMediaError(error)
-            }
             await emulator.startAutomatically()
+            reloadToolbarProfiles()
         }
         .task(id: printerEnabled) {
             await monitorPrinterCapture()
