@@ -9,8 +9,10 @@
 /* Begin PBXBuildFile section */
 		02D735014547E54BA8C0B28F /* C64KeyboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7F58AFDD31BC4F048A4B03B /* C64KeyboardView.swift */; };
 		1A11076DF99128E649E8EF6C /* LibretroSession.mm in Sources */ = {isa = PBXBuildFile; fileRef = 7725FE7F892841556F15BC3E /* LibretroSession.mm */; };
+		2CFC115D5806A0778DD67E6B /* EmulationProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E37D9EF8913203B3D12F8B4 /* EmulationProfileStore.swift */; };
 		35B8FC01D0C3237B4CD73CFB /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4822A2213113D2329AC947E2 /* LibraryView.swift */; };
 		36B65395C555CF90241B04F7 /* EmulatorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E05DEE9B3F9F2DDD233038 /* EmulatorModel.swift */; };
+		428CD672CF7438E349587E90 /* FirmwareProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 357A5131079B5C33C0DC4AA3 /* FirmwareProfileStore.swift */; };
 		51E44C46A1C49917E8A5AA43 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A9C94FB248449DE144B8E521 /* AudioToolbox.framework */; };
 		571AAAAE7876AB23D4A22A51 /* FirmwareStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B9E8A020E592A88D7AB9194 /* FirmwareStore.swift */; };
 		61C2704A8480473247FB4687 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC6353F181131B78CB9E2301 /* SettingsView.swift */; };
@@ -34,7 +36,9 @@
 		03A8AFEB9042C3C96638CBFB /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		0A4D40EE166996984F128885 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		1513BD695B536FBA4CFB2901 /* LibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryStore.swift; sourceTree = "<group>"; };
+		1E37D9EF8913203B3D12F8B4 /* EmulationProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulationProfileStore.swift; sourceTree = "<group>"; };
 		1EE2221E50EDD7D2A0ED4DA8 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		357A5131079B5C33C0DC4AA3 /* FirmwareProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirmwareProfileStore.swift; sourceTree = "<group>"; };
 		4822A2213113D2329AC947E2 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		4AA91E3CFCCE98FA078C40FE /* LibretroSession.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LibretroSession.h; sourceTree = "<group>"; };
 		4E4BACE62D631B6765D0E3B6 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -137,7 +141,9 @@
 				A7F58AFDD31BC4F048A4B03B /* C64KeyboardView.swift */,
 				541E8DF10CD05F93890E6977 /* C64MouseCaptureView.swift */,
 				4E4BACE62D631B6765D0E3B6 /* ContentView.swift */,
+				1E37D9EF8913203B3D12F8B4 /* EmulationProfileStore.swift */,
 				F2E05DEE9B3F9F2DDD233038 /* EmulatorModel.swift */,
+				357A5131079B5C33C0DC4AA3 /* FirmwareProfileStore.swift */,
 				64CD239BF939255B799F19C0 /* FirmwareSettingsView.swift */,
 				9B9E8A020E592A88D7AB9194 /* FirmwareStore.swift */,
 				BD4721181C78231CB5D16BDB /* HardwareKeyboardCapture.swift */,
@@ -263,7 +269,9 @@
 				AB7CAB3269F9F45FE27C565E /* C64MouseCaptureView.swift in Sources */,
 				FB9ACFE0427D95B7B90E795B /* C64Shaders.metal in Sources */,
 				75AB048B9A3F820BC3EAEF4B /* ContentView.swift in Sources */,
+				2CFC115D5806A0778DD67E6B /* EmulationProfileStore.swift in Sources */,
 				36B65395C555CF90241B04F7 /* EmulatorModel.swift in Sources */,
+				428CD672CF7438E349587E90 /* FirmwareProfileStore.swift in Sources */,
 				C469C7BC9C78F50CAE96AEB7 /* FirmwareSettingsView.swift in Sources */,
 				571AAAAE7876AB23D4A22A51 /* FirmwareStore.swift in Sources */,
 				7998F522E76A742788F5AE40 /* HardwareKeyboardCapture.swift in Sources */,

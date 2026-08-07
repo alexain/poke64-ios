@@ -186,6 +186,10 @@ enum FirmwareStore {
         [.basic, .kernal, .chargen].contains { status(for: $0).isInstalled }
     }
 
+    static var hasAnyInstalledFirmware: Bool {
+        statuses.contains(where: \.isInstalled)
+    }
+
     static var isOpenROMsInstalled: Bool {
         guard isBootReady,
               let marker = try? String(contentsOf: openROMsMarkerURL(), encoding: .utf8) else {
@@ -208,14 +212,18 @@ enum FirmwareStore {
         }
     }
 
-    static var activeProfileName: String {
+    static var detectedProfileName: String {
         if isOpenROMsInstalled {
             return "MEGA65 OpenROMs"
         }
-        return isBootReady ? "Custom firmware" : "Incomplete firmware"
+        return isBootReady ? "Custom Firmware" : "Incomplete Firmware"
     }
 
-    static var configurationFingerprint: String {
+    static var activeProfileName: String {
+        FirmwareProfileStore.activeProfile?.name ?? detectedProfileName
+    }
+
+    static var firmwareFingerprint: String {
         let firmware = statuses.map { status in
             [
                 status.slot.rawValue,
@@ -226,9 +234,13 @@ enum FirmwareStore {
         }
         .joined(separator: "|")
 
+        let openROMsMarker = openROMsRevisionMarker ?? "none"
+        return "\(firmware)|openroms:\(openROMsMarker)"
+    }
+
+    static var configurationFingerprint: String {
         return [
-            firmware,
-            "profile:\(activeProfileName)",
+            firmwareFingerprint,
             "machine:\(C64MachineModel.selected.rawValue)",
             "reu:\(C64REUSettings.configurationFingerprint)",
             "tape:\(C64TapeSettings.configurationFingerprint)",
@@ -244,9 +256,88 @@ enum FirmwareStore {
         do {
             _ = try firmwareDirectory()
             try writeVicerc()
+            FirmwareProfileStore.prepareIfNeeded()
         } catch {
             NSLog("POKE64 firmware setup failed: %@", error.localizedDescription)
         }
+    }
+
+    static var openROMsRevisionMarker: String? {
+        guard let marker = try? String(contentsOf: openROMsMarkerURL(), encoding: .utf8) else {
+            return nil
+        }
+        let revision = marker.trimmingCharacters(in: .whitespacesAndNewlines)
+        return revision.isEmpty ? nil : revision
+    }
+
+    static func copyActiveFirmware(to directory: URL) throws {
+        let fileManager = FileManager.default
+        let temporary = directory.appendingPathExtension("tmp")
+        try? fileManager.removeItem(at: temporary)
+        try fileManager.createDirectory(at: temporary, withIntermediateDirectories: true)
+
+        do {
+            for slot in FirmwareSlot.allCases {
+                let source = try fileURL(for: slot)
+                guard fileManager.fileExists(atPath: source.path) else { continue }
+                try fileManager.copyItem(
+                    at: source,
+                    to: temporary.appendingPathComponent(slot.storedFilename, isDirectory: false)
+                )
+            }
+
+            let marker = try openROMsMarkerURL()
+            if fileManager.fileExists(atPath: marker.path) {
+                try fileManager.copyItem(
+                    at: marker,
+                    to: temporary.appendingPathComponent("openroms-profile.txt", isDirectory: false)
+                )
+            }
+
+            try? fileManager.removeItem(at: directory)
+            try fileManager.moveItem(at: temporary, to: directory)
+        } catch {
+            try? fileManager.removeItem(at: temporary)
+            throw error
+        }
+    }
+
+    static func replaceActiveFirmware(from directory: URL) throws {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: directory.path) else {
+            throw FirmwareStoreError.unreadableFile
+        }
+
+        var sourceData: [FirmwareSlot: Data] = [:]
+        for slot in FirmwareSlot.allCases {
+            let source = directory.appendingPathComponent(slot.storedFilename, isDirectory: false)
+            guard fileManager.fileExists(atPath: source.path) else { continue }
+            let data = try Data(contentsOf: source, options: [.mappedIfSafe])
+            guard data.count == slot.requiredSize else {
+                throw FirmwareStoreError.invalidSize(slot: slot, actual: data.count)
+            }
+            sourceData[slot] = data
+        }
+
+        for slot in FirmwareSlot.allCases {
+            if let data = sourceData[slot] {
+                try replaceFirmwareData(data, in: slot)
+            } else {
+                let destination = try fileURL(for: slot)
+                if fileManager.fileExists(atPath: destination.path) {
+                    try fileManager.removeItem(at: destination)
+                }
+            }
+        }
+
+        let storedMarker = directory.appendingPathComponent("openroms-profile.txt", isDirectory: false)
+        let activeMarker = try openROMsMarkerURL()
+        try? fileManager.removeItem(at: activeMarker)
+        if fileManager.fileExists(atPath: storedMarker.path) {
+            try fileManager.copyItem(at: storedMarker, to: activeMarker)
+        }
+
+        try writeVicerc()
     }
 
     static func status(for slot: FirmwareSlot) -> FirmwareStatus {
@@ -307,7 +398,10 @@ enum FirmwareStore {
     }
 
     @discardableResult
-    static func importREUImage(from source: URL) throws -> C64REUImageInfo {
+    static func importREUImage(
+        from source: URL,
+        displayName: String? = nil
+    ) throws -> C64REUImageInfo {
         guard source.pathExtension.caseInsensitiveCompare("reu") == .orderedSame else {
             throw C64REUImageError.invalidExtension
         }
@@ -331,11 +425,12 @@ enum FirmwareStore {
         try FileManager.default.moveItem(at: temporary, to: destination)
 
         C64REUSize.selected = size
-        C64REUSettings.recordImportedImage(named: source.lastPathComponent)
+        let importedName = displayName ?? source.lastPathComponent
+        C64REUSettings.recordImportedImage(named: importedName)
         try writeVicerc()
 
         return C64REUImageInfo(
-            filename: source.lastPathComponent,
+            filename: importedName,
             fileSize: data.count,
             size: size
         )
@@ -348,6 +443,23 @@ enum FirmwareStore {
         }
         C64REUSettings.clearImportedImage()
         try writeVicerc()
+    }
+
+    static func copyImportedREUImage(to destination: URL) throws {
+        let source = try importedREUImageURL()
+        guard FileManager.default.fileExists(atPath: source.path) else {
+            throw C64REUImageError.unreadableFile
+        }
+
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let temporary = destination.appendingPathExtension("tmp")
+        try? FileManager.default.removeItem(at: temporary)
+        try FileManager.default.copyItem(at: source, to: temporary)
+        try? FileManager.default.removeItem(at: destination)
+        try FileManager.default.moveItem(at: temporary, to: destination)
     }
 
     static func importFirmware(from source: URL, into slot: FirmwareSlot) throws {
