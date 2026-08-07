@@ -1185,6 +1185,34 @@ enum C64DriveSettings {
     }
 }
 
+enum C64VirtualModemSettings {
+    static let enabledKey = "poke64.network.virtualModem.enabled"
+    static let baudKey = "poke64.network.virtualModem.baud"
+
+    static let defaultEnabled = false
+    static let defaultBaud = 9600
+    static let supportedBaudRates = [300, 600, 1200, 2400, 9600]
+
+    static var enabled: Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: enabledKey) == nil
+            ? defaultEnabled
+            : defaults.bool(forKey: enabledKey)
+    }
+
+    static var baud: Int {
+        let defaults = UserDefaults.standard
+        let value = defaults.object(forKey: baudKey) == nil
+            ? defaultBaud
+            : defaults.integer(forKey: baudKey)
+        return supportedBaudRates.contains(value) ? value : defaultBaud
+    }
+
+    static var configurationFingerprint: String {
+        [String(enabled), String(baud)].joined(separator: ":")
+    }
+}
+
 enum SettingsPanel: String, CaseIterable, Identifiable {
     case system
     case graphics
@@ -1339,14 +1367,7 @@ private struct SettingsPanelDetail: View {
             case .firmware:
                 FirmwareSettingsView()
             case .networking:
-                SettingsPlaceholderView(
-                    panel: panel,
-                    plannedFeatures: [
-                        "Hayes-compatible virtual modem",
-                        "Telnet and raw TCP",
-                        "BBS directory and connection status"
-                    ]
-                )
+                VirtualModemSettingsView()
             case .about:
                 AboutSettingsView()
             }
@@ -2589,6 +2610,69 @@ private struct PrinterSettingsView: View {
         .onChange(of: exportFormatRawValue) { _, _ in
             if !canEnablePrinter {
                 printerEnabled = false
+            }
+        }
+    }
+}
+
+
+private struct VirtualModemSettingsView: View {
+    @AppStorage(C64VirtualModemSettings.enabledKey)
+    private var modemEnabled = C64VirtualModemSettings.defaultEnabled
+    @AppStorage(C64VirtualModemSettings.baudKey)
+    private var baud = C64VirtualModemSettings.defaultBaud
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Enable Virtual Modem", isOn: $modemEnabled)
+
+                LabeledContent(
+                    "Backend",
+                    value: "Hayes modem → VICE rs232net"
+                )
+            } header: {
+                Text("Virtual Modem")
+            } footer: {
+                Text("Closing Settings restarts the C64 core when this configuration changes. The modem stays in AT command mode until C64 software dials a destination.")
+            }
+
+            Section("Serial Interface") {
+                Picker("Baud rate", selection: $baud) {
+                    ForEach(C64VirtualModemSettings.supportedBaudRates, id: \.self) { rate in
+                        Text(rate == 9600 ? "9600 (UP9600 / EZ232, recommended)" : "\(rate) (legacy)")
+                            .tag(rate)
+                    }
+                }
+                .disabled(!modemEnabled)
+
+                if baud != 9600 {
+                    Label(
+                        "300–2400 baud uses VICE's bit-banged User Port path and remains experimental in POKE64. UP9600 at 9600 baud is the verified mode.",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                }
+            }
+
+            Section("Hayes Commands") {
+                Text("Use your C64 terminal program to control the modem with AT commands, or open the Virtual Modem sheet for the BBS directory, native Dial/Hang Up controls, and read-only traffic diagnostics.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                Text("AT\nATDT bbs.example.com:6400\n+++\nATH")
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+
+                Text("Supported: AT, ATZ, AT&F, ATE0/1, ATV0/1, ATQ0/1, ATI, ATDT/ATDP host:port, ATNET0/1, +++, ATO and ATH. Common X, &C, &D, &K and S0=0 initialization commands are accepted for compatibility.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onChange(of: baud) { _, value in
+            if !C64VirtualModemSettings.supportedBaudRates.contains(value) {
+                baud = C64VirtualModemSettings.defaultBaud
             }
         }
     }

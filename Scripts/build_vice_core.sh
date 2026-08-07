@@ -64,6 +64,11 @@ python3 "${SCRIPT_DIR}/prepare_virtual_printer_core.py" \
   --source "${SOURCE_DIR}" \
   --replacement "${SCRIPT_DIR}/vice-patches/output-graphics-poke64.c"
 
+# Enable VICE's RS-232-over-TCP backend for iOS and retain lightweight modem
+# telemetry exports for the native POKE64 frontend.
+python3 "${SCRIPT_DIR}/prepare_virtual_modem_core.py" \
+  --source "${SOURCE_DIR}"
+
 make -C "${SOURCE_DIR}" clean EMUTYPE=x64sc || true
 make -C "${SOURCE_DIR}" \
   -j"${JOBS}" \
@@ -78,23 +83,35 @@ cp -f "${SOURCE_DIR}/vice_x64sc_libretro_ios.dylib" "${OUTPUT_CORE}"
 # piping `nm` directly into `grep -q` can report a false failure: grep exits as
 # soon as it finds a match, nm receives SIGPIPE, and the pipeline becomes
 # non-zero even though the requested symbol is present.
-PRINTER_SYMBOLS_FILE="$(mktemp "${TMPDIR:-/tmp}/poke64-printer-symbols.XXXXXX")"
-trap 'rm -f "${PRINTER_SYMBOLS_FILE}"' EXIT
-nm -gU "${OUTPUT_CORE}" > "${PRINTER_SYMBOLS_FILE}"
+POKE64_SYMBOLS_FILE="$(mktemp "${TMPDIR:-/tmp}/poke64-core-symbols.XXXXXX")"
+trap 'rm -f "${POKE64_SYMBOLS_FILE}"' EXIT
+nm -gU "${OUTPUT_CORE}" > "${POKE64_SYMBOLS_FILE}"
 
 for symbol in \
   poke64_printer_set_output_directory \
   poke64_printer_snapshot \
-  poke64_printer_configure_raw_capture; do
-  if ! grep -Eq "[[:space:]]_${symbol}$" "${PRINTER_SYMBOLS_FILE}"; then
-    echo "Missing required graphical printer symbol: ${symbol}" >&2
-    echo "Available POKE64 printer symbols:" >&2
-    grep -E '[[:space:]]_poke64_printer_' "${PRINTER_SYMBOLS_FILE}" >&2 || true
+  poke64_printer_configure_raw_capture \
+  poke64_modem_connected \
+  poke64_modem_tx_bytes \
+  poke64_modem_rx_bytes \
+  poke64_modem_ready \
+  poke64_modem_command_mode \
+  poke64_modem_telnet_enabled \
+  poke64_modem_endpoint \
+  poke64_modem_last_result \
+  poke64_modem_dial \
+  poke64_modem_hangup \
+  poke64_modem_trace_snapshot \
+  poke64_modem_trace_clear; do
+  if ! grep -Eq "[[:space:]]_${symbol}$" "${POKE64_SYMBOLS_FILE}"; then
+    echo "Missing required POKE64 core symbol: ${symbol}" >&2
+    echo "Available POKE64 bridge symbols:" >&2
+    grep -E '[[:space:]]_poke64_(printer|modem)_' "${POKE64_SYMBOLS_FILE}" >&2 || true
     exit 1
   fi
 done
 
-rm -f "${PRINTER_SYMBOLS_FILE}"
+rm -f "${POKE64_SYMBOLS_FILE}"
 trap - EXIT
 
 # Verify the linked dylib without modifying it. Any exact ROM payload found in

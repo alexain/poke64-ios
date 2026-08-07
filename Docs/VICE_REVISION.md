@@ -14,7 +14,8 @@ applying the local POKE64 patches, including:
 - restoration of the VICE MPS-803 printer driver;
 - the sandbox-safe POKE64 raster-printer backend;
 - iOS compatibility changes;
-- retention and verification of the exported printer bridge symbols.
+- retention and verification of the exported printer bridge symbols;
+- iOS VICE RS-232-over-TCP support and POKE64 modem telemetry exports.
 
 The build does not contain proprietary Commodore firmware. Commodore
 system ROMs, drive ROMs and the MPS-803 printer ROM must be supplied
