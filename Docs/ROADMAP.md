@@ -2,7 +2,7 @@
 
 POKE64 is designed for **iPadOS first**, with landscape iPad use as the primary interface target. iPhone and macOS adaptations will be considered after the core iPad experience is stable.
 
-This document lists only work that is still pending. Completed Library, keyboard, Devices, video, audio, Drive 8/9, REU, datasette transport and the first MPS-803 virtual-printer implementation have been removed.
+This document lists only work that is still pending. Completed Library foundations, G64 support, duplicate handling, disk inspection, Library artwork/screenshots, multi-disk detection, keyboard, Devices, video, audio, Drive 8/9, REU, datasette transport and the first MPS-803 virtual-printer implementation have been removed.
 
 ## 1. Core, firmware and diagnostics
 
@@ -21,13 +21,11 @@ This document lists only work that is still pending. Completed Library, keyboard
 
 ## 3. Library and media management
 
-- Add G64 and other disk formats after their drive and write-back requirements are handled reliably.
-- Add file replacement, duplicate detection and import-conflict handling.
-- Add screenshots, notes and optional cover artwork.
+- Add other disk formats after their drive and write-back requirements are handled reliably.
 - Add an optional cover/grid view while retaining the detailed list.
-- Display disk directories, free blocks and contained files.
 - Preview BASIC listings where practical.
-- Associate hardware profiles, joyports, firmware, save states and multidisk sets with library entries.
+- Add manual multi-disk grouping and editing for sets that cannot be inferred reliably from filenames.
+- Associate hardware profiles, joyports, firmware and save states with library entries.
 - Add explicit export/share workflows for created or modified disk images.
 - Add optional iCloud Drive and Google Drive backup/synchronization for the library, imported media and user-supplied firmware/ROM files, supporting recovery after app reinstallation and synchronization across multiple devices.
 
@@ -42,7 +40,6 @@ This document lists only work that is still pending. Completed Library, keyboard
 
 - Add optional drive units 10 and 11.
 - Expose independent per-drive activity indicators by connecting to a VICE API that identifies the active unit; the current libretro LED is aggregate.
-- Add multidisk sets, disk-side navigation and disk-flip workflows.
 - Add safe writable TAP recording, explicit write-back and export before exposing the datasette RECORD control.
 - Extend cartridge handling for supported expansion devices beyond basic CRT attachment.
 
@@ -121,11 +118,11 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 ## Development order
 
 ```text
-Library inspection, duplicate handling and metadata
-→ firmware profiles and diagnostics
+Networking and Virtual Modem foundation
+→ global profiles, firmware profiles and per-title overrides
 → advanced CRT graphics, SID options and external-display support
-→ printer validation and networking
-→ save states, multidisk and additional drives
+→ save states, manual multi-disk management and additional drives
+→ printer validation and broader compatibility testing
 → release engineering and App Store preparation
 → hardware link and experimental features
 ```
