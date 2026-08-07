@@ -10,6 +10,8 @@ NS_ASSUME_NONNULL_BEGIN
               pitch:(NSUInteger)pitch
         pixelFormat:(NSInteger)pixelFormat;
 
+- (nullable NSData *)captureCurrentFramePNGData;
+
 @end
 
 NS_ASSUME_NONNULL_END

@@ -10,6 +10,9 @@ struct ContentView: View {
     private var printerEnabled = C64PrinterSettings.defaultEnabled
     @AppStorage(C64PrinterSettings.deviceKey)
     private var printerDevice = C64PrinterSettings.defaultDevice
+    @AppStorage("poke64.toolbar.collapsed")
+    private var toolbarCollapsed = false
+    @State private var toolbarHeight: CGFloat = 62
     @State private var showImporter = false
     @State private var showKeyboard = false
     @State private var showDatasetteControls = false
@@ -42,6 +45,10 @@ struct ContentView: View {
 
             VStack(spacing: 0) {
                 header
+                    .frame(height: toolbarHeight, alignment: .top)
+                    .clipped()
+                    .allowsHitTesting(toolbarHeight > 1)
+
                 emulatorArea
 
                 if showKeyboard {
@@ -76,6 +83,16 @@ struct ContentView: View {
                 }
             }
 
+            toolbarRestoreButton
+                .padding(.top, 8)
+                .padding(.trailing, 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .opacity(toolbarCollapsed ? 1 : 0)
+                .offset(y: toolbarCollapsed ? 0 : -8)
+                .allowsHitTesting(toolbarCollapsed)
+                .accessibilityHidden(!toolbarCollapsed)
+                .zIndex(80)
+
             if emulator.externalMouseCaptureActive {
                 ExternalMouseCaptureShield()
                     .ignoresSafeArea()
@@ -91,6 +108,9 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.2), value: emulator.isStarting)
         .animation(.easeInOut(duration: 0.2), value: showKeyboard)
         .animation(.easeInOut(duration: 0.2), value: showDatasetteControls)
+        .onAppear {
+            toolbarHeight = toolbarCollapsed ? 0 : 62
+        }
         .onChange(of: emulator.mountedTape?.id) { previousID, currentID in
             guard previousID != currentID else { return }
             if currentID == nil || !emulator.mountedTapeSupportsPhysicalTransport {
@@ -198,7 +218,7 @@ struct ContentView: View {
             let sideMargin = max(0, (proxy.size.width - displaySize.width) / 2)
             let sideStatusPanelWidth = min(sideMargin, 104)
 
-            ZStack {
+            ZStack(alignment: .top) {
                 Color.black
 
                 ZStack(alignment: .bottom) {
@@ -317,10 +337,10 @@ struct ContentView: View {
                         alignment: .center
                     )
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 4)
             }
         }
-        .frame(height: 58)
+        .frame(height: 62)
         .background(.black)
         .popover(isPresented: $showPorts, arrowEdge: .top) {
             PortsConfigurationView(emulator: emulator)
@@ -440,7 +460,19 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .disabled(!emulator.isRunning)
+
+            Button {
+                collapseToolbar()
+            } label: {
+                Image(systemName: "chevron.up")
+                    .font(.caption.weight(.bold))
+                    .frame(minWidth: 12, minHeight: 18)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Hide Toolbar")
+            .help("Hide Toolbar")
         }
+        .buttonBorderShape(.roundedRectangle(radius: 14))
     }
 
     private func chooseMedia(for target: DeviceImportTarget) {
@@ -519,9 +551,45 @@ struct ContentView: View {
     }
 
     private func toolbarLabel(_ title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
+        ToolbarStatusLabel(
+            title: title,
+            systemImage: systemImage,
+            detail: nil
+        )
+    }
+
+    private var toolbarRestoreButton: some View {
+        Button {
+            expandToolbar()
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.caption.weight(.bold))
+                .frame(width: 28, height: 24)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: 10))
+        .accessibilityLabel("Show Toolbar")
+        .help("Show Toolbar")
+    }
+
+    private func collapseToolbar() {
+        withAnimation(.easeInOut(duration: 0.32)) {
+            toolbarHeight = 0
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+            guard toolbarHeight <= 0.5 else { return }
+            toolbarCollapsed = true
+        }
+    }
+
+    private func expandToolbar() {
+        toolbarCollapsed = false
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.32)) {
+                toolbarHeight = 62
+            }
+        }
     }
 
     private func openSettings(_ panel: SettingsPanel) {
@@ -699,26 +767,54 @@ private enum DeviceMediaSelectionError: LocalizedError {
     }
 }
 
+private struct ToolbarStatusLabel: View {
+    let title: String
+    let systemImage: String
+    let detail: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Label {
+                Text(title)
+            } icon: {
+                Image(systemName: systemImage)
+                    .font(.body.weight(.semibold))
+            }
+            .lineLimit(1)
+
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            } else {
+                Text(" ")
+                    .font(.caption2)
+                    .hidden()
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.vertical, 1)
+        .fixedSize(horizontal: true, vertical: false)
+        .contentShape(Rectangle())
+        .accessibilityLabel(title)
+    }
+}
+
 private struct PortsToolbarLabel: View {
     let port1Title: String
     let port2Title: String
 
     var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "gamecontroller")
-                .font(.body.weight(.semibold))
-
-            Text("Ports")
-
-            Text("1 \(port1Title) · 2 \(port2Title)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-        }
-        .lineLimit(1)
-        .fixedSize(horizontal: true, vertical: false)
-        .contentShape(Rectangle())
+        ToolbarStatusLabel(
+            title: "Ports",
+            systemImage: "gamecontroller",
+            detail: "1 \(port1Title) · 2 \(port2Title)"
+        )
+        .accessibilityLabel(
+            "Ports, Port 1 \(port1Title), Port 2 \(port2Title)"
+        )
     }
 }
 
@@ -876,20 +972,11 @@ private struct DevicesToolbarLabel: View {
     let cartridgeMounted: Bool
 
     var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "externaldrive.fill")
-                .font(.body.weight(.semibold))
-
-            Text("Devices")
-
-            Text(summary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .lineLimit(1)
-        .fixedSize(horizontal: true, vertical: false)
-        .contentShape(Rectangle())
+        ToolbarStatusLabel(
+            title: "Devices",
+            systemImage: "externaldrive.fill",
+            detail: summary
+        )
         .accessibilityLabel(accessibilitySummary)
     }
 
@@ -918,6 +1005,7 @@ private struct DevicesConfigurationView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var errorMessage: String?
+    @State private var driveMediaSetSelection: DriveMediaSetSelection?
 
     var body: some View {
         NavigationStack {
@@ -962,6 +1050,9 @@ private struct DevicesConfigurationView: View {
                 Text(errorMessage ?? "Unknown error")
             }
         }
+        .sheet(item: $driveMediaSetSelection) { selection in
+            DriveMediaSetSheet(unit: selection.unit, emulator: emulator)
+        }
     }
 
     @ViewBuilder
@@ -987,6 +1078,24 @@ private struct DevicesConfigurationView: View {
                     perform(.autostartDisk(unit), media: media)
                 } label: {
                     Label("Autostart Disk", systemImage: "play.circle.fill")
+                }
+
+                if let setInfo = emulator.mountedDiskSetInfo(for: unit) {
+                    LabeledContent("Multi-disk set") {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(setInfo.displayName)
+                                .lineLimit(1)
+                            Text("\(setInfo.currentMemberLabel) · \(setInfo.positionLabel)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Button {
+                        driveMediaSetSelection = DriveMediaSetSelection(unit: unit)
+                    } label: {
+                        Label("Swap Multi-Disk Set…", systemImage: "arrow.left.arrow.right.circle")
+                    }
                 }
 
                 Button {
@@ -1534,6 +1643,101 @@ private struct DatasetteStatusPanel: View {
     }
 }
 
+private struct DriveMediaSetSelection: Identifiable {
+    let unit: Int
+    var id: Int { unit }
+}
+
+private struct DriveMediaSetSheet: View {
+    let unit: Int
+    @ObservedObject var emulator: EmulatorModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let info = emulator.mountedDiskSetInfo(for: unit) {
+                    List {
+                        Section {
+                            LabeledContent("Drive", value: "\(unit)")
+                            LabeledContent("Set", value: info.displayName)
+                            LabeledContent("Current", value: info.currentMemberLabel)
+                            LabeledContent("Position", value: info.positionLabel)
+                        }
+
+                        Section("Available Disks") {
+                            ForEach(info.members) { member in
+                                let memberIndex = info.members.firstIndex(where: {
+                                    $0.id == member.id
+                                }) ?? 0
+                                let isCurrent = member.id == info.currentItem.id
+
+                                Button {
+                                    emulator.selectDiskSetMember(member, in: unit)
+                                    dismiss()
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(
+                                            systemName: isCurrent
+                                                ? "checkmark.circle.fill"
+                                                : "circle"
+                                        )
+                                        .foregroundStyle(
+                                            isCurrent
+                                                ? Color.accentColor
+                                                : Color.secondary
+                                        )
+
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(
+                                                member.mediaSetDescriptor?.memberLabel
+                                                    ?? "Disk \(memberIndex + 1)"
+                                            )
+                                            .foregroundStyle(.primary)
+
+                                            Text(member.originalFilename)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+
+                                        Spacer()
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(isCurrent)
+                            }
+                        }
+
+                        Section {
+                            Text("Selecting another member replaces the image in Drive \(unit) immediately, without resetting the C64.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "Multi-disk Set Unavailable",
+                        systemImage: "externaldrive.badge.questionmark",
+                        description: Text("The mounted disk is no longer part of a detected Library set.")
+                    )
+                }
+            }
+            .navigationTitle("Swap Multi-Disk Set")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
 private struct DriveStatusPanel: View {
     let drive8PowerOn: Bool
     let drive9Enabled: Bool
@@ -1810,7 +2014,7 @@ private struct MediaActionPromptModifier: ViewModifier {
     private var chooseDialogMessage: String? {
         guard let prompt, case .choose = prompt.mode else { return nil }
         switch prompt.request.media.mediaType {
-        case .d64, .d71, .d81:
+        case .d64, .d71, .d81, .g64:
             return "Choose whether to insert the disk without resetting the C64 or autostart it."
         case .tap:
             return "Choose whether to insert the TAP image without resetting the C64 or autostart it."

@@ -115,6 +115,27 @@ Physical controllers are discovered through Game Controller. Commodore 1351 inpu
 
 `LibretroSession.mm` loads the dylib through `dlopen`, resolves `retro_*` symbols and selected VICE runtime symbols, provides system/save/assets directories, registers callbacks and runs `retro_run()` on a dedicated thread. It captures VICE messages and treats startup shutdown requests as explicit errors instead of leaving a silent black screen.
 
+## Core abstraction and long-term VICE direction
+
+The current supported runtime remains the VICE `x64sc` libretro core. New frontend features should, where practical, depend on POKE64-owned abstractions rather than calling libretro-specific APIs directly. Video presentation, audio output, input routing, media actions, device state and lifecycle control should remain separable from the concrete core host.
+
+A possible long-term architecture is to introduce an `EmulatorSession`-style boundary with the existing `LibretroSession` as one implementation and an experimental `ViceSession` as another. `ViceSession` would embed and drive VICE directly through a POKE64 platform/bridge layer, removing the libretro translation layer while retaining VICE as the emulation engine.
+
+The migration, if pursued, should be staged:
+
+```text
+POKE64 UI / Library / Devices
+  → POKE64 session and device abstractions
+      → LibretroSession (current production backend)
+      → ViceSession     (future experimental backend)
+```
+
+Before any backend switch, the direct-VICE implementation must match or exceed the current build in compatibility, timing, audio/video behavior, media handling, save-state reliability and performance. Libretro should only be removed after a direct backend is proven on real iPad hardware and the migration has a clear maintenance benefit.
+
+A ground-up POKE64 C64 emulation core is not a planned replacement path. Reimplementing the 6510, VIC-II, SID, CIAs, IEC bus, drive hardware, GCR behavior and cycle-level compatibility would be a separate emulator project with substantially greater scope than embedding VICE directly.
+
+Direct VICE integration would not remove VICE licensing obligations. Any future distribution model must continue to satisfy the applicable GPL requirements for the VICE-derived component and document the boundary between that component and POKE64-owned application code.
+
 ## Video
 
 VICE supplies a framebuffer through the video callback. `C64MetalView` uploads it to a Metal texture and presents it using the aspect ratio reported by the core and the selected crop and geometry options.
