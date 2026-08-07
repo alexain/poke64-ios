@@ -90,6 +90,33 @@ struct FirmwareStatus: Identifiable {
     var isValid: Bool { isInstalled && validationError == nil }
 }
 
+struct C64REUImageInfo: Equatable {
+    let filename: String
+    let fileSize: Int
+    let size: C64REUSize
+}
+
+enum C64REUImageError: LocalizedError {
+    case invalidExtension
+    case invalidSize(actual: Int)
+    case unreadableFile
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidExtension:
+            return "Select a .reu image file."
+        case .invalidSize(let actual):
+            let megabytes = Double(actual) / (1024.0 * 1024.0)
+            return String(
+                format: "The selected image is %.2f MB. POKE64 supports raw REU images of 128 KB, 256 KB, 512 KB, 1 MB, 2 MB, 4 MB, 8 MB or 16 MB.",
+                megabytes
+            )
+        case .unreadableFile:
+            return "The selected REU image could not be read."
+        }
+    }
+}
+
 enum FirmwareStoreError: LocalizedError {
     case invalidSize(slot: FirmwareSlot, actual: Int)
     case unreadableFile
@@ -206,6 +233,7 @@ enum FirmwareStore {
             "reu:\(C64REUSettings.configurationFingerprint)",
             "tape:\(C64TapeSettings.configurationFingerprint)",
             "printer:\(C64PrinterSettings.configurationFingerprint)",
+            "network:\(C64VirtualModemSettings.configurationFingerprint)",
             "video:\(C64VideoSettings.configurationFingerprint)",
             "audio:\(C64AudioSettings.configurationFingerprint)",
             "drive:\(C64DriveSettings.configurationFingerprint)"
@@ -260,6 +288,66 @@ enum FirmwareStore {
                 validationError: error.localizedDescription
             )
         }
+    }
+
+    static func importedREUImageInfo() -> C64REUImageInfo? {
+        guard let url = try? importedREUImageURL(),
+              FileManager.default.fileExists(atPath: url.path),
+              let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+              let fileSize = values.fileSize,
+              let size = C64REUSize.matching(byteCount: fileSize) else {
+            return nil
+        }
+
+        return C64REUImageInfo(
+            filename: C64REUSettings.importedImageName ?? "Imported REU image.reu",
+            fileSize: fileSize,
+            size: size
+        )
+    }
+
+    @discardableResult
+    static func importREUImage(from source: URL) throws -> C64REUImageInfo {
+        guard source.pathExtension.caseInsensitiveCompare("reu") == .orderedSame else {
+            throw C64REUImageError.invalidExtension
+        }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: source, options: [.mappedIfSafe])
+        } catch {
+            throw C64REUImageError.unreadableFile
+        }
+
+        guard let size = C64REUSize.matching(byteCount: data.count) else {
+            throw C64REUImageError.invalidSize(actual: data.count)
+        }
+
+        let destination = try importedREUImageURL()
+        let temporary = destination.appendingPathExtension("tmp")
+        try? FileManager.default.removeItem(at: temporary)
+        try data.write(to: temporary, options: [.atomic])
+        try? FileManager.default.removeItem(at: destination)
+        try FileManager.default.moveItem(at: temporary, to: destination)
+
+        C64REUSize.selected = size
+        C64REUSettings.recordImportedImage(named: source.lastPathComponent)
+        try writeVicerc()
+
+        return C64REUImageInfo(
+            filename: source.lastPathComponent,
+            fileSize: data.count,
+            size: size
+        )
+    }
+
+    static func removeImportedREUImage() throws {
+        let destination = try importedREUImageURL()
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        C64REUSettings.clearImportedImage()
+        try writeVicerc()
     }
 
     static func importFirmware(from source: URL, into slot: FirmwareSlot) throws {
@@ -441,12 +529,18 @@ enum FirmwareStore {
             ? C64DriveSettings.defaultWriteProtection
             : defaults.bool(forKey: C64DriveSettings.writeProtectionKey)
 
-        let reuSize = C64REUSize.selected
+        let importedREUImage = importedREUImageInfo()
+        let reuSize = importedREUImage?.size ?? C64REUSize.selected
         if let sizeInKilobytes = reuSize.sizeInKilobytes {
             let persistentMemory = C64REUSettings.persistentMemoryEnabled
-            let reuFilename = persistentMemory
-                ? escapedVicercPath(try reuImageURL().path)
-                : ""
+            let reuFilename: String
+            if importedREUImage != nil {
+                reuFilename = escapedVicercPath(try importedREUImageURL().path)
+            } else if persistentMemory {
+                reuFilename = escapedVicercPath(try reuImageURL().path)
+            } else {
+                reuFilename = ""
+            }
             lines.append("REUfilename=\"\(reuFilename)\"")
             lines.append("REUImageWrite=\(persistentMemory ? 1 : 0)")
             lines.append("REUsize=\(sizeInKilobytes)")
@@ -562,6 +656,17 @@ enum FirmwareStore {
             withIntermediateDirectories: true
         )
         return directory.appendingPathComponent("persistent-memory.reu", isDirectory: false)
+    }
+
+    private static func importedREUImageURL() throws -> URL {
+        let directory = try viceDirectory()
+            .appendingPathComponent("POKE64", isDirectory: true)
+            .appendingPathComponent("REU", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        return directory.appendingPathComponent("imported-image.reu", isDirectory: false)
     }
 
     private static func printerFirmwareDirectory() throws -> URL {

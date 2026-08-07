@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 enum C64MachineModel: String, CaseIterable, Identifiable {
     case c64PAL = "C64 PAL"
@@ -143,16 +144,30 @@ enum C64REUSize: String, CaseIterable, Identifiable {
     }
 
     static var selected: C64REUSize {
-        guard let value = UserDefaults.standard.string(forKey: defaultsKey),
-              let size = C64REUSize(rawValue: value) else {
-            return defaultValue
+        get {
+            guard let value = UserDefaults.standard.string(forKey: defaultsKey),
+                  let size = C64REUSize(rawValue: value) else {
+                return defaultValue
+            }
+            return size
         }
-        return size
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey)
+        }
+    }
+
+    static func matching(byteCount: Int) -> C64REUSize? {
+        allCases.first { size in
+            guard let kilobytes = size.sizeInKilobytes else { return false }
+            return kilobytes * 1024 == byteCount
+        }
     }
 }
 
 enum C64REUSettings {
     static let persistentMemoryKey = "poke64.system.reuPersistentMemory"
+    static let importedImageNameKey = "poke64.system.reuImportedImageName"
+    static let imageRevisionKey = "poke64.system.reuImageRevision"
     static let defaultPersistentMemory = false
 
     static var persistentMemoryEnabled: Bool {
@@ -162,10 +177,32 @@ enum C64REUSettings {
             : defaults.bool(forKey: persistentMemoryKey)
     }
 
+    static var importedImageName: String? {
+        UserDefaults.standard.string(forKey: importedImageNameKey)
+    }
+
+    static var imageRevision: String {
+        UserDefaults.standard.string(forKey: imageRevisionKey) ?? "none"
+    }
+
+    static func recordImportedImage(named filename: String) {
+        let defaults = UserDefaults.standard
+        defaults.set(filename, forKey: importedImageNameKey)
+        defaults.set(UUID().uuidString, forKey: imageRevisionKey)
+    }
+
+    static func clearImportedImage() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: importedImageNameKey)
+        defaults.set(UUID().uuidString, forKey: imageRevisionKey)
+    }
+
     static var configurationFingerprint: String {
         [
             C64REUSize.selected.rawValue,
-            String(persistentMemoryEnabled)
+            String(persistentMemoryEnabled),
+            importedImageName ?? "no-image",
+            imageRevision
         ].joined(separator: ":")
     }
 }
@@ -1185,6 +1222,34 @@ enum C64DriveSettings {
     }
 }
 
+enum C64VirtualModemSettings {
+    static let enabledKey = "poke64.network.virtualModem.enabled"
+    static let baudKey = "poke64.network.virtualModem.baud"
+
+    static let defaultEnabled = false
+    static let defaultBaud = 9600
+    static let supportedBaudRates = [300, 600, 1200, 2400, 9600]
+
+    static var enabled: Bool {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: enabledKey) == nil
+            ? defaultEnabled
+            : defaults.bool(forKey: enabledKey)
+    }
+
+    static var baud: Int {
+        let defaults = UserDefaults.standard
+        let value = defaults.object(forKey: baudKey) == nil
+            ? defaultBaud
+            : defaults.integer(forKey: baudKey)
+        return supportedBaudRates.contains(value) ? value : defaultBaud
+    }
+
+    static var configurationFingerprint: String {
+        [String(enabled), String(baud)].joined(separator: ":")
+    }
+}
+
 enum SettingsPanel: String, CaseIterable, Identifiable {
     case system
     case graphics
@@ -1339,14 +1404,7 @@ private struct SettingsPanelDetail: View {
             case .firmware:
                 FirmwareSettingsView()
             case .networking:
-                SettingsPlaceholderView(
-                    panel: panel,
-                    plannedFeatures: [
-                        "Hayes-compatible virtual modem",
-                        "Telnet and raw TCP",
-                        "BBS directory and connection status"
-                    ]
-                )
+                VirtualModemSettingsView()
             case .about:
                 AboutSettingsView()
             }
@@ -1366,6 +1424,10 @@ private struct SystemSettingsView: View {
     @AppStorage(C64REUSettings.persistentMemoryKey)
     private var persistentREUMemory = C64REUSettings.defaultPersistentMemory
 
+    @State private var showREUImporter = false
+    @State private var reuImageInfo = FirmwareStore.importedREUImageInfo()
+    @State private var reuImageError: String?
+
     private var selectedModel: C64MachineModel {
         C64MachineModel(rawValue: selectedModelRawValue) ?? .defaultModel
     }
@@ -1378,6 +1440,7 @@ private struct SystemSettingsView: View {
         selectedModel == .defaultModel
             && selectedREUSize == .defaultValue
             && persistentREUMemory == C64REUSettings.defaultPersistentMemory
+            && reuImageInfo == nil
     }
 
     var body: some View {
@@ -1406,13 +1469,45 @@ private struct SystemSettingsView: View {
                     }
                 }
                 .pickerStyle(.menu)
+                .disabled(reuImageInfo != nil)
 
-                Toggle("Persistent REU memory", isOn: $persistentREUMemory)
-                    .disabled(selectedREUSize == .disabled)
+                Toggle(
+                    reuImageInfo == nil
+                        ? "Persistent REU memory"
+                        : "Save changes to imported image",
+                    isOn: $persistentREUMemory
+                )
+                .disabled(selectedREUSize == .disabled)
+
+                if let reuImageInfo {
+                    LabeledContent("REU image", value: reuImageInfo.filename)
+                    LabeledContent("Detected size", value: reuImageInfo.size.capacityTitle)
+
+                    HStack {
+                        Button("Replace REU Image…") {
+                            showREUImporter = true
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Eject Image", role: .destructive) {
+                            removeImportedREUImage()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                } else {
+                    Button("Load REU Image…") {
+                        showREUImporter = true
+                    }
+                    .buttonStyle(.bordered)
+                }
             } header: {
                 Text("Memory Expansion")
             } footer: {
-                Text("REU changes restart the C64 when Settings is closed. Persistent memory restores the REU image at startup and writes it when the core closes.")
+                if reuImageInfo == nil {
+                    Text("REU changes restart the C64 when Settings is closed. Persistent memory restores the REU image at startup and writes it when the core closes.")
+                } else {
+                    Text("Imported .reu files are copied into the POKE64 sandbox and their size selects the matching REU automatically. Save changes writes back to the sandbox copy, never to the original file in Files.")
+                }
             }
 
             Section("Compatibility") {
@@ -1431,12 +1526,62 @@ private struct SystemSettingsView: View {
 
             Section {
                 Button("Restore System Defaults") {
-                    selectedModelRawValue = C64MachineModel.defaultModel.rawValue
-                    selectedREUSizeRawValue = C64REUSize.defaultValue.rawValue
-                    persistentREUMemory = C64REUSettings.defaultPersistentMemory
+                    do {
+                        if reuImageInfo != nil {
+                            try FirmwareStore.removeImportedREUImage()
+                            reuImageInfo = nil
+                        }
+                        selectedModelRawValue = C64MachineModel.defaultModel.rawValue
+                        selectedREUSizeRawValue = C64REUSize.defaultValue.rawValue
+                        persistentREUMemory = C64REUSettings.defaultPersistentMemory
+                    } catch {
+                        reuImageError = error.localizedDescription
+                    }
                 }
                 .disabled(systemDefaultsAreSelected)
             }
+        }
+        .fileImporter(
+            isPresented: $showREUImporter,
+            allowedContentTypes: [.data],
+            allowsMultipleSelection: false
+        ) { result in
+            do {
+                let urls = try result.get()
+                guard let url = urls.first else { return }
+                let accessing = url.startAccessingSecurityScopedResource()
+                defer {
+                    if accessing {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+
+                let info = try FirmwareStore.importREUImage(from: url)
+                selectedREUSizeRawValue = info.size.rawValue
+                reuImageInfo = info
+            } catch {
+                reuImageError = error.localizedDescription
+            }
+        }
+        .alert(
+            "REU image error",
+            isPresented: Binding(
+                get: { reuImageError != nil },
+                set: { if !$0 { reuImageError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(reuImageError ?? "Unknown error")
+        }
+    }
+
+    private func removeImportedREUImage() {
+        do {
+            try FirmwareStore.removeImportedREUImage()
+            reuImageInfo = nil
+        } catch {
+            reuImageError = error.localizedDescription
         }
     }
 }
@@ -2589,6 +2734,69 @@ private struct PrinterSettingsView: View {
         .onChange(of: exportFormatRawValue) { _, _ in
             if !canEnablePrinter {
                 printerEnabled = false
+            }
+        }
+    }
+}
+
+
+private struct VirtualModemSettingsView: View {
+    @AppStorage(C64VirtualModemSettings.enabledKey)
+    private var modemEnabled = C64VirtualModemSettings.defaultEnabled
+    @AppStorage(C64VirtualModemSettings.baudKey)
+    private var baud = C64VirtualModemSettings.defaultBaud
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Enable Virtual Modem", isOn: $modemEnabled)
+
+                LabeledContent(
+                    "Backend",
+                    value: "Hayes modem → VICE rs232net"
+                )
+            } header: {
+                Text("Virtual Modem")
+            } footer: {
+                Text("Closing Settings restarts the C64 core when this configuration changes. The modem stays in AT command mode until C64 software dials a destination.")
+            }
+
+            Section("Serial Interface") {
+                Picker("Baud rate", selection: $baud) {
+                    ForEach(C64VirtualModemSettings.supportedBaudRates, id: \.self) { rate in
+                        Text(rate == 9600 ? "9600 (UP9600 / EZ232, recommended)" : "\(rate) (legacy)")
+                            .tag(rate)
+                    }
+                }
+                .disabled(!modemEnabled)
+
+                if baud != 9600 {
+                    Label(
+                        "300–2400 baud uses VICE's bit-banged User Port path and remains experimental in POKE64. UP9600 at 9600 baud is the verified mode.",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                }
+            }
+
+            Section("Hayes Commands") {
+                Text("Use your C64 terminal program to control the modem with AT commands, or open the Virtual Modem sheet for the BBS directory, native Dial/Hang Up controls, and read-only traffic diagnostics.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                Text("AT\nATDT bbs.example.com:6400\n+++\nATH")
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+
+                Text("Supported: AT, ATZ, AT&F, ATE0/1, ATV0/1, ATQ0/1, ATI, ATDT/ATDP host:port, ATNET0/1, +++, ATO and ATH. Common X, &C, &D, &K and S0=0 initialization commands are accepted for compatibility.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onChange(of: baud) { _, value in
+            if !C64VirtualModemSettings.supportedBaudRates.contains(value) {
+                baud = C64VirtualModemSettings.defaultBaud
             }
         }
     }

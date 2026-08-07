@@ -61,19 +61,23 @@ The project links Apple system frameworks including SwiftUI/UIKit, Metal/MetalKi
 
 No game, program, disk image, tape image, cartridge image or commercial content is included in this repository or its release archives.
 
-### POKE64 MPS-803 raster backend
+### POKE64 GPL VICE-core patches
 
-For POKE64 0.7.0, the pinned `vice-libretro` revision is:
+For POKE64 0.7.5, the pinned `vice-libretro` revision is:
 
 ```text
 c8c242db75a559246d6d51017e6dd4ecd75d6a9f
 ```
 
 `Scripts/vice-patches/output-graphics-poke64.c` replaces a graphics
-output backend inside the VICE-derived core. Because it is compiled and
-linked into that GPL component, this file is intentionally licensed
-GPL-2.0-or-later and is not covered by the repository's root MIT
-License.
+output backend inside the VICE-derived core.
+
+`Scripts/vice-patches/rs232net-poke64-hayes.c` adds the POKE64 Virtual
+Hayes modem layer used by the VICE RS-232 network backend.
+
+Because these files are compiled and linked into the GPL VICE component,
+they are intentionally licensed GPL-2.0-or-later and are not covered by
+the repository's root MIT License.
 
 The proprietary Commodore MPS-803 printer ROM is not included in the
 repository, application bundle, generated core or release artifacts.

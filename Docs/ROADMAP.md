@@ -2,7 +2,7 @@
 
 POKE64 is designed for **iPadOS first**, with landscape iPad use as the primary interface target. iPhone and macOS adaptations will be considered after the core iPad experience is stable.
 
-This document lists only work that is still pending. Completed Library foundations, G64 support, duplicate handling, disk inspection, Library artwork/screenshots, multi-disk detection, keyboard, Devices, video, audio, Drive 8/9, REU, datasette transport and the first MPS-803 virtual-printer implementation have been removed.
+This document lists only work that is still pending. Completed Library foundations, G64 support, duplicate handling, disk inspection, Library artwork/screenshots, multi-disk detection, keyboard, Devices, video, audio, Drive 8/9, REU including external `.reu` image import, datasette transport, the MPS-803 virtual printer and the Virtual Hayes modem/BBS foundation have been removed.
 
 ## 1. Core, firmware and diagnostics
 
@@ -13,10 +13,11 @@ This document lists only work that is still pending. Completed Library foundatio
 - Add explicit per-model firmware profiles while preserving the VICE limitation that a model's ROM is shared by every unit using it.
 - Verify pinned OpenROMs downloads with recorded hashes and surface upstream revision/license information in release material.
 
-## 2. Remaining settings panels
+## 2. Profiles and remaining settings
 
+- Add global emulation profiles that can capture machine type, drives, REU, printer, modem, joyports, graphics/audio choices and firmware-profile references.
 - Add firmware profile selection, profile naming and known-ROM status.
-- Implement Networking and modem settings.
+- Add per-title profile overrides without binding mounted media to the hardware profile itself.
 - Add advanced options only where they can be applied safely without destabilizing the current core lifecycle.
 
 ## 3. Library and media management
@@ -42,6 +43,7 @@ This document lists only work that is still pending. Completed Library foundatio
 - Expose independent per-drive activity indicators by connecting to a VICE API that identifies the active unit; the current libretro LED is aggregate.
 - Add safe writable TAP recording, explicit write-back and export before exposing the datasette RECORD control.
 - Extend cartridge handling for supported expansion devices beyond basic CRT attachment.
+- Add explicit export/share for modified external REU images and clarify snapshot/write-back workflows.
 
 ## 6. Graphics and audio
 
@@ -62,9 +64,9 @@ This document lists only work that is still pending. Completed Library foundatio
 
 ## 8. Networking and BBS
 
-- Add Hayes modem emulation through RS-232/User Port.
-- Support Telnet and raw TCP connections.
-- Add a BBS directory, baud-rate selection, connection state and activity indicators.
+- Validate the Virtual Hayes modem against additional C64 terminal software and BBS implementations, including the CCGMS 2021/RetroCampus display-corruption case.
+- Implement stricter Hayes compatibility where useful, including real `+++` guard times and functional hardware-flow-control command semantics.
+- Investigate RR-Net/Ethernet emulation with an iPadOS-compatible user-space backend rather than relying on raw TAP/pcap access.
 
 ## 9. Hardware Link
 
@@ -118,8 +120,7 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 ## Development order
 
 ```text
-Networking and Virtual Modem foundation
-→ global profiles, firmware profiles and per-title overrides
+Global emulation profiles, firmware profiles and per-title overrides
 → advanced CRT graphics, SID options and external-display support
 → save states, manual multi-disk management and additional drives
 → printer validation and broader compatibility testing
