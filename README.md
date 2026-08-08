@@ -8,32 +8,19 @@ POKE64 is an independent open-source project. It is not affiliated with Commodor
 
 ## Current features
 
-- Native iPadOS interface with automatic C64 startup and full-screen Library and Settings views.
-- Locally built and signed VICE `x64sc` libretro core.
-- Selectable C64 PAL, C64 NTSC, C64C PAL and C64C NTSC machine profiles.
-- Metal video rendering with dynamic core geometry, aspect-ratio control, border cropping, VIC-II palettes, PAL filtering and color adjustments.
-- AVAudioEngine output with selectable FastSID, ReSID and ReSID-FP engines, SID models, ReSID sampling modes, sample rates, VIC-II audio leak and datasette sound.
-- Hardware-keyboard input, a docked Compact/Full C64 keyboard, a virtual joystick assignable to either C64 joyport and persistent Shift Lock.
-- Multiple physical game controllers with D-pad/left-stick movement and A/B fire input.
-- Commodore 1351 mouse input from the iPad touchscreen, trackpad or external mouse.
-- Persistent media library with import, search, favorites, recent usage, title editing, notes, cover artwork, screenshots and media-specific artwork.
-- Import, temporary opening and media-specific launch actions for D64, D71, D81, G64, PRG, CRT, TAP and T64 files.
-- Automatic multi-disk set detection, grouped Library presentation, disk swapping from Devices and disk inspection with Commodore directory previews.
-- Creation of formatted or completely blank D64, D71 and D81 images from Library or Devices, followed by immediate library storage and optional drive insertion.
-- Unified Devices control for Drive 8, optional Drive 9, datasette and cartridge status, insertion, replacement, autostart and ejection.
-- Configurable 1541, 1541-II, 1571 and 1581 models, with Fast Virtual Drive or shared True Drive Emulation for every enabled drive.
-- Optional Drive 9 with an independent model and independently mounted media.
-- Commodore REU support from 128 KB through 16 MB, with optional app-managed persistence and import of external `.reu` images with automatic size detection and optional write-back.
-- True Drive mechanical sound, per-drive power indicators and an aggregate floppy-activity indicator supplied by the libretro core.
-- External BASIC, KERNAL, character, 1541, 1541-II, 1571, 1581 and MPS-803 printer ROM management with exact-size validation and SHA-256 diagnostics.
-- Optional one-step installation of a pinned MEGA65 OpenROMs system profile, while preserving a complete previous system-ROM set for restoration.
-- Compatible custom firmware support, including matching JiffyDOS-style C64 KERNAL and drive-ROM replacements.
-- Compact centered toolbar with a unified Ports popover and Port 1/Port 2 swapping.
-- Soft Reset and Hard Reset that retain mounted media, plus **Eject All Media and Reset**.
-- IEC virtual printer on device 4 or 5 with Commodore MPS-803 text/graphics rendering, paper preview, PDF output by default, PNG pages and optional RAW capture.
-- Virtual Hayes modem over the C64 User Port using VICE `rs232net`, with UP9600/EZ232 support, Hayes `AT` dialing, raw TCP and Telnet modes, a compact network activity panel, persistent BBS directory, native Dial/Hang Up controls and a read-only text/hex traffic monitor.
+- Native iPadOS interface with a real C64 Power control, full-screen Library and Settings, and guided first-run firmware setup.
+- VICE `x64sc` emulation for C64/C64C PAL and NTSC systems, with configurable VIC-II video and SID audio.
+- C64 keyboard, virtual joystick, physical game controllers and Commodore 1351 mouse support from touch, trackpad or external mouse.
+- Persistent Library for D64, D71, D81, G64, PRG, CRT, TAP and T64 media, including artwork, screenshots, disk inspection and automatic multi-disk sets.
+- Drive 8 and optional Drive 9 with 1541/1541-II/1571/1581 models, Fast Virtual Drive or True Drive Emulation, plus datasette and cartridge controls.
+- Commodore REU support from 128 KB to 16 MB, including persistent memory and external `.reu` images.
+- User-managed Commodore and compatible firmware, one-step MEGA65 OpenROMs installation, and shared Firmware Profiles.
+- Emulation Profiles for complete machine configurations, including a permanent editable `Default` profile and optional Power-on Profile behavior.
+- Automatic **Previous Session** restore so the running C64 and its mounted media can survive normal app backgrounding and process termination.
+- IEC virtual printer with MPS-803 rendering, paper preview and PDF/PNG/RAW output.
+- Virtual Hayes modem over the C64 User Port with raw TCP/Telnet connections, BBS directory, native dialing and traffic monitoring.
 
-Writable TAP recording, save states, manual multi-disk grouping, drives 10–11, additional printer models and RR-Net/Ethernet emulation remain pending.
+Writable TAP recording, Library save states, manual multi-disk grouping, drives 10–11, additional printer models and RR-Net/Ethernet emulation remain pending.
 
 ## Firmware policy
 
@@ -62,7 +49,9 @@ Users and redistributors are responsible for ensuring that every imported or red
 
 POKE64 is under active development and currently targets iPadOS 17 or later. iPhone and macOS adaptations are planned for a later stage.
 
-System, Graphics, Audio, Disk Drives, Tape, Printer, Networking and Firmware / ROMs now have persistent functional settings. Closing Settings restarts the core only when a configuration fingerprint has changed.
+System, Graphics, Audio, Disk Drives, Tape, Printer, Networking and Firmware / ROMs have persistent functional settings. Emulation Profiles capture the machine configuration, while Firmware Profiles keep ROM sets shared between configurations. Closing Settings restarts the core only when required.
+
+POKE64 maintains an automatic Previous Session checkpoint for normal app backgrounding and cold-launch restoration. A deliberate C64 Power OFF ends that resumable machine state; Power ON performs a fresh boot using the current profile or the optional Power-on Profile.
 
 Drive 8 is always available. Drive 9 can be enabled independently. Fast Virtual Drive uses VICE virtual-device traps; True Drive executes the selected drive ROMs for all enabled drives and enables hardware-level timing, compatible drive-side firmware and mechanical sound.
 
@@ -78,7 +67,7 @@ A cartridge, disk or tape remains mounted across Soft and Hard Reset, matching p
 ## Documentation
 
 - [Build and development guide](Docs/BUILDING.md)
-- [VICE revision used by v0.7.5](Docs/VICE_REVISION.md)
+- [VICE revision used by v0.7.6](Docs/VICE_REVISION.md)
 - [Architecture](Docs/ARCHITECTURE.md)
 - [Roadmap](Docs/ROADMAP.md)
 - [External-firmware testing](Docs/TESTING_EXTERNAL_FIRMWARE.md)
@@ -91,6 +80,12 @@ Created by [Alessandro Capano](https://www.alexain.it/poke64) in 2026.
 ## Licensing
 
 The POKE64 application code in this repository is licensed under the MIT License. See the [LICENSE](LICENSE) file for the full text.
+
+The software license applies to the POKE64 source code, not to the project identity. The **POKE64** name, logo, application icon, banner and associated visual branding are reserved to the project owner unless permission is granted separately. Redistribution or modification of the source code does not by itself grant permission to present a derivative application as **POKE64**, as an official POKE64 build, or using POKE64 branding in a way that may imply such an association.
+
+Original POKE64 visual assets, including the logo, application icon, banner and other project artwork, remain separately protected by copyright unless an individual asset explicitly states a different license.
+
+Forks and derivative applications should therefore use their own name, icon and visual identity. References to POKE64 for attribution, compatibility information or a factual description of the project's origin are not intended to be restricted by this notice.
 
 VICE and `vice-libretro` are separate GPL-2.0-or-later components, subject to the notices in the exact source revision used for a build. A distributor shipping a VICE-derived core must satisfy the corresponding GPL requirements, including providing the applicable license notices and complete corresponding source in an allowed form.
 

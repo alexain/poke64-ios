@@ -2,7 +2,7 @@
 
 POKE64 is designed for **iPadOS first**, with landscape iPad use as the primary interface target. iPhone and macOS adaptations will be considered after the core iPad experience is stable.
 
-This document lists only work that is still pending. Completed Library foundations, G64 support, duplicate handling, disk inspection, Library artwork/screenshots, multi-disk detection, keyboard, Devices, video, audio, Drive 8/9, REU including external `.reu` image import, datasette transport, the MPS-803 virtual printer and the Virtual Hayes modem/BBS foundation have been removed.
+This document lists only work that is still pending. Completed Library foundations, G64 support, duplicate handling, disk inspection, Library artwork/screenshots, multi-disk detection, keyboard, Devices, video, audio, Drive 8/9, REU including external `.reu` image import, datasette transport, the MPS-803 virtual printer, the Virtual Hayes modem/BBS foundation, Emulation/Firmware Profiles, C64 Power control and automatic Previous Session restore have been removed.
 
 ## 1. Core, firmware and diagnostics
 
@@ -15,9 +15,9 @@ This document lists only work that is still pending. Completed Library foundatio
 
 ## 2. Profiles and remaining settings
 
-- Add global emulation profiles that can capture machine type, drives, REU, printer, modem, joyports, graphics/audio choices and firmware-profile references.
-- Add firmware profile selection, profile naming and known-ROM status.
-- Add per-title profile overrides without binding mounted media to the hardware profile itself.
+- Add per-title Emulation Profile assignment and selective overrides without binding mounted media to the hardware profile itself.
+- Add known-ROM identification/status to Firmware Profiles, including recognized Commodore and JiffyDOS replacements where licensing permits identification.
+- Extend logical input/joyport configuration into profiles without binding a profile to a specific physical controller instance.
 - Add advanced options only where they can be applied safely without destabilizing the current core lifecycle.
 
 ## 3. Library and media management
@@ -40,6 +40,7 @@ This document lists only work that is still pending. Completed Library foundatio
 ## 5. Media and expansion devices
 
 - Add optional drive units 10 and 11.
+- Refine drive-emulation controls around VICE Virtual Device Traps: make the fast/virtual versus accurate/True Drive choice explicit, preserve it in Emulation Profiles and test standard loaders plus common fastloaders.
 - Expose independent per-drive activity indicators by connecting to a VICE API that identifies the active unit; the current libretro LED is aggregate.
 - Add safe writable TAP recording, explicit write-back and export before exposing the datasette RECORD control.
 - Extend cartridge handling for supported expansion devices beyond basic CRT attachment.
@@ -78,7 +79,13 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 - Exchange memory and program data.
 - Investigate audio/video streaming where supported by the hardware API.
 
-## 10. Distribution and release engineering
+## 10. iPadOS lifecycle and save states
+
+- Finish lifecycle regression coverage for audio-route changes, audio interruptions, printer activity and Virtual Modem/BBS behavior across inactive/background/restore transitions.
+- Keep external resources that cannot survive process termination, especially live BBS/TCP sockets, explicitly disconnected after Previous Session restoration and validate clean reconnection paths.
+- Add optional **Library Save States** tied to a Library item rather than global emulator slots: multiple named/timestamped states, screenshot previews, configuration/media metadata and explicit load/delete/replace actions. These states should let games continue from arbitrary points even when the original software has no native save facility.
+
+## 11. Distribution and release engineering
 
 - Automate release builds and archive validation.
 - Document the exact source revision and patches corresponding to every distributed core binary.
@@ -87,7 +94,7 @@ Investigate integration with Ultimate 64 Elite-II and compatible current Commodo
 - Record third-party notices and OpenROMs revision/hash information in every release.
 - Prepare App Store metadata, privacy declarations and review documentation.
 
-## 11. Long-term and experimental work
+## 12. Long-term and experimental work
 
 ### Core abstraction and direct VICE integration
 
@@ -145,10 +152,11 @@ Experimental research only; do not tie this work to a specific release until the
 ## Development order
 
 ```text
-Global emulation profiles, firmware profiles and per-title overrides
+lifecycle hardening + modem/printer resume validation
+→ Library per-title save states and per-title Emulation Profile overrides
 → advanced CRT graphics, SID options and external-display support
-→ save states, manual multi-disk management and additional drives
+→ manual multi-disk management and additional drives
 → printer validation and broader compatibility testing
-→ release engineering and App Store preparation
+→ release engineering / unsigned IPA distribution / App Store preparation
 → hardware link and experimental features
 ```

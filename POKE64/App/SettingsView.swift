@@ -1322,11 +1322,7 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var selection: SettingsPanel
-
-    init(initialPanel: SettingsPanel = .profiles) {
-        _selection = State(initialValue: initialPanel)
-    }
+    @Binding var selection: SettingsPanel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1424,10 +1420,10 @@ private struct SettingsPanelDetail: View {
 private struct EmulationProfilesSettingsView: View {
     @State private var profiles = EmulationProfileStore.loadProfiles()
     @State private var selectedProfileID = EmulationProfileStore.selectedProfileID
-    @State private var defaultProfileID = EmulationProfileStore.defaultProfileID
-    @State private var applyDefaultProfileAtLaunch = EmulationProfileStore.applyDefaultProfileAtLaunch
+    @State private var powerOnProfileID = EmulationProfileStore.powerOnProfileID
     @State private var nameEditor: ProfileNameEditor?
     @State private var pendingDeleteProfile: EmulationProfile?
+    @State private var pendingResetDefault = false
     @State private var pendingSwitchProfileID: UUID?
     @State private var errorMessage: String?
     @State private var statusMessage: String?
@@ -1447,14 +1443,6 @@ private struct EmulationProfilesSettingsView: View {
         return selectedProfileMatchesCurrent
             ? selectedProfile.name
             : "\(selectedProfile.name) — Modified"
-    }
-
-    private var defaultProfileTitle: String {
-        guard let defaultProfileID,
-              let profile = profiles.first(where: { $0.id == defaultProfileID }) else {
-            return "None"
-        }
-        return profile.name
     }
 
     private func firmwareProfileName(for profile: EmulationProfile) -> String {
@@ -1500,19 +1488,24 @@ private struct EmulationProfilesSettingsView: View {
             }
 
             Section {
-                LabeledContent("Default profile", value: defaultProfileTitle)
-
-                Toggle("Apply default profile at launch", isOn: Binding(
-                    get: { applyDefaultProfileAtLaunch },
-                    set: { enabled in
-                        applyDefaultProfileAtLaunch = enabled
-                        EmulationProfileStore.applyDefaultProfileAtLaunch = enabled
+                Picker("Power-on profile", selection: Binding(
+                    get: { powerOnProfileID },
+                    set: { profileID in
+                        powerOnProfileID = profileID
+                        EmulationProfileStore.powerOnProfileID = profileID
                     }
-                ))
+                )) {
+                    Text("Keep current profile")
+                        .tag(nil as UUID?)
+                    ForEach(profiles) { profile in
+                        Text(profile.name)
+                            .tag(profile.id as UUID?)
+                    }
+                }
             } header: {
-                Text("Startup")
+                Text("Power")
             } footer: {
-                Text("When enabled, POKE64 applies the default emulation profile before starting VICE. When disabled, the last configuration remains active.")
+                Text("Choose a profile to apply the next time the emulated C64 is powered on. Keep Current Profile preserves the active profile across power cycles. Closing and reopening POKE64 still resumes the previous session when available.")
             }
 
             Section {
@@ -1524,10 +1517,12 @@ private struct EmulationProfilesSettingsView: View {
                                     Text(profile.name)
                                         .font(.headline)
 
-                                    if defaultProfileID == profile.id {
-                                        Image(systemName: "star.fill")
-                                            .foregroundStyle(.yellow)
-                                            .accessibilityLabel("Default profile")
+                                    if EmulationProfileStore.isBuiltInProfile(profile.id) {
+                                        Label("Built-in", systemImage: "lock.fill")
+                                            .labelStyle(.titleAndIcon)
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                            .accessibilityLabel("Built-in Default profile")
                                     }
 
                                     if selectedProfileID == profile.id
@@ -1559,20 +1554,22 @@ private struct EmulationProfilesSettingsView: View {
                                 Button("Duplicate") {
                                     duplicateProfile(profile.id)
                                 }
-                                Button("Rename") {
-                                    nameEditor = ProfileNameEditor(
-                                        mode: .rename(profile.id),
-                                        name: profile.name
-                                    )
-                                }
-                                if defaultProfileID != profile.id {
-                                    Button("Set as Default") {
-                                        setDefaultProfile(profile.id)
+                                if EmulationProfileStore.isBuiltInProfile(profile.id) {
+                                    Divider()
+                                    Button("Reset to Initial Settings…") {
+                                        pendingResetDefault = true
                                     }
-                                }
-                                Divider()
-                                Button("Delete", role: .destructive) {
-                                    pendingDeleteProfile = profile
+                                } else {
+                                    Button("Rename") {
+                                        nameEditor = ProfileNameEditor(
+                                            mode: .rename(profile.id),
+                                            name: profile.name
+                                        )
+                                    }
+                                    Divider()
+                                    Button("Delete", role: .destructive) {
+                                        pendingDeleteProfile = profile
+                                    }
                                 }
                             } label: {
                                 Image(systemName: "ellipsis.circle")
@@ -1598,14 +1595,20 @@ private struct EmulationProfilesSettingsView: View {
                 }
 
                 Button {
-                    nameEditor = ProfileNameEditor(mode: .create, name: "")
+                    nameEditor = ProfileNameEditor(mode: .createBlank, name: "")
                 } label: {
-                    Label("New Profile from Current Settings", systemImage: "plus.circle.fill")
+                    Label("New Profile", systemImage: "plus.circle.fill")
+                }
+
+                Button {
+                    nameEditor = ProfileNameEditor(mode: .createFromCurrent, name: "")
+                } label: {
+                    Label("New Profile from Current Settings", systemImage: "plus.square.on.square")
                 }
             } header: {
                 Text("Profiles")
             } footer: {
-                Text("Profiles include machine, drives, REU, tape, printer, modem, video and audio settings. Mounted PRG/D64/G64/TAP/CRT media are not stored in a profile.")
+                Text("Default is always available and can be updated or duplicated, but it cannot be renamed or deleted. New Profile starts from clean POKE64 hardware settings and keeps the current Firmware Profile; New Profile from Current Settings captures the current configuration. Mounted PRG/D64/G64/TAP/CRT media are not stored in a profile.")
             }
 
             Section("Profile Scope") {
@@ -1628,8 +1631,10 @@ private struct EmulationProfilesSettingsView: View {
         .sheet(item: $nameEditor) { editor in
             ProfileNameEditorSheet(editor: editor) { mode, name in
                 switch mode {
-                case .create:
-                    createProfile(named: name)
+                case .createBlank:
+                    createBlankProfile(named: name)
+                case .createFromCurrent:
+                    createProfileFromCurrentSettings(named: name)
                 case .rename(let profileID):
                     renameProfile(profileID, to: name)
                 }
@@ -1654,6 +1659,18 @@ private struct EmulationProfilesSettingsView: View {
             }
         } message: {
             Text("This removes the saved configuration and any REU image snapshot stored with the profile. Mounted Library media is not affected.")
+        }
+        .confirmationDialog(
+            "Reset Default to Initial Settings?",
+            isPresented: $pendingResetDefault,
+            titleVisibility: .visible
+        ) {
+            Button("Reset Default", role: .destructive) {
+                resetBuiltInDefault()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This restores Default to POKE64's initial emulator settings and removes its saved REU image. Its Firmware Profile association is preserved.")
         }
         .confirmationDialog(
             "Unsaved Profile Changes",
@@ -1698,15 +1715,24 @@ private struct EmulationProfilesSettingsView: View {
     private func reloadProfiles() {
         profiles = EmulationProfileStore.loadProfiles()
         selectedProfileID = EmulationProfileStore.selectedProfileID
-        defaultProfileID = EmulationProfileStore.defaultProfileID
-        applyDefaultProfileAtLaunch = EmulationProfileStore.applyDefaultProfileAtLaunch
+        powerOnProfileID = EmulationProfileStore.powerOnProfileID
     }
 
-    private func createProfile(named name: String) {
+    private func createBlankProfile(named name: String) {
+        do {
+            let profile = try EmulationProfileStore.createBlankProfile(named: name)
+            reloadProfiles()
+            statusMessage = "Created clean profile \"\(profile.name)\"."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func createProfileFromCurrentSettings(named name: String) {
         do {
             let profile = try EmulationProfileStore.createProfile(named: name)
             reloadProfiles()
-            statusMessage = "Saved \"\(profile.name)\"."
+            statusMessage = "Saved \"\(profile.name)\" from current settings."
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1784,11 +1810,11 @@ private struct EmulationProfilesSettingsView: View {
         }
     }
 
-    private func setDefaultProfile(_ profileID: UUID) {
+    private func resetBuiltInDefault() {
         do {
-            try EmulationProfileStore.setDefaultProfile(profileID)
+            let profile = try EmulationProfileStore.resetBuiltInDefaultToInitialSettings()
             reloadProfiles()
-            statusMessage = "Default profile updated."
+            statusMessage = "Reset \"\(profile.name)\" to initial settings."
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1807,7 +1833,8 @@ private struct EmulationProfilesSettingsView: View {
 
 private struct ProfileNameEditor: Identifiable {
     enum Mode {
-        case create
+        case createBlank
+        case createFromCurrent
         case rename(UUID)
     }
 
@@ -1839,10 +1866,23 @@ private struct ProfileNameEditorSheet: View {
 
     private var title: String {
         switch editor.mode {
-        case .create:
+        case .createBlank:
             return "New Emulation Profile"
+        case .createFromCurrent:
+            return "New Profile from Current Settings"
         case .rename:
             return "Rename Profile"
+        }
+    }
+
+    private var profileDescription: String {
+        switch editor.mode {
+        case .createBlank:
+            return "Starts from POKE64's clean hardware settings and uses the current Firmware Profile. Mounted media is not included."
+        case .createFromCurrent:
+            return "Captures the current emulator configuration. Mounted media remains part of the current session or Library item."
+        case .rename:
+            return "Renaming changes only the profile name."
         }
     }
 
@@ -1856,7 +1896,7 @@ private struct ProfileNameEditorSheet: View {
                 }
 
                 Section {
-                    Text("The profile stores emulator configuration only. Mounted media remains part of the current session or Library item.")
+                    Text(profileDescription)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

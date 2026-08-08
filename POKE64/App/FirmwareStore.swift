@@ -484,6 +484,9 @@ enum FirmwareStore {
             try clearOpenROMsMarker()
         }
         try writeVicerc()
+        if isBootReady {
+            _ = try FirmwareProfileStore.ensureInitialBootProfileIfNeeded()
+        }
     }
 
     static func remove(_ slot: FirmwareSlot) throws {
@@ -548,6 +551,7 @@ enum FirmwareStore {
                 encoding: .utf8
             )
             try writeVicerc()
+            _ = try FirmwareProfileStore.ensureInitialBootProfileIfNeeded()
         } catch {
             for slot in requiredSlots {
                 let destination = try fileURL(for: slot)

@@ -40,6 +40,7 @@ typedef NS_ENUM(NSInteger, C64DatasetteCommand) {
 
 @property (nonatomic, weak, nullable) C64MetalView *videoView;
 @property (nonatomic, copy, nullable) void (^videoGeometryDidChange)(double aspectRatio);
+@property (nonatomic, copy, nullable) void (^videoFrameAspectRatioDidChange)(double aspectRatio);
 @property (nonatomic, copy, nullable) void (^driveLEDStateDidChange)(BOOL active);
 @property (nonatomic, copy, nullable) void (^datasetteLEDStateDidChange)(BOOL active);
 @property (nonatomic, copy, nullable) void (^datasetteStateDidChange)(
@@ -83,6 +84,9 @@ typedef NS_ENUM(NSInteger, C64DatasetteCommand) {
                        telnet:(BOOL)telnet NS_SWIFT_NAME(dialVirtualModem(target:telnet:));
 - (BOOL)hangUpVirtualModem;
 - (BOOL)clearVirtualModemTraffic;
+- (nullable NSData *)serializeState;
+- (BOOL)unserializeState:(NSData *)state;
+- (void)setSuspended:(BOOL)suspended;
 - (BOOL)flushPrinterAtDevice:(NSInteger)device NS_SWIFT_NAME(flushPrinter(atDevice:));
 - (BOOL)snapshotPrinterAtDevice:(NSInteger)device NS_SWIFT_NAME(snapshotPrinter(atDevice:));
 - (BOOL)ejectCartridge;

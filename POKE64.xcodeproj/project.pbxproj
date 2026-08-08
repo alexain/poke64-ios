@@ -26,6 +26,7 @@
 		C469C7BC9C78F50CAE96AEB7 /* FirmwareSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64CD239BF939255B799F19C0 /* FirmwareSettingsView.swift */; };
 		CD4C301C1535EBE53E483172 /* C64MetalView.mm in Sources */ = {isa = PBXBuildFile; fileRef = C3ADE8835878CBE3A1F54492 /* C64MetalView.mm */; };
 		D34583E3E5139A853354474B /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 814D62254F1D37CDE3B0D024 /* AVFoundation.framework */; };
+		D6014CF2B7B9EA28EB7303CA /* PersistentSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AFA771F69FA7C33DEA540A7 /* PersistentSessionStore.swift */; };
 		DEC81CF48A00FB0B67D71208 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 03A8AFEB9042C3C96638CBFB /* Metal.framework */; };
 		E8599DCA042E75FC3EF5B41B /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 1EE2221E50EDD7D2A0ED4DA8 /* LaunchScreen.storyboard */; };
 		FB9ACFE0427D95B7B90E795B /* C64Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = E8ED7C2D830B4B2B639A3CEF /* C64Shaders.metal */; };
@@ -38,6 +39,7 @@
 		1513BD695B536FBA4CFB2901 /* LibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryStore.swift; sourceTree = "<group>"; };
 		1E37D9EF8913203B3D12F8B4 /* EmulationProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulationProfileStore.swift; sourceTree = "<group>"; };
 		1EE2221E50EDD7D2A0ED4DA8 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		2AFA771F69FA7C33DEA540A7 /* PersistentSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistentSessionStore.swift; sourceTree = "<group>"; };
 		357A5131079B5C33C0DC4AA3 /* FirmwareProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirmwareProfileStore.swift; sourceTree = "<group>"; };
 		4822A2213113D2329AC947E2 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		4AA91E3CFCCE98FA078C40FE /* LibretroSession.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LibretroSession.h; sourceTree = "<group>"; };
@@ -150,6 +152,7 @@
 				1EE2221E50EDD7D2A0ED4DA8 /* LaunchScreen.storyboard */,
 				1513BD695B536FBA4CFB2901 /* LibraryStore.swift */,
 				4822A2213113D2329AC947E2 /* LibraryView.swift */,
+				2AFA771F69FA7C33DEA540A7 /* PersistentSessionStore.swift */,
 				87B773761B2C079BD76E63C7 /* POKE64-Bridging-Header.h */,
 				E3A7820C6E392E65D7B9F2F1 /* POKE64App.swift */,
 				AC6353F181131B78CB9E2301 /* SettingsView.swift */,
@@ -279,6 +282,7 @@
 				35B8FC01D0C3237B4CD73CFB /* LibraryView.swift in Sources */,
 				1A11076DF99128E649E8EF6C /* LibretroSession.mm in Sources */,
 				8FA3804304433C32B07BD7BB /* POKE64App.swift in Sources */,
+				D6014CF2B7B9EA28EB7303CA /* PersistentSessionStore.swift in Sources */,
 				61C2704A8480473247FB4687 /* SettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

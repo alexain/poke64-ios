@@ -83,6 +83,7 @@ enum FirmwareProfileStore {
     static let schemaVersion = 1
     static let initializedKey = "poke64.firmwareProfiles.initialized"
     static let activeProfileIDKey = "poke64.firmwareProfiles.activeID"
+    private static let initialAutoPowerOnPendingKey = "poke64.firmwareProfiles.initialAutoPowerOnPending"
 
     static var activeProfileID: UUID? {
         get {
@@ -98,6 +99,14 @@ enum FirmwareProfileStore {
                 UserDefaults.standard.removeObject(forKey: activeProfileIDKey)
             }
         }
+    }
+
+    static var initialAutoPowerOnPending: Bool {
+        UserDefaults.standard.bool(forKey: initialAutoPowerOnPendingKey)
+    }
+
+    static func consumeInitialAutoPowerOnPending() {
+        UserDefaults.standard.removeObject(forKey: initialAutoPowerOnPendingKey)
     }
 
     static var activeProfile: FirmwareProfile? {
@@ -143,6 +152,39 @@ enum FirmwareProfileStore {
             return []
         }
         return archive.profiles
+    }
+
+    @discardableResult
+    static func ensureInitialBootProfileIfNeeded() throws -> FirmwareProfile? {
+        guard FirmwareStore.isBootReady else { return nil }
+
+        var profiles = loadProfiles()
+        if let readyProfile = profiles.first(where: \.isBootReady) {
+            if try EmulationProfileStore.attachFirmwareProfileToBuiltInDefaultIfNeeded(readyProfile.id) {
+                UserDefaults.standard.set(true, forKey: initialAutoPowerOnPendingKey)
+            }
+            return nil
+        }
+
+        let now = Date()
+        let profile = makeProfile(
+            id: UUID(),
+            name: uniqueName(
+                FirmwareStore.detectedProfileName,
+                excluding: nil,
+                profiles: profiles
+            ),
+            createdAt: now,
+            updatedAt: now
+        )
+        try FirmwareStore.copyActiveFirmware(to: try profileDirectory(for: profile.id))
+        profiles.append(profile)
+        try saveProfiles(profiles)
+        activeProfileID = profile.id
+
+        _ = try EmulationProfileStore.attachFirmwareProfileToBuiltInDefaultIfNeeded(profile.id)
+        UserDefaults.standard.set(true, forKey: initialAutoPowerOnPendingKey)
+        return profile
     }
 
     @discardableResult
