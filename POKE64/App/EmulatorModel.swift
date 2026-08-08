@@ -247,6 +247,7 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var videoFrameAspectRatio: CGFloat = 4.0 / 3.0
     @Published private(set) var powerOffVideoAspectRatio: CGFloat = 4.0 / 3.0
     @Published private(set) var powerOffVideoContentAspectRatio: CGFloat = 4.0 / 3.0
+    @Published private(set) var temporaryNoBorderEnabled = false
     @Published var presentedError: String?
     @Published private(set) var joyport1Assignment: JoyportAssignment = .none
     @Published private(set) var joyport2Assignment: JoyportAssignment = .none
@@ -529,6 +530,10 @@ final class EmulatorModel: ObservableObject {
 
     func attach(videoView: C64MetalView) {
         session.videoView = videoView
+    }
+
+    func attach(crtPreviewVideoView: C64MetalView?) {
+        session.videoView?.crtPreviewMirror = crtPreviewVideoView
     }
 
     func captureCurrentVideoFrame() -> Data? {
@@ -880,6 +885,7 @@ final class EmulatorModel: ObservableObject {
         if isRunning {
             session.stop()
             isRunning = false
+            temporaryNoBorderEnabled = false
             clearMediaState(removeTemporaryFiles: true)
         }
 
@@ -1214,6 +1220,7 @@ final class EmulatorModel: ObservableObject {
             session.stop()
         }
         isRunning = false
+        temporaryNoBorderEnabled = false
         isPoweredOn = false
         isPowerTransitioning = false
         UserDefaults.standard.set(false, forKey: Self.machinePowerStateKey)
@@ -1343,8 +1350,23 @@ final class EmulatorModel: ObservableObject {
         status = firmwareReady ? "Core stopped" : "Firmware required"
     }
 
+    func toggleTemporaryNoBorder() {
+        guard isRunning, isPoweredOn, !isPowerTransitioning else { return }
+        let enabled = !temporaryNoBorderEnabled
+        session.setTemporaryMaximumVideoCropEnabled(enabled)
+        temporaryNoBorderEnabled = enabled
+        status = enabled ? "Temporary no-border view" : "Configured borders restored"
+    }
+
+    private func restoreConfiguredVideoCrop() {
+        guard temporaryNoBorderEnabled else { return }
+        session.setTemporaryMaximumVideoCropEnabled(false)
+        temporaryNoBorderEnabled = false
+    }
+
     func softReset() {
         guard isRunning else { return }
+        restoreConfiguredVideoCrop()
         let previousProgram = activeProgram
         activeProgram = nil
         session.softReset()
@@ -1356,6 +1378,7 @@ final class EmulatorModel: ObservableObject {
 
     func hardReset() {
         guard isRunning else { return }
+        restoreConfiguredVideoCrop()
         let previousProgram = activeProgram
         activeProgram = nil
         session.hardReset()

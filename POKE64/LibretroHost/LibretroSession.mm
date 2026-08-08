@@ -240,6 +240,7 @@ struct SessionImpl {
     bool hasDiskControl = false;
     bool hasDiskControlExt = false;
     std::map<std::string, std::string> variables;
+    std::mutex variablesMutex;
     std::atomic<bool> variablesUpdated{false};
     std::string systemDirectory;
     std::string saveDirectory;
@@ -1864,8 +1865,10 @@ static void assignCoreOption(
     const char *coreKey,
     NSString *value
 ) {
+    if (!value) return;
+    std::lock_guard<std::mutex> lock(session->variablesMutex);
     auto found = session->variables.find(coreKey);
-    if (found == session->variables.end() || !value) return;
+    if (found == session->variables.end()) return;
     found->second = value.UTF8String;
 }
 
@@ -2315,20 +2318,23 @@ static bool environmentCallback(unsigned command, void *data) {
 
         case RETRO_ENVIRONMENT_SET_VARIABLES: {
             const retro_variable *variables = static_cast<const retro_variable *>(data);
-            for (size_t index = 0; variables && variables[index].key; ++index) {
-                const char *definition = variables[index].value;
-                if (!definition) continue;
-                const char *separator = std::strstr(definition, "; ");
-                const char *values = separator ? separator + 2 : definition;
-                const char *pipe = std::strchr(values, '|');
-                session->variables[variables[index].key] =
-                    pipe ? std::string(values, static_cast<size_t>(pipe - values)) : std::string(values);
+            {
+                std::lock_guard<std::mutex> lock(session->variablesMutex);
+                for (size_t index = 0; variables && variables[index].key; ++index) {
+                    const char *definition = variables[index].value;
+                    if (!definition) continue;
+                    const char *separator = std::strstr(definition, "; ");
+                    const char *values = separator ? separator + 2 : definition;
+                    const char *pipe = std::strchr(values, '|');
+                    session->variables[variables[index].key] =
+                        pipe ? std::string(values, static_cast<size_t>(pipe - values)) : std::string(values);
+                }
             }
 
             // POKE64 uses a generated system/vice/vicerc for user-imported
             // firmware and applies the matching libretro options here so the
             // core cannot replace the selected drive backend with defaults.
-            session->variables["vice_read_vicerc"] = "enabled";
+            assignCoreOption(session, "vice_read_vicerc", @"enabled");
 
             NSString *storedModel = [NSUserDefaults.standardUserDefaults
                 stringForKey:@"poke64.machineModel"];
@@ -2341,7 +2347,7 @@ static bool environmentCallback(unsigned command, void *data) {
             NSString *selectedModel = [supportedModels containsObject:storedModel]
                 ? storedModel
                 : @"C64 PAL";
-            session->variables["vice_c64_model"] = selectedModel.UTF8String;
+            assignCoreOption(session, "vice_c64_model", selectedModel);
             applyStoredREUOptions(session);
             applyStoredVideoOptions(session);
             applyStoredAudioOptions(session);
@@ -2373,15 +2379,27 @@ static bool environmentCallback(unsigned command, void *data) {
                 return true;
             }
 
-            auto found = session->variables.find(key);
-            variable->value = found == session->variables.end() ? nullptr : found->second.c_str();
+            static thread_local std::string variableValue;
+            {
+                std::lock_guard<std::mutex> lock(session->variablesMutex);
+                auto found = session->variables.find(key);
+                if (found == session->variables.end()) {
+                    variable->value = nullptr;
+                    return true;
+                }
+                variableValue = found->second;
+            }
+            variable->value = variableValue.c_str();
             return true;
         }
 
         case RETRO_ENVIRONMENT_SET_VARIABLE: {
             const retro_variable *variable = static_cast<const retro_variable *>(data);
             if (!variable || !variable->key || !variable->value) return false;
-            session->variables[variable->key] = variable->value;
+            {
+                std::lock_guard<std::mutex> lock(session->variablesMutex);
+                session->variables[variable->key] = variable->value;
+            }
             session->variablesUpdated.store(true, std::memory_order_release);
             return true;
         }
@@ -3039,6 +3057,18 @@ bool SessionImpl::start(const char *path, std::string &error) {
 
 - (void)hardReset {
     _impl->resetModeRequested.store(2, std::memory_order_release);
+}
+
+- (void)setTemporaryMaximumVideoCropEnabled:(BOOL)enabled {
+    NSString *crop = enabled
+        ? @"maximum"
+        : validatedDefaultString(
+            @"poke64.video.crop",
+            @[@"disabled", @"small", @"medium", @"maximum", @"auto"],
+            @"disabled"
+        );
+    assignCoreOption(_impl.get(), "vice_crop", crop);
+    _impl->variablesUpdated.store(true, std::memory_order_release);
 }
 
 - (void)setMousePort:(NSInteger)port {
