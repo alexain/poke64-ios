@@ -68,6 +68,57 @@ def main() -> None:
         "VICE socket implementation for RS232NET",
     )
 
+
+    # POKE64/iOS: the pinned VICE IPv4 resolver uses legacy gethostbyname().
+    # Keep the existing VICE IPv4 address structure and parsing, but resolve
+    # hostnames through getaddrinfo(AF_INET). This is deliberately minimal:
+    # it fixes DNS on Apple networks without changing VICE's socket ABI or
+    # enabling the rest of HAVE_NETWORK.
+    replace_once(
+        socket_source,
+        "#include <string.h>\n",
+        "#include <string.h>\n"
+        "\n"
+        "#if defined(HAVE_RS232NET) && defined(__APPLE__) && defined(__MACH__)\n"
+        "#include <netdb.h>\n"
+        "#endif\n",
+        "POKE64 Apple getaddrinfo declarations",
+    )
+    replace_once(
+        socket_source,
+        "            host_entry = gethostbyname(address_part);\n",
+        """#if defined(HAVE_RS232NET) && defined(__APPLE__) && defined(__MACH__)
+            {
+                struct addrinfo hints;
+                struct addrinfo *results = NULL;
+                struct sockaddr_in *resolved_ipv4;
+
+                memset(&hints, 0, sizeof hints);
+                hints.ai_family = AF_INET;
+                hints.ai_socktype = SOCK_STREAM;
+                hints.ai_protocol = IPPROTO_TCP;
+
+                if (getaddrinfo(address_part, NULL, &hints, &results) == 0
+                        && results != NULL
+                        && results->ai_addr != NULL
+                        && results->ai_addrlen >= sizeof(struct sockaddr_in)) {
+                    resolved_ipv4 = (struct sockaddr_in *)results->ai_addr;
+                    socket_address->address.ipv4.sin_addr = resolved_ipv4->sin_addr;
+                    freeaddrinfo(results);
+                    error = 0;
+                    break;
+                }
+
+                if (results != NULL) {
+                    freeaddrinfo(results);
+                }
+            }
+#endif
+            host_entry = gethostbyname(address_part);
+""",
+        "POKE64 Apple IPv4 DNS resolver",
+    )
+
     # libretro snapshot_stream.c provides fallback ACIA stubs because the
     # cartridge ACIA implementation is normally compiled without RS-232 support.
     # Once RS232NET is enabled, c64acia1.c provides the real implementations;
