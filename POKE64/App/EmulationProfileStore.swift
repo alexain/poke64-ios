@@ -27,6 +27,8 @@ struct EmulationProfileSnapshot: Codable, Equatable {
     var videoSaturation: Int
     var videoGamma: Int
     var videoTint: Int
+    var crtFilterEnabled: Bool?
+    var crtPresetID: UUID?
 
     var sidEngine: String
     var sidModel: String
@@ -131,6 +133,12 @@ struct EmulationProfileSnapshot: Codable, Equatable {
                 key: C64VideoSettings.tintKey,
                 defaultValue: C64VideoSettings.defaultTint
             ),
+            crtFilterEnabled: boolValue(
+                defaults,
+                key: C64CRTSettings.enabledKey,
+                defaultValue: C64CRTSettings.defaultEnabled
+            ),
+            crtPresetID: C64CRTPresetStore.activePresetID,
             sidEngine: defaults.string(forKey: C64SIDEngine.defaultsKey)
                 ?? C64SIDEngine.defaultValue.rawValue,
             sidModel: defaults.string(forKey: C64SIDModel.defaultsKey)
@@ -210,6 +218,8 @@ struct EmulationProfileSnapshot: Codable, Equatable {
             videoSaturation: C64VideoSettings.defaultSaturation,
             videoGamma: C64VideoSettings.defaultGamma,
             videoTint: C64VideoSettings.defaultTint,
+            crtFilterEnabled: C64CRTSettings.defaultEnabled,
+            crtPresetID: C64CRTPresetStore.builtInPresetID,
             sidEngine: C64SIDEngine.defaultValue.rawValue,
             sidModel: C64SIDModel.defaultValue.rawValue,
             reSIDSampling: C64ReSIDSampling.defaultValue.rawValue,
@@ -225,6 +235,18 @@ struct EmulationProfileSnapshot: Codable, Equatable {
             virtualModemEnabled: C64VirtualModemSettings.defaultEnabled,
             virtualModemBaud: C64VirtualModemSettings.defaultBaud
         )
+    }
+
+    func matchesCurrentConfiguration() -> Bool {
+        let current = Self.current
+        var normalized = self
+        if normalized.crtFilterEnabled == nil {
+            normalized.crtFilterEnabled = current.crtFilterEnabled
+        }
+        if normalized.crtPresetID == nil {
+            normalized.crtPresetID = current.crtPresetID
+        }
+        return normalized == current
     }
 
     var machineTitle: String {
@@ -276,6 +298,12 @@ struct EmulationProfileSnapshot: Codable, Equatable {
         defaults.set(videoSaturation, forKey: C64VideoSettings.saturationKey)
         defaults.set(videoGamma, forKey: C64VideoSettings.gammaKey)
         defaults.set(videoTint, forKey: C64VideoSettings.tintKey)
+        if let crtFilterEnabled {
+            defaults.set(crtFilterEnabled, forKey: C64CRTSettings.enabledKey)
+        }
+        if let crtPresetID {
+            _ = C64CRTPresetStore.applyPreset(crtPresetID)
+        }
 
         defaults.set(sidEngine, forKey: C64SIDEngine.defaultsKey)
         defaults.set(sidModel, forKey: C64SIDModel.defaultsKey)
@@ -620,6 +648,13 @@ enum EmulationProfileStore {
             .sorted()
     }
 
+    static func profileNamesReferencingCRTPreset(_ crtPresetID: UUID) -> [String] {
+        loadProfiles()
+            .filter { $0.settings.crtPresetID == crtPresetID }
+            .map(\.name)
+            .sorted()
+    }
+
     static func applyProfile(_ profileID: UUID) throws {
         guard let profile = loadProfiles().first(where: { $0.id == profileID }) else {
             throw EmulationProfileStoreError.profileNotFound
@@ -658,7 +693,7 @@ enum EmulationProfileStore {
     }
 
     static func matchesCurrentConfiguration(_ profile: EmulationProfile) -> Bool {
-        guard profile.settings == .current else { return false }
+        guard profile.settings.matchesCurrentConfiguration() else { return false }
         guard let firmwareProfileID = profile.firmwareProfileID else { return true }
         return FirmwareProfileStore.activeProfileID == firmwareProfileID
             && !FirmwareProfileStore.activeProfileIsModified

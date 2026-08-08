@@ -94,6 +94,8 @@ typedef NS_ENUM(NSInteger, C64DatasetteCommand) {
 - (void)stop;
 - (void)softReset;
 - (void)hardReset;
+- (void)setTemporaryMaximumVideoCropEnabled:(BOOL)enabled
+    NS_SWIFT_NAME(setTemporaryMaximumVideoCropEnabled(_:));
 - (void)setMousePort:(NSInteger)port;
 - (void)setJoypadMask:(uint32_t)mask forC64Port:(NSInteger)port;
 - (void)addMouseDeltaX:(NSInteger)deltaX deltaY:(NSInteger)deltaY;
