@@ -4,6 +4,41 @@
 
 No unreleased changes yet.
 
+## 0.7.6 — 2026-08-08
+
+### Added
+
+- Added global Emulation Profiles for machine, drives, REU, datasette, printer, modem, video/audio and linked Firmware Profile configuration without binding mounted media to the profile.
+- Added shared Firmware Profiles so ROM sets are stored once and referenced by Emulation Profiles instead of being duplicated.
+- Added a permanent editable `Default` Emulation Profile that cannot be renamed or deleted, plus clean profile creation and reset-to-initial-settings support.
+- Added an optional Power-on Profile setting: keep the current profile across a C64 power cycle or apply a selected profile on the next Power ON.
+- Added automatic Previous Session persistence using VICE/libretro serialization, periodic/lifecycle checkpoints and cold-launch restoration of machine state and session media.
+- Added a real C64 Power ON/OFF control with persistent OFF state and a CRT-style collapse/static shutdown effect.
+- Added first-run firmware onboarding that links the first complete ROM set to `Default` and automatically powers on the C64 after setup.
+
+### Changed
+
+- Changed profile semantics so the current profile is the normal persistent configuration; the previous default-at-app-launch behavior is no longer used.
+- Changed new installations to start with only the built-in `Default` Emulation Profile instead of pre-populating specialized REU and BBS/modem profiles.
+- Changed internal core restarts caused by Settings updates to show only a minimal spinner instead of replaying the full startup presentation.
+- Improved the application launch presentation with the POKE64 icon and aligned the Power control with the rest of the toolbar.
+- Refined C64 Power OFF timing and matched the powered-off CRT static area to the active C64 framebuffer geometry.
+- Preserved ordinary auto-resume independently from the C64 Power switch: deliberate Power OFF invalidates the Previous Session checkpoint, while app background/termination can restore it.
+
+### Fixed
+
+- Fixed Configure Firmware on first run opening Profiles instead of Firmware / ROMs.
+- Fixed first-run firmware/profile ordering so the first valid ROM set is associated with `Default` before the initial boot.
+- Fixed stale or missing profile references by falling back safely to `Default`.
+- Fixed Power-on Profile references when a selected user profile is deleted by returning to `Keep Current Profile`.
+
+### Documentation
+
+- Updated README, roadmap, VICE revision notes and version metadata for the v0.7.6 checkpoint.
+- Kept the README feature list focused on major user-facing capabilities; implementation-level release details remain in this changelog.
+- Added roadmap research for physical Commodore hardware bridges and C64 Reloaded MK2 development/validation workflows.
+- Clarified that the MIT source-code license does not grant use of the POKE64 name, logo, icon, banner or project identity for derivative applications.
+
 ## 0.7.5 — 2026-08-07
 
 ### Added
