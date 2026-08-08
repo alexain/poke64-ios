@@ -40,6 +40,7 @@ typedef NS_ENUM(NSInteger, C64DatasetteCommand) {
 
 @property (nonatomic, weak, nullable) C64MetalView *videoView;
 @property (nonatomic, copy, nullable) void (^videoGeometryDidChange)(double aspectRatio);
+@property (nonatomic, copy, nullable) void (^videoFrameAspectRatioDidChange)(double aspectRatio);
 @property (nonatomic, copy, nullable) void (^driveLEDStateDidChange)(BOOL active);
 @property (nonatomic, copy, nullable) void (^datasetteLEDStateDidChange)(BOOL active);
 @property (nonatomic, copy, nullable) void (^datasetteStateDidChange)(

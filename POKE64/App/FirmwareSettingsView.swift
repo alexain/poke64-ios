@@ -25,6 +25,7 @@ private enum FirmwareProfileNamePrompt: Identifiable {
 }
 
 struct FirmwareSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
     @State private var statuses = FirmwareStore.statuses
     @State private var firmwareProfiles = FirmwareProfileStore.loadProfiles()
     @State private var pendingSlot: FirmwareSlot?
@@ -513,5 +514,11 @@ struct FirmwareSettingsView: View {
     private func refresh() {
         statuses = FirmwareStore.statuses
         firmwareProfiles = FirmwareProfileStore.loadProfiles()
+
+        if FirmwareProfileStore.initialAutoPowerOnPending {
+            DispatchQueue.main.async {
+                dismiss()
+            }
+        }
     }
 }

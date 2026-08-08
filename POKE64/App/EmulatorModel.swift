@@ -239,9 +239,14 @@ struct TemporaryMediaInfo: Identifiable, Equatable {
 final class EmulatorModel: ObservableObject {
     @Published private(set) var status = "Core not started"
     @Published private(set) var isRunning = false
+    @Published private(set) var isPoweredOn = false
+    @Published private(set) var isPowerTransitioning = false
     @Published private(set) var firmwareReady = false
     @Published private(set) var isStarting = false
     @Published private(set) var videoAspectRatio: CGFloat = 4.0 / 3.0
+    @Published private(set) var videoFrameAspectRatio: CGFloat = 4.0 / 3.0
+    @Published private(set) var powerOffVideoAspectRatio: CGFloat = 4.0 / 3.0
+    @Published private(set) var powerOffVideoContentAspectRatio: CGFloat = 4.0 / 3.0
     @Published var presentedError: String?
     @Published private(set) var joyport1Assignment: JoyportAssignment = .none
     @Published private(set) var joyport2Assignment: JoyportAssignment = .none
@@ -327,11 +332,53 @@ final class EmulatorModel: ObservableObject {
     private var persistentCheckpointTask: Task<Void, Never>?
     private var persistentSessionRestoreAttempted = false
 
+    private static let machinePowerStateKey = "poke64.machine.poweredOn"
+    private static let machinePowerAspectRatioKey = "poke64.machine.powerOffAspectRatio"
+    private static let machinePowerContentAspectRatioKey = "poke64.machine.powerOffContentAspectRatio"
+
     init() {
+        let hasStoredPowerState = UserDefaults.standard.object(forKey: Self.machinePowerStateKey) != nil
+        if hasStoredPowerState {
+            isPoweredOn = UserDefaults.standard.bool(forKey: Self.machinePowerStateKey)
+        }
+        let storedPowerOffAspectRatio = UserDefaults.standard.double(forKey: Self.machinePowerAspectRatioKey)
+        if storedPowerOffAspectRatio.isFinite, storedPowerOffAspectRatio > 0 {
+            powerOffVideoAspectRatio = CGFloat(storedPowerOffAspectRatio)
+        }
+        let storedPowerOffContentAspectRatio = UserDefaults.standard.double(
+            forKey: Self.machinePowerContentAspectRatioKey
+        )
+        if storedPowerOffContentAspectRatio.isFinite, storedPowerOffContentAspectRatio > 0 {
+            videoFrameAspectRatio = CGFloat(storedPowerOffContentAspectRatio)
+            powerOffVideoContentAspectRatio = CGFloat(storedPowerOffContentAspectRatio)
+        }
+
         session.videoGeometryDidChange = { [weak self] aspectRatio in
             guard aspectRatio.isFinite, aspectRatio > 0 else { return }
             Task { @MainActor in
-                self?.videoAspectRatio = CGFloat(aspectRatio)
+                guard let self else { return }
+                self.videoAspectRatio = CGFloat(aspectRatio)
+                if !self.isPowerTransitioning {
+                    self.powerOffVideoAspectRatio = CGFloat(aspectRatio)
+                    UserDefaults.standard.set(
+                        aspectRatio,
+                        forKey: Self.machinePowerAspectRatioKey
+                    )
+                }
+            }
+        }
+        session.videoFrameAspectRatioDidChange = { [weak self] aspectRatio in
+            guard aspectRatio.isFinite, aspectRatio > 0 else { return }
+            Task { @MainActor in
+                guard let self else { return }
+                self.videoFrameAspectRatio = CGFloat(aspectRatio)
+                if !self.isPowerTransitioning {
+                    self.powerOffVideoContentAspectRatio = CGFloat(aspectRatio)
+                    UserDefaults.standard.set(
+                        aspectRatio,
+                        forKey: Self.machinePowerContentAspectRatioKey
+                    )
+                }
             }
         }
         session.driveLEDStateDidChange = { [weak self] active in
@@ -404,6 +451,13 @@ final class EmulatorModel: ObservableObject {
         FirmwareStore.prepareDirectoriesAndConfiguration()
         refreshFirmwareState()
         refreshDriveConfigurationState()
+        if !hasStoredPowerState {
+            // A genuinely new installation waits at the powered-off CRT until
+            // firmware is configured. Upgrades that already have valid ROMs keep
+            // the historical start-on-launch behavior.
+            isPoweredOn = firmwareReady
+            UserDefaults.standard.set(isPoweredOn, forKey: Self.machinePowerStateKey)
+        }
         if !firmwareReady {
             status = "Firmware required"
         }
@@ -485,14 +539,22 @@ final class EmulatorModel: ObservableObject {
         guard !didAttemptAutomaticStart else { return }
         didAttemptAutomaticStart = true
 
-        if await restorePersistentSessionIfAvailable() {
+        if !isPoweredOn,
+           firmwareReady,
+           FirmwareProfileStore.initialAutoPowerOnPending {
+            FirmwareProfileStore.consumeInitialAutoPowerOnPending()
+            await powerOn()
             return
         }
 
-        do {
-            _ = try EmulationProfileStore.applyDefaultProfileAtLaunchIfEnabled()
-        } catch {
-            present(error)
+        guard isPoweredOn else {
+            PersistentSessionStore.clear()
+            status = firmwareReady ? "C64 powered off" : "Firmware required"
+            return
+        }
+
+        if await restorePersistentSessionIfAvailable() {
+            return
         }
 
         refreshFirmwareState()
@@ -803,6 +865,14 @@ final class EmulatorModel: ObservableObject {
         refreshFirmwareState()
         refreshDriveConfigurationState()
 
+        if !isPoweredOn,
+           firmwareReady,
+           FirmwareProfileStore.initialAutoPowerOnPending {
+            FirmwareProfileStore.consumeInitialAutoPowerOnPending()
+            await powerOn()
+            return
+        }
+
         guard FirmwareStore.configurationFingerprint != previousFirmwareFingerprint else {
             return
         }
@@ -811,6 +881,12 @@ final class EmulatorModel: ObservableObject {
             session.stop()
             isRunning = false
             clearMediaState(removeTemporaryFiles: true)
+        }
+
+        guard isPoweredOn else {
+            isStarting = false
+            status = firmwareReady ? "C64 powered off" : "Firmware required"
+            return
         }
 
         if firmwareReady {
@@ -1103,6 +1179,155 @@ final class EmulatorModel: ObservableObject {
             libraryItemID: descriptor.libraryItemID,
             addedLibraryItemID: nil
         )
+    }
+
+    func powerOff() async {
+        guard isPoweredOn || isRunning else { return }
+        guard !isPowerTransitioning else { return }
+
+        persistentCheckpointTask?.cancel()
+        persistentCheckpointTask = nil
+        PersistentSessionStore.clear()
+
+        // Keep the final video frame and its exact geometry stable while the UI
+        // performs the CRT power-down collapse.  VICE may report a fallback
+        // geometry while shutting down, which must not resize the powered-off CRT.
+        powerOffVideoAspectRatio = videoAspectRatio
+        powerOffVideoContentAspectRatio = videoFrameAspectRatio
+        UserDefaults.standard.set(
+            Double(powerOffVideoAspectRatio),
+            forKey: Self.machinePowerAspectRatioKey
+        )
+        UserDefaults.standard.set(
+            Double(powerOffVideoContentAspectRatio),
+            forKey: Self.machinePowerContentAspectRatioKey
+        )
+        isPowerTransitioning = true
+        status = "Powering off C64…"
+        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(2200))
+
+        let previousProgram = activeProgram
+        activeProgram = nil
+
+        if isRunning {
+            session.stop()
+        }
+        isRunning = false
+        isPoweredOn = false
+        isPowerTransitioning = false
+        UserDefaults.standard.set(false, forKey: Self.machinePowerStateKey)
+
+        driveLEDOffTask?.cancel()
+        driveLEDOffTask = nil
+        drive8ActivityLEDOn = false
+        datasetteTelemetryAvailable = false
+        datasetteMotorOn = false
+        datasetteActivityLEDOn = false
+        virtualModemTelemetryAvailable = false
+        virtualModemConnected = false
+        virtualModemReady = false
+        virtualModemCommandMode = true
+        virtualModemEndpoint = ""
+        virtualModemLastResult = ""
+        virtualModemTraceBytes = []
+        virtualModemTraceDirections = []
+
+        if let previousProgram {
+            removeTemporaryFileIfUnused(previousProgram)
+        }
+        status = "C64 powered off"
+    }
+
+    func powerOn() async {
+        guard !isRunning else {
+            if !isPoweredOn {
+                isPoweredOn = true
+                UserDefaults.standard.set(true, forKey: Self.machinePowerStateKey)
+            }
+            return
+        }
+
+        presentedError = nil
+        isPoweredOn = true
+        UserDefaults.standard.set(true, forKey: Self.machinePowerStateKey)
+        PersistentSessionStore.clear()
+
+        do {
+            _ = try EmulationProfileStore.applyPowerOnProfileIfConfigured()
+        } catch {
+            present(error)
+            return
+        }
+
+        refreshFirmwareState()
+        refreshDriveConfigurationState()
+        guard firmwareReady else {
+            status = "Import BASIC, KERNAL and character ROMs"
+            return
+        }
+
+        isStarting = true
+        isPowerTransitioning = true
+        status = "Powering on C64…"
+        defer {
+            isStarting = false
+            isPowerTransitioning = false
+        }
+
+        await Task.yield()
+
+        guard session.startWithoutContent() else {
+            let message = session.lastErrorMessage ?? "Unable to start the core"
+            status = Self.errorSummary(message)
+            presentedError = message
+            return
+        }
+
+        do {
+            try reattachMountedMediaAfterPowerOn()
+            isRunning = true
+            syncInputConfiguration()
+            startPersistentCheckpointLoop()
+            status = "C64 powered on"
+        } catch {
+            session.stop()
+            isRunning = false
+            present(error)
+        }
+    }
+
+    func togglePower() async {
+        if isPoweredOn {
+            await powerOff()
+        } else {
+            await powerOn()
+        }
+    }
+
+    private func reattachMountedMediaAfterPowerOn() throws {
+        for unit in mountedDisks.keys.sorted() {
+            guard let media = mountedDisks[unit] else { continue }
+            guard session.attachDisk(at: media.url, driveUnit: unit) else {
+                throw EmulatorModelError.coreFailure(
+                    session.lastErrorMessage ?? "Unable to restore Drive \(unit) after power on"
+                )
+            }
+        }
+
+        if let mountedTape, !session.attachTape(at: mountedTape.url) {
+            throw EmulatorModelError.coreFailure(
+                session.lastErrorMessage ?? "Unable to restore the mounted tape after power on"
+            )
+        }
+
+        if let mountedCartridge, !session.attachCartridge(at: mountedCartridge.url) {
+            throw EmulatorModelError.coreFailure(
+                session.lastErrorMessage ?? "Unable to restore the mounted cartridge after power on"
+            )
+        }
+
+        resetDatasettePresentation(for: mountedTape)
     }
 
     func stop() {

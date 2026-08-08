@@ -227,19 +227,6 @@ struct EmulationProfileSnapshot: Codable, Equatable {
         )
     }
 
-    static var reu512Preset: EmulationProfileSnapshot {
-        var snapshot = factoryDefault
-        snapshot.reuSize = C64REUSize.kb512.rawValue
-        return snapshot
-    }
-
-    static var bbsPreset: EmulationProfileSnapshot {
-        var snapshot = factoryDefault
-        snapshot.virtualModemEnabled = true
-        snapshot.virtualModemBaud = 9600
-        return snapshot
-    }
-
     var machineTitle: String {
         C64MachineModel(rawValue: machineModel)?.title ?? machineModel
     }
@@ -339,6 +326,7 @@ enum EmulationProfileStoreError: LocalizedError {
     case profileNotFound
     case reuImageUnavailable(String)
     case firmwareProfileUnavailable
+    case builtInProfileProtected
     case storageFailure(String)
 
     var errorDescription: String? {
@@ -351,6 +339,8 @@ enum EmulationProfileStoreError: LocalizedError {
             return "The REU image stored with this profile is unavailable: \(filename)."
         case .firmwareProfileUnavailable:
             return "The firmware profile associated with this emulation profile is unavailable."
+        case .builtInProfileProtected:
+            return "The built-in Default profile cannot be renamed or deleted."
         case .storageFailure(let message):
             return "The emulation profile could not be saved: \(message)"
         }
@@ -367,9 +357,13 @@ enum EmulationProfileStore {
     static let schemaVersion = 1
     static let initializedKey = "poke64.emulationProfiles.initialized"
     static let selectedProfileIDKey = "poke64.emulationProfiles.selectedID"
-    static let defaultProfileIDKey = "poke64.emulationProfiles.defaultID"
-    static let applyDefaultProfileAtLaunchKey = "poke64.emulationProfiles.applyDefaultAtLaunch"
+    static let powerOnProfileIDKey = "poke64.emulationProfiles.powerOnProfileID"
     static let firmwareReferenceMigrationKey = "poke64.emulationProfiles.firmwareReferenceMigration.v1"
+    static let builtInDefaultProfileID = UUID(uuidString: "00000000-0000-4000-8000-000000000064")!
+
+    // Legacy keys from the earlier startup-default implementation.
+    private static let legacyDefaultProfileIDKey = "poke64.emulationProfiles.defaultID"
+    private static let legacyApplyDefaultProfileAtLaunchKey = "poke64.emulationProfiles.applyDefaultAtLaunch"
 
     static var selectedProfileID: UUID? {
         get {
@@ -387,25 +381,24 @@ enum EmulationProfileStore {
         }
     }
 
-    static var defaultProfileID: UUID? {
+    static var powerOnProfileID: UUID? {
         get {
-            guard let raw = UserDefaults.standard.string(forKey: defaultProfileIDKey) else {
+            guard let raw = UserDefaults.standard.string(forKey: powerOnProfileIDKey) else {
                 return nil
             }
             return UUID(uuidString: raw)
         }
         set {
             if let newValue {
-                UserDefaults.standard.set(newValue.uuidString, forKey: defaultProfileIDKey)
+                UserDefaults.standard.set(newValue.uuidString, forKey: powerOnProfileIDKey)
             } else {
-                UserDefaults.standard.removeObject(forKey: defaultProfileIDKey)
+                UserDefaults.standard.removeObject(forKey: powerOnProfileIDKey)
             }
         }
     }
 
-    static var applyDefaultProfileAtLaunch: Bool {
-        get { UserDefaults.standard.bool(forKey: applyDefaultProfileAtLaunchKey) }
-        set { UserDefaults.standard.set(newValue, forKey: applyDefaultProfileAtLaunchKey) }
+    static func isBuiltInProfile(_ profileID: UUID) -> Bool {
+        profileID == builtInDefaultProfileID
     }
 
     static func loadProfiles() -> [EmulationProfile] {
@@ -418,8 +411,16 @@ enum EmulationProfileStore {
 
         var profiles = archive.profiles
         migrateFirmwareReferencesIfNeeded(&profiles)
-        if defaultProfileID == nil, let first = profiles.first {
-            defaultProfileID = first.id
+        ensureBuiltInDefaultProfile(in: &profiles)
+        clearLegacyStartupDefaultSettings()
+
+        if selectedProfileID == nil
+            || !profiles.contains(where: { $0.id == selectedProfileID }) {
+            selectedProfileID = builtInDefaultProfileID
+        }
+        if let powerOnProfileID,
+           !profiles.contains(where: { $0.id == powerOnProfileID }) {
+            self.powerOnProfileID = nil
         }
         return profiles
     }
@@ -446,6 +447,25 @@ enum EmulationProfileStore {
     }
 
     @discardableResult
+    static func createBlankProfile(named rawName: String) throws -> EmulationProfile {
+        let name = try validatedName(rawName)
+        var profiles = loadProfiles()
+        let now = Date()
+        let profile = EmulationProfile(
+            id: UUID(),
+            name: uniqueName(name, excluding: nil, profiles: profiles),
+            settings: .factoryDefault,
+            firmwareProfileID: FirmwareProfileStore.activeProfileID,
+            createdAt: now,
+            updatedAt: now
+        )
+
+        profiles.append(profile)
+        try saveProfiles(profiles)
+        return profile
+    }
+
+    @discardableResult
     static func updateProfile(_ profileID: UUID) throws -> EmulationProfile {
         var profiles = loadProfiles()
         guard let index = profiles.firstIndex(where: { $0.id == profileID }) else {
@@ -467,6 +487,9 @@ enum EmulationProfileStore {
         var profiles = loadProfiles()
         guard let index = profiles.firstIndex(where: { $0.id == profileID }) else {
             throw EmulationProfileStoreError.profileNotFound
+        }
+        guard !isBuiltInProfile(profileID) else {
+            throw EmulationProfileStoreError.builtInProfileProtected
         }
 
         profiles[index].name = uniqueName(name, excluding: profileID, profiles: profiles)
@@ -509,40 +532,85 @@ enum EmulationProfileStore {
     }
 
     static func deleteProfile(_ profileID: UUID) throws {
+        guard !isBuiltInProfile(profileID) else {
+            throw EmulationProfileStoreError.builtInProfileProtected
+        }
+
         var profiles = loadProfiles()
         guard profiles.contains(where: { $0.id == profileID }) else {
             throw EmulationProfileStoreError.profileNotFound
         }
+        let deletedSelectedProfile = selectedProfileID == profileID
         profiles.removeAll { $0.id == profileID }
         try saveProfiles(profiles)
 
         let assetURL = try reuAssetURL(for: profileID)
         try? FileManager.default.removeItem(at: assetURL)
 
-        if selectedProfileID == profileID {
-            selectedProfileID = nil
+        if powerOnProfileID == profileID {
+            powerOnProfileID = nil
         }
-        if defaultProfileID == profileID {
-            defaultProfileID = profiles.first?.id
+        if deletedSelectedProfile {
+            try applyProfile(builtInDefaultProfileID)
         }
-    }
-
-    static func setDefaultProfile(_ profileID: UUID) throws {
-        guard loadProfiles().contains(where: { $0.id == profileID }) else {
-            throw EmulationProfileStoreError.profileNotFound
-        }
-        defaultProfileID = profileID
     }
 
     @discardableResult
-    static func applyDefaultProfileAtLaunchIfEnabled() throws -> Bool {
-        guard applyDefaultProfileAtLaunch else { return false }
+    static func applyPowerOnProfileIfConfigured() throws -> Bool {
+        guard let powerOnProfileID else { return false }
         let profiles = loadProfiles()
-        guard let defaultProfileID, profiles.contains(where: { $0.id == defaultProfileID }) else {
+        guard profiles.contains(where: { $0.id == powerOnProfileID }) else {
+            self.powerOnProfileID = nil
             return false
         }
-        try applyProfile(defaultProfileID)
+        try applyProfile(powerOnProfileID)
         return true
+    }
+
+    @discardableResult
+    static func attachFirmwareProfileToBuiltInDefaultIfNeeded(_ firmwareProfileID: UUID) throws -> Bool {
+        let firmwareProfiles = FirmwareProfileStore.loadProfiles()
+        guard firmwareProfiles.contains(where: { $0.id == firmwareProfileID && $0.isBootReady }) else {
+            throw EmulationProfileStoreError.firmwareProfileUnavailable
+        }
+
+        var profiles = loadProfiles()
+        guard let index = profiles.firstIndex(where: { $0.id == builtInDefaultProfileID }) else {
+            throw EmulationProfileStoreError.profileNotFound
+        }
+
+        if let currentFirmwareID = profiles[index].firmwareProfileID,
+           firmwareProfiles.contains(where: { $0.id == currentFirmwareID && $0.isBootReady }) {
+            return false
+        }
+
+        profiles[index].firmwareProfileID = firmwareProfileID
+        profiles[index].updatedAt = Date()
+        try saveProfiles(profiles)
+        return true
+    }
+
+    @discardableResult
+    static func resetBuiltInDefaultToInitialSettings() throws -> EmulationProfile {
+        var profiles = loadProfiles()
+        guard let index = profiles.firstIndex(where: { $0.id == builtInDefaultProfileID }) else {
+            throw EmulationProfileStoreError.profileNotFound
+        }
+
+        let retainedFirmwareProfileID = profiles[index].firmwareProfileID
+        profiles[index].settings = .factoryDefault
+        profiles[index].firmwareProfileID = retainedFirmwareProfileID
+        profiles[index].updatedAt = Date()
+
+        if let assetURL = try? reuAssetURL(for: builtInDefaultProfileID) {
+            try? FileManager.default.removeItem(at: assetURL)
+        }
+        try saveProfiles(profiles)
+
+        if selectedProfileID == builtInDefaultProfileID {
+            try applyProfile(builtInDefaultProfileID)
+        }
+        return profiles[index]
     }
 
     static func profileNamesReferencingFirmwareProfile(_ firmwareProfileID: UUID) -> [String] {
@@ -603,41 +671,54 @@ enum EmulationProfileStore {
         FirmwareProfileStore.prepareIfNeeded()
         let now = Date()
         let profiles = [
-            EmulationProfile(
-                id: UUID(),
-                name: "C64 Standard",
-                settings: .factoryDefault,
-                firmwareProfileID: FirmwareProfileStore.activeProfileID,
-                createdAt: now,
-                updatedAt: now
-            ),
-            EmulationProfile(
-                id: UUID(),
-                name: "C64 + REU 512K",
-                settings: .reu512Preset,
-                firmwareProfileID: FirmwareProfileStore.activeProfileID,
-                createdAt: now,
-                updatedAt: now
-            ),
-            EmulationProfile(
-                id: UUID(),
-                name: "BBS / Modem",
-                settings: .bbsPreset,
-                firmwareProfileID: FirmwareProfileStore.activeProfileID,
-                createdAt: now,
-                updatedAt: now
-            )
+            makeBuiltInDefaultProfile(createdAt: now)
         ]
 
         let archive = EmulationProfileArchive(version: schemaVersion, profiles: profiles)
         if let data = try? JSONEncoder().encode(archive) {
             defaults.set(data, forKey: profilesKey)
         }
-        if let first = profiles.first {
-            defaultProfileID = first.id
-        }
+        selectedProfileID = builtInDefaultProfileID
+        clearLegacyStartupDefaultSettings()
         defaults.set(true, forKey: initializedKey)
         defaults.set(true, forKey: firmwareReferenceMigrationKey)
+    }
+
+    private static func makeBuiltInDefaultProfile(
+        createdAt: Date = Date(),
+        updatedAt: Date? = nil
+    ) -> EmulationProfile {
+        EmulationProfile(
+            id: builtInDefaultProfileID,
+            name: "Default",
+            settings: .factoryDefault,
+            firmwareProfileID: FirmwareProfileStore.activeProfileID,
+            createdAt: createdAt,
+            updatedAt: updatedAt ?? createdAt
+        )
+    }
+
+    private static func ensureBuiltInDefaultProfile(in profiles: inout [EmulationProfile]) {
+        if let index = profiles.firstIndex(where: { $0.id == builtInDefaultProfileID }) {
+            var existing = profiles.remove(at: index)
+            let needsSave = index != 0 || existing.name != "Default"
+            existing.name = "Default"
+            profiles.insert(existing, at: 0)
+            if needsSave {
+                try? saveProfiles(profiles)
+            }
+            return
+        }
+
+        FirmwareProfileStore.prepareIfNeeded()
+        profiles.insert(makeBuiltInDefaultProfile(), at: 0)
+        try? saveProfiles(profiles)
+    }
+
+    private static func clearLegacyStartupDefaultSettings() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: legacyDefaultProfileIDKey)
+        defaults.removeObject(forKey: legacyApplyDefaultProfileAtLaunchKey)
     }
 
     private static func migrateFirmwareReferencesIfNeeded(_ profiles: inout [EmulationProfile]) {

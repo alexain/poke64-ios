@@ -248,6 +248,8 @@ struct SessionImpl {
     double fps = 50.0;
     double sampleRate = 48000.0;
     AudioRingBuffer audioRing;
+    std::atomic<unsigned> lastVideoFrameWidth{0};
+    std::atomic<unsigned> lastVideoFrameHeight{0};
     AVAudioEngine *audioEngine = nil;
     AVAudioSourceNode *audioSource = nil;
     std::mutex diagnosticMutex;
@@ -317,6 +319,31 @@ struct SessionImpl {
 
         LibretroSession *session = owner;
         void (^callback)(double) = session.videoGeometryDidChange;
+        if (!callback) return;
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            callback(aspectRatio);
+        });
+    }
+
+    void updateVideoFrameAspectRatio(unsigned width, unsigned height) {
+        if (width == 0 || height == 0) return;
+
+        const unsigned previousWidth = lastVideoFrameWidth.exchange(
+            width,
+            std::memory_order_acq_rel
+        );
+        const unsigned previousHeight = lastVideoFrameHeight.exchange(
+            height,
+            std::memory_order_acq_rel
+        );
+        if (previousWidth == width && previousHeight == height) return;
+
+        const double aspectRatio = static_cast<double>(width) / static_cast<double>(height);
+        if (!std::isfinite(aspectRatio) || aspectRatio < 0.5 || aspectRatio > 3.0) return;
+
+        LibretroSession *session = owner;
+        void (^callback)(double) = session.videoFrameAspectRatioDidChange;
         if (!callback) return;
 
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -2455,6 +2482,7 @@ static bool environmentCallback(unsigned command, void *data) {
 static void videoCallback(const void *data, unsigned width, unsigned height, size_t pitch) {
     SessionImpl *session = gSession;
     if (!session || !data) return;
+    session->updateVideoFrameAspectRatio(width, height);
     C64MetalView *view = session->videoView;
     [view submitFrame:data
                 width:width

@@ -40,6 +40,7 @@ struct ContentView: View {
     @State private var emulationProfiles = EmulationProfileStore.loadProfiles()
     @State private var selectedEmulationProfileID = EmulationProfileStore.selectedProfileID
     @State private var pendingToolbarProfileSwitchID: UUID?
+    @State private var hasCompletedInitialStartup = false
 
     var body: some View {
         ZStack {
@@ -107,7 +108,9 @@ struct ContentView: View {
                     .zIndex(90)
             }
 
-            if emulator.isStarting {
+            if emulator.isStarting
+                && !emulator.isPowerTransitioning
+                && !hasCompletedInitialStartup {
                 bootOverlay
                     .transition(.opacity)
                     .zIndex(100)
@@ -119,6 +122,11 @@ struct ContentView: View {
         .onAppear {
             toolbarHeight = toolbarCollapsed ? 0 : 62
             reloadToolbarProfiles()
+        }
+        .onChange(of: emulator.isRunning) { _, running in
+            if running {
+                hasCompletedInitialStartup = true
+            }
         }
         .onChange(of: emulator.mountedTape?.id) { previousID, currentID in
             guard previousID != currentID else { return }
@@ -140,6 +148,14 @@ struct ContentView: View {
             if !enabled {
                 showVirtualModemControls = false
                 virtualModemActivityPulse = false
+            }
+        }
+        .onChange(of: emulator.isPoweredOn) { _, poweredOn in
+            if !poweredOn {
+                showKeyboard = false
+                showDatasetteControls = false
+                showPrinterControls = false
+                showVirtualModemControls = false
             }
         }
         .onChange(of: emulator.virtualModemTXBytes) { previous, current in
@@ -191,7 +207,7 @@ struct ContentView: View {
                 )
             }
         }) {
-            SettingsView(initialPanel: settingsInitialPanel)
+            SettingsView(selection: $settingsInitialPanel)
         }
         .fullScreenCover(isPresented: $showLibrary) {
             LibraryView(emulator: emulator)
@@ -274,9 +290,16 @@ struct ContentView: View {
 
     private var emulatorArea: some View {
         GeometryReader { proxy in
+            let displayAspectRatio = (!emulator.isPoweredOn || (emulator.isPowerTransitioning && !emulator.isStarting))
+                ? emulator.powerOffVideoAspectRatio
+                : emulator.videoAspectRatio
             let displaySize = Self.fittedC64Size(
                 in: proxy.size,
-                aspectRatio: emulator.videoAspectRatio
+                aspectRatio: displayAspectRatio
+            )
+            let powerOffContentSize = Self.fittedC64Size(
+                in: displaySize,
+                aspectRatio: emulator.powerOffVideoContentAspectRatio
             )
             let sideMargin = max(0, (proxy.size.width - displaySize.width) / 2)
             let sideStatusPanelWidth = min(sideMargin, 104)
@@ -285,29 +308,73 @@ struct ContentView: View {
                 Color.black
 
                 ZStack(alignment: .bottom) {
-                    C64ScreenRepresentable()
-                        .environmentObject(emulator)
-                        .frame(width: displaySize.width, height: displaySize.height)
-                        .background(Color.black)
+                    if !emulator.isPoweredOn {
+                        ZStack {
+                            CRTNoSignalView()
+                                .frame(
+                                    width: powerOffContentSize.width,
+                                    height: powerOffContentSize.height
+                                )
+                                .frame(
+                                    width: displaySize.width,
+                                    height: displaySize.height,
+                                    alignment: .center
+                                )
 
-                    if emulator.mousePort != nil {
-                        C64MouseCaptureView(
-                            onMove: { deltaX, deltaY in
-                                emulator.moveMouse(deltaX: deltaX, deltaY: deltaY)
-                            },
-                            onButton: { button, pressed in
-                                emulator.setMouseButton(button, pressed: pressed)
+                            if !emulator.firmwareReady {
+                                firmwareRequiredOverlay
                             }
-                        )
-                    }
+                        }
+                    } else if !emulator.isRunning && emulator.isStarting {
+                        ZStack {
+                            Color.black
 
-                    if !emulator.firmwareReady {
-                        firmwareRequiredOverlay
-                    }
+                            if hasCompletedInitialStartup && !emulator.isPowerTransitioning {
+                                ProgressView()
+                                    .controlSize(.large)
+                                    .tint(.white)
+                            }
+                        }
+                        .frame(width: displaySize.width, height: displaySize.height)
+                    } else {
+                        C64ScreenRepresentable()
+                            .environmentObject(emulator)
+                            .frame(width: displaySize.width, height: displaySize.height)
+                            .background(Color.black)
 
-                    if emulator.virtualJoystickPort != nil {
-                        gameControlsOverlay
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        if emulator.isPowerTransitioning && !emulator.isStarting {
+                            CRTPowerOffTransitionView()
+                                .frame(
+                                    width: powerOffContentSize.width,
+                                    height: powerOffContentSize.height
+                                )
+                                .frame(
+                                    width: displaySize.width,
+                                    height: displaySize.height,
+                                    alignment: .center
+                                )
+                                .allowsHitTesting(false)
+                        }
+
+                        if emulator.isRunning, emulator.mousePort != nil {
+                            C64MouseCaptureView(
+                                onMove: { deltaX, deltaY in
+                                    emulator.moveMouse(deltaX: deltaX, deltaY: deltaY)
+                                },
+                                onButton: { button, pressed in
+                                    emulator.setMouseButton(button, pressed: pressed)
+                                }
+                            )
+                        }
+
+                        if !emulator.firmwareReady {
+                            firmwareRequiredOverlay
+                        }
+
+                        if emulator.isRunning, emulator.virtualJoystickPort != nil {
+                            gameControlsOverlay
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
                     }
                 }
                 .frame(width: displaySize.width, height: displaySize.height)
@@ -565,6 +632,19 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .disabled(!emulator.isRunning)
+
+            Button {
+                Task {
+                    await emulator.togglePower()
+                    reloadToolbarProfiles()
+                }
+            } label: {
+                PowerToolbarLabel(isOn: emulator.isPoweredOn)
+            }
+            .buttonStyle(.bordered)
+            .disabled(emulator.isStarting || emulator.isPowerTransitioning)
+            .accessibilityLabel(emulator.isPoweredOn ? "Power Off C64" : "Power On C64")
+            .help(emulator.isPoweredOn ? "Power Off C64" : "Power On C64")
 
             Button {
                 collapseToolbar()
@@ -2843,6 +2923,194 @@ private struct MediaActionPromptModifier: ViewModifier {
             prompt = nil
             emulator.presentMediaError(error)
         }
+    }
+}
+
+
+private struct PowerToolbarLabel: View {
+    let isOn: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "power")
+                .font(.body.weight(.medium))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Power")
+                    .font(.callout.weight(.medium))
+                Text(isOn ? "ON" : "OFF")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            Circle()
+                .fill(isOn ? Color.green : Color.gray.opacity(0.42))
+                .frame(width: 10, height: 10)
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(isOn ? 0.22 : 0.10), lineWidth: 1)
+                }
+                .shadow(color: isOn ? .green.opacity(0.45) : .clear, radius: 4)
+        }
+        .padding(.vertical, 1)
+        .frame(minHeight: 38)
+    }
+}
+
+private struct CRTPowerOffTransitionView: View {
+    @State private var startedAt = Date()
+
+    private let collapseDuration = 0.34
+    private let beamDuration = 1.86
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+            GeometryReader { proxy in
+                let elapsed = max(0, timeline.date.timeIntervalSince(startedAt))
+                let collapseProgress = min(1, elapsed / collapseDuration)
+                let collapseEase = 1 - pow(1 - collapseProgress, 3)
+                let visibleHeight = max(0, proxy.size.height * CGFloat(1 - collapseEase))
+                let maskHeight = max(0, (proxy.size.height - visibleHeight) / 2)
+
+                let beamElapsed = max(0, elapsed - collapseDuration)
+                let beamProgress = min(1, beamElapsed / beamDuration)
+                let beamEase = 1 - pow(1 - beamProgress, 2)
+                let beamWidth = max(0, proxy.size.width * CGFloat(1 - beamEase))
+                let beamOpacity = max(0, 0.94 - beamProgress * 0.94)
+                let beamHeight = max(0.7, 3.1 - CGFloat(beamProgress) * 2.35)
+
+                ZStack {
+                    VStack(spacing: 0) {
+                        Color.black
+                            .frame(height: maskHeight)
+                        Color.clear
+                            .frame(height: visibleHeight)
+                        Color.black
+                            .frame(height: maskHeight)
+                    }
+
+                    if collapseProgress > 0.70, beamProgress < 1 {
+                        Rectangle()
+                            .fill(.white.opacity(beamOpacity))
+                            .frame(
+                                width: max(1, beamWidth),
+                                height: beamHeight
+                            )
+                            .shadow(
+                                color: .white.opacity(max(0, beamOpacity * 0.76)),
+                                radius: 7
+                            )
+                            .shadow(
+                                color: .white.opacity(max(0, beamOpacity * 0.30)),
+                                radius: 16
+                            )
+                    }
+
+                    if beamProgress > 0.72, beamProgress < 1 {
+                        let pointProgress = (beamProgress - 0.72) / 0.28
+                        Circle()
+                            .fill(.white.opacity(max(0, 0.50 - pointProgress * 0.50)))
+                            .frame(
+                                width: max(1.2, 5.5 - CGFloat(pointProgress) * 4.3),
+                                height: max(1.2, 5.5 - CGFloat(pointProgress) * 4.3)
+                            )
+                            .blur(radius: max(0.6, 1.8 - CGFloat(pointProgress)))
+                    }
+                }
+                .clipped()
+            }
+        }
+        .onAppear {
+            startedAt = Date()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("C64 powering off")
+    }
+}
+
+private struct CRTNoSignalView: View {
+    private let columns = 72
+    private let refreshInterval = 1.0 / 15.0
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: refreshInterval)) { timeline in
+            Canvas(opaque: true, rendersAsynchronously: true) { context, size in
+                guard size.width > 0, size.height > 0 else { return }
+
+                context.fill(
+                    Path(CGRect(origin: .zero, size: size)),
+                    with: .color(.black)
+                )
+
+                let aspect = max(0.25, Double(size.height / size.width))
+                let rows = max(24, Int(Double(columns) * aspect))
+                let cellWidth = size.width / CGFloat(columns)
+                let cellHeight = size.height / CGFloat(rows)
+                let frame = UInt64(
+                    max(0, timeline.date.timeIntervalSinceReferenceDate * 30.0)
+                )
+                var noise = CRTStaticNoise(seed: frame &* 0x9E3779B97F4A7C15 &+ 0xA5A5A5A5)
+
+                for row in 0..<rows {
+                    for column in 0..<columns {
+                        let sample = noise.nextUnitInterval()
+                        let white = sample < 0.47
+                            ? 0.03 + sample * 0.30
+                            : 0.55 + (sample - 0.47) * 0.84
+                        let rect = CGRect(
+                            x: CGFloat(column) * cellWidth,
+                            y: CGFloat(row) * cellHeight,
+                            width: cellWidth + 0.65,
+                            height: cellHeight + 0.65
+                        )
+                        context.fill(
+                            Path(rect),
+                            with: .color(Color(white: min(1, white)))
+                        )
+                    }
+                }
+
+                // A slowly travelling brighter band and subtle dark scanlines
+                // make the generated noise read more like an untuned CRT.
+                let travel = timeline.date.timeIntervalSinceReferenceDate * 52.0
+                let bandY = CGFloat(
+                    travel.truncatingRemainder(dividingBy: Double(size.height + 70))
+                ) - 35
+                context.fill(
+                    Path(CGRect(x: 0, y: bandY, width: size.width, height: 28)),
+                    with: .color(.white.opacity(0.055))
+                )
+
+                var y: CGFloat = 1
+                while y < size.height {
+                    context.fill(
+                        Path(CGRect(x: 0, y: y, width: size.width, height: 1)),
+                        with: .color(.black.opacity(0.12))
+                    )
+                    y += 4
+                }
+            }
+        }
+        .background(.black)
+        .clipped()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("C64 powered off")
+    }
+}
+
+private struct CRTStaticNoise {
+    private var state: UInt64
+
+    init(seed: UInt64) {
+        state = seed == 0 ? 0xD1B54A32D192ED03 : seed
+    }
+
+    mutating func nextUnitInterval() -> Double {
+        state ^= state >> 12
+        state ^= state << 25
+        state ^= state >> 27
+        let value = state &* 0x2545F4914F6CDD1D
+        return Double(value >> 11) / Double(1 << 53)
     }
 }
 
