@@ -4754,6 +4754,10 @@ private struct SettingsPlaceholderView: View {
 }
 
 private struct AboutSettingsView: View {
+    @State private var copiedBuildInformation = false
+
+    private let viceRevision = "c8c242db75a559246d6d51017e6dd4ecd75d6a9f"
+
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
             ?? "Development"
@@ -4762,6 +4766,37 @@ private struct AboutSettingsView: View {
     private var build: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
             ?? "Development"
+    }
+
+    private var bundleIdentifier: String {
+        Bundle.main.bundleIdentifier ?? "Unknown"
+    }
+
+    private var buildConfiguration: String {
+#if DEBUG
+        return "Debug"
+#else
+        return "Release"
+#endif
+    }
+
+    private var operatingSystem: String {
+        "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)"
+    }
+
+    private var shortVICERevision: String {
+        String(viceRevision.prefix(8))
+    }
+
+    private var buildInformation: String {
+        [
+            "POKE64 \(version) (\(build))",
+            "Configuration: \(buildConfiguration)",
+            "Bundle: \(bundleIdentifier)",
+            "OS: \(operatingSystem)",
+            "Emulation: VICE x64sc / libretro",
+            "VICE revision: \(viceRevision)"
+        ].joined(separator: "\n")
     }
 
     var body: some View {
@@ -4789,12 +4824,33 @@ private struct AboutSettingsView: View {
                 .padding(.vertical, 8)
             }
 
-            Section("Technology") {
-                LabeledContent("Emulation", value: "VICE x64sc / libretro")
-                LabeledContent("Interface", value: "SwiftUI + UIKit")
-                LabeledContent("Video", value: "Metal")
-                LabeledContent("Audio", value: "AVAudioEngine")
+            Section {
+                LabeledContent("Version", value: version)
+                LabeledContent("Build", value: build)
+                LabeledContent("Configuration", value: buildConfiguration)
+                LabeledContent("Bundle ID", value: bundleIdentifier)
+                LabeledContent("Operating system", value: operatingSystem)
+                LabeledContent("VICE revision") {
+                    Text(shortVICERevision)
+                        .font(.body.monospaced())
+                        .textSelection(.enabled)
+                }
+
+                Button {
+                    UIPasteboard.general.string = buildInformation
+                    copiedBuildInformation = true
+                } label: {
+                    Label(
+                        copiedBuildInformation ? "Build Information Copied" : "Copy Build Information",
+                        systemImage: copiedBuildInformation ? "checkmark.circle" : "doc.on.doc"
+                    )
+                }
+            } header: {
+                Text("Build Information")
+            } footer: {
+                Text("Copy this information when reporting a build-specific issue, especially for sideloaded IPA releases.")
             }
+
 
             Section("Created by") {
                 Text("Created by Alessandro Capano in 2026.")

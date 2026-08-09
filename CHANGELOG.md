@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.8.1 — 2026-08-09
+
+- Kept the Devices toolbar button at a stable compact width when Drives 10/11 are enabled, summarizing mounted disks/tape/cartridge without pushing later toolbar actions off screen; removed the static Technology section from About.
+- Redesigned the Control Ports popover around compact per-port device selectors, moved Swap Ports to an always-visible quick action at the top, and left the layout ready for future paddles/KoalaPad device types without growing into a long scrolling list.
+- Expanded About with copyable build diagnostics including app version/build, Debug/Release configuration, bundle identifier, iPadOS version and the pinned VICE/libretro revision for easier sideload and support troubleshooting.
 - Fixed host-layout physical keyboard shifted symbols by staging C64 Shift one emulated frame before the base key, preventing intermittent `3`/`,` output for `#`/`<`; added an Italian Shift+0 fallback for `=`.
 
 - Fixed Host Keyboard Layout so it remaps only the physical keyboard. VICE remains on its positional map, preventing the host preference from disabling or remapping POKE64's on-screen C64 keyboard. Host Shift/AltGr combinations are translated from the actual iPadOS character into C64 key sequences.

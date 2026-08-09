@@ -1333,20 +1333,35 @@ private struct PortsConfigurationView: View {
     var body: some View {
         NavigationStack {
             Form {
-                portSection(1)
-                portSection(2)
-
                 Section {
                     Button {
                         emulator.swapJoyportAssignments()
                     } label: {
-                        Label("Swap Port 1 and Port 2", systemImage: "arrow.left.arrow.right")
+                        HStack(spacing: 12) {
+                            Label("Swap Port 1 and Port 2", systemImage: "arrow.left.arrow.right")
+                            Spacer(minLength: 12)
+                            Text(
+                                "1 \(emulator.joyportCompactAssignmentTitle(for: 1))  ↔  "
+                                + "2 \(emulator.joyportCompactAssignmentTitle(for: 2))"
+                            )
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
+                } header: {
+                    Text("Quick Action")
                 } footer: {
-                    Text("Assignments are applied immediately.")
+                    Text("Swap stays at the top so it remains immediately available while playing.")
                 }
+
+                portSection(1)
+                portSection(2)
             }
-            .navigationTitle("Joystick Ports")
+            .navigationTitle("Control Ports")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
@@ -1386,68 +1401,73 @@ private struct PortsConfigurationView: View {
     private func portSection(_ port: Int) -> some View {
         let assignment = emulator.joyportAssignment(for: port)
 
-        Section("Port \(port)") {
-            assignmentButton(
-                title: "None",
-                systemImage: "circle.slash",
-                assignment: .none,
-                selectedAssignment: assignment,
-                port: port
-            )
+        Section {
+            Menu {
+                assignmentMenuButton(
+                    title: "None",
+                    systemImage: "circle.slash",
+                    assignment: .none,
+                    selectedAssignment: assignment,
+                    port: port
+                )
 
-            assignmentButton(
-                title: "Virtual Joystick",
-                systemImage: "gamecontroller",
-                assignment: .virtualJoystick,
-                selectedAssignment: assignment,
-                port: port
-            )
+                assignmentMenuButton(
+                    title: "Virtual Joystick",
+                    systemImage: "gamecontroller",
+                    assignment: .virtualJoystick,
+                    selectedAssignment: assignment,
+                    port: port
+                )
 
-            assignmentButton(
-                title: "Commodore 1351 Mouse",
-                systemImage: "computermouse",
-                assignment: .commodoreMouse,
-                selectedAssignment: assignment,
-                port: port
-            )
+                assignmentMenuButton(
+                    title: "Commodore 1351 Mouse",
+                    systemImage: "computermouse",
+                    assignment: .commodoreMouse,
+                    selectedAssignment: assignment,
+                    port: port
+                )
 
-            if emulator.physicalControllers.isEmpty {
-                Label("No physical controllers connected", systemImage: "gamecontroller")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(emulator.physicalControllers) { controller in
-                    let controllerAssignment = JoyportAssignment.physicalController(controller.id)
-                    let assignedPort = emulator.controllerAssignedPort(controller.id)
+                if !emulator.physicalControllers.isEmpty {
+                    Divider()
 
-                    Button {
-                        emulator.setJoyportAssignment(controllerAssignment, for: port)
-                    } label: {
-                        HStack {
-                            Label(controller.name, systemImage: "gamecontroller.fill")
-                                .lineLimit(1)
+                    ForEach(emulator.physicalControllers) { controller in
+                        let controllerAssignment = JoyportAssignment.physicalController(controller.id)
+                        let assignedPort = emulator.controllerAssignedPort(controller.id)
 
-                            Spacer()
-
+                        Button {
+                            emulator.setJoyportAssignment(controllerAssignment, for: port)
+                        } label: {
                             if assignment == controllerAssignment {
-                                Image(systemName: "checkmark")
-                                    .font(.body.weight(.semibold))
+                                Label(controller.name, systemImage: "checkmark")
                             } else if let assignedPort, assignedPort != port {
-                                Text("Port \(assignedPort)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                Label("\(controller.name) — Port \(assignedPort)", systemImage: "gamecontroller.fill")
+                            } else {
+                                Label(controller.name, systemImage: "gamecontroller.fill")
                             }
                         }
-                        .contentShape(Rectangle())
+                        .disabled(assignedPort != nil && assignedPort != port)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.primary)
-                    .disabled(assignedPort != nil && assignedPort != port)
                 }
+            } label: {
+                HStack(spacing: 12) {
+                    Label("Device", systemImage: assignmentIcon(assignment))
+                    Spacer(minLength: 12)
+                    Text(emulator.joyportAssignmentTitle(for: port))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
             }
+            .foregroundStyle(.primary)
+        } header: {
+            Text("Port \(port)")
         }
     }
 
-    private func assignmentButton(
+    private func assignmentMenuButton(
         title: String,
         systemImage: String,
         assignment: JoyportAssignment,
@@ -1457,18 +1477,25 @@ private struct PortsConfigurationView: View {
         Button {
             emulator.setJoyportAssignment(assignment, for: port)
         } label: {
-            HStack {
+            if selectedAssignment == assignment {
+                Label(title, systemImage: "checkmark")
+            } else {
                 Label(title, systemImage: systemImage)
-                Spacer()
-                if selectedAssignment == assignment {
-                    Image(systemName: "checkmark")
-                        .font(.body.weight(.semibold))
-                }
             }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.primary)
+    }
+
+    private func assignmentIcon(_ assignment: JoyportAssignment) -> String {
+        switch assignment {
+        case .none:
+            return "circle.slash"
+        case .virtualJoystick:
+            return "gamecontroller"
+        case .commodoreMouse:
+            return "computermouse"
+        case .physicalController:
+            return "gamecontroller.fill"
+        }
     }
 }
 
@@ -1484,16 +1511,22 @@ private struct DevicesToolbarLabel: View {
             systemImage: "externaldrive.fill",
             detail: summary
         )
+        // Keep the toolbar footprint stable regardless of how many IEC drives
+        // are enabled. Full per-unit state remains available in the popover
+        // and through VoiceOver.
+        .frame(width: 150, alignment: .leading)
         .accessibilityLabel(accessibilitySummary)
     }
 
     private var summary: String {
-        let drives = driveUnits.map { unit in
-            "\(unit) \(mountedDriveUnits.contains(unit) ? "Disk" : "Empty")"
+        let mountedDiskCount = driveUnits.reduce(into: 0) { count, unit in
+            if mountedDriveUnits.contains(unit) {
+                count += 1
+            }
         }
-        return drives.joined(separator: " · ")
-            + " · T \(tapeMounted ? "Tape" : "Empty")"
-            + " · C \(cartridgeMounted ? "CRT" : "Empty")"
+        let tape = tapeMounted ? "●" : "—"
+        let cartridge = cartridgeMounted ? "●" : "—"
+        return "Disk \(mountedDiskCount)/\(driveUnits.count) · T \(tape) · C \(cartridge)"
     }
 
     private var accessibilitySummary: String {
