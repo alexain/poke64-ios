@@ -201,25 +201,33 @@ struct FirmwareSettingsView: View {
                         .font(.footnote)
                 }
         }
-        .fileImporter(
-            isPresented: $showImporter,
-            allowedContentTypes: [.data],
-            allowsMultipleSelection: false
-        ) { result in
-            guard let slot = pendingSlot else { return }
-            pendingSlot = nil
+        .sheet(isPresented: $showImporter) {
+            // Snapshot the destination slot before presenting the UIKit picker. The picker can
+            // begin dismissing as soon as a file is chosen; clearing `pendingSlot` from the
+            // sheet's dismissal path can therefore race the delegate callback and silently turn
+            // a valid selection into a no-op.
+            if let slot = pendingSlot {
+                CopyDocumentPicker(
+                    isPresented: $showImporter,
+                    allowedContentTypes: [.data],
+                    allowsMultipleSelection: false
+                ) { urls in
+                    pendingSlot = nil
 
-            do {
-                let urls = try result.get()
-                guard let url = urls.first else { return }
-                let accessing = url.startAccessingSecurityScopedResource()
-                defer {
-                    if accessing { url.stopAccessingSecurityScopedResource() }
+                    do {
+                        guard let url = urls.first else { return }
+                        let accessing = url.startAccessingSecurityScopedResource()
+                        defer {
+                            if accessing { url.stopAccessingSecurityScopedResource() }
+                        }
+                        try FirmwareStore.importFirmware(from: url, into: slot)
+                        refresh()
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                } onCancel: {
+                    pendingSlot = nil
                 }
-                try FirmwareStore.importFirmware(from: url, into: slot)
-                refresh()
-            } catch {
-                errorMessage = error.localizedDescription
             }
         }
         .alert("Install OpenROMs?", isPresented: $showOpenROMsConfirmation) {

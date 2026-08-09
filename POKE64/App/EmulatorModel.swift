@@ -261,6 +261,8 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var activeProgram: MediaReference?
     @Published private(set) var trueDriveEmulationConfigured = false
     @Published private(set) var drive9Configured = false
+    @Published private(set) var drive10Configured = false
+    @Published private(set) var drive11Configured = false
     @Published private(set) var drive8ActivityLEDOn = false
     @Published private(set) var datasetteTelemetryAvailable = false
     @Published private(set) var datasetteEnabled = false
@@ -285,7 +287,26 @@ final class EmulatorModel: ObservableObject {
     }
 
     var drive9PowerLEDOn: Bool {
-        isRunning && trueDriveEmulationConfigured && drive9Configured
+        drivePowerLEDOn(for: 9)
+    }
+
+    var drive10PowerLEDOn: Bool {
+        drivePowerLEDOn(for: 10)
+    }
+
+    var drive11PowerLEDOn: Bool {
+        drivePowerLEDOn(for: 11)
+    }
+
+    func drivePowerLEDOn(for unit: Int) -> Bool {
+        guard isRunning, trueDriveEmulationConfigured else { return false }
+        switch unit {
+        case 8: return true
+        case 9: return drive9Configured
+        case 10: return drive10Configured
+        case 11: return drive11Configured
+        default: return false
+        }
     }
 
     var driveActivityLEDOn: Bool {
@@ -319,7 +340,10 @@ final class EmulatorModel: ObservableObject {
     let library = LibraryStore()
 
     var availableDriveUnits: [Int] {
-        drive9Configured ? [8, 9] : [8]
+        [8]
+            + (drive9Configured ? [9] : [])
+            + (drive10Configured ? [10] : [])
+            + (drive11Configured ? [11] : [])
     }
 
     private var didAttemptAutomaticStart = false
@@ -1589,6 +1613,10 @@ final class EmulatorModel: ObservableObject {
         session.setRawKeyCode(keyCode, pressed: pressed)
     }
 
+    func setRawShiftedKey(modifier: UInt, baseKey: UInt, pressed: Bool) {
+        session.setRawShiftedKeyModifier(modifier, baseKey: baseKey, pressed: pressed)
+    }
+
     private func setAssignment(_ assignment: JoyportAssignment, for port: Int) {
         if port == 1 {
             joyport1Assignment = assignment
@@ -2077,19 +2105,21 @@ final class EmulatorModel: ObservableObject {
 
     private func refreshDriveConfigurationState() {
         let defaults = UserDefaults.standard
-        drive9Configured = defaults.object(forKey: C64DriveSettings.drive9EnabledKey) == nil
-            ? C64DriveSettings.defaultDrive9Enabled
-            : defaults.bool(forKey: C64DriveSettings.drive9EnabledKey)
+        drive9Configured = C64DriveSettings.isEnabled(9, defaults: defaults)
+        drive10Configured = C64DriveSettings.isEnabled(10, defaults: defaults)
+        drive11Configured = C64DriveSettings.isEnabled(11, defaults: defaults)
+
         let requested = defaults.object(forKey: C64DriveSettings.trueDriveEmulationKey) == nil
             ? C64DriveSettings.defaultTrueDriveEmulation
             : defaults.bool(forKey: C64DriveSettings.trueDriveEmulationKey)
-        let drive8Ready = FirmwareStore.status(
-            for: C64DriveModel.selected(for: 8).firmwareSlot
-        ).isValid
-        let drive9Ready = !drive9Configured || FirmwareStore.status(
-            for: C64DriveModel.selected(for: 9).firmwareSlot
-        ).isValid
-        trueDriveEmulationConfigured = requested && drive8Ready && drive9Ready
+        let enabledUnits = [8]
+            + (drive9Configured ? [9] : [])
+            + (drive10Configured ? [10] : [])
+            + (drive11Configured ? [11] : [])
+        let allEnabledDrivesReady = enabledUnits.allSatisfy { unit in
+            FirmwareStore.status(for: C64DriveModel.selected(for: unit).firmwareSlot).isValid
+        }
+        trueDriveEmulationConfigured = requested && allEnabledDrivesReady
         if !trueDriveEmulationConfigured {
             driveLEDOffTask?.cancel()
             driveLEDOffTask = nil

@@ -63,7 +63,7 @@ No game, program, disk image, tape image, cartridge image or commercial content 
 
 ### POKE64 GPL VICE-core patches
 
-For POKE64 0.8.0, the pinned `vice-libretro` revision is:
+For POKE64 0.8.1, the pinned `vice-libretro` revision is:
 
 ```text
 c8c242db75a559246d6d51017e6dd4ecd75d6a9f

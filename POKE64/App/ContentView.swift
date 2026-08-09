@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct ContentView: View {
@@ -12,6 +13,8 @@ struct ContentView: View {
     private var printerDevice = C64PrinterSettings.defaultDevice
     @AppStorage(C64VirtualModemSettings.enabledKey)
     private var virtualModemEnabled = C64VirtualModemSettings.defaultEnabled
+    @AppStorage(C64PhysicalKeyboardMode.defaultsKey)
+    private var physicalKeyboardModeRawValue = C64PhysicalKeyboardMode.defaultValue.rawValue
     @AppStorage("poke64.toolbar.collapsed")
     private var toolbarCollapsed = false
     @State private var toolbarHeight: CGFloat = 62
@@ -58,8 +61,14 @@ struct ContentView: View {
             }
             .allowsHitTesting(false)
 
-            HardwareKeyboardCapture(isEnabled: emulator.isRunning) { keyCode, pressed in
+            HardwareKeyboardCapture(
+                isEnabled: emulator.isRunning,
+                mappingMode: C64PhysicalKeyboardMode(rawValue: physicalKeyboardModeRawValue)
+                    ?? .defaultValue
+            ) { keyCode, pressed in
                 emulator.setRawKey(keyCode, pressed: pressed)
+            } onShiftedKey: { modifier, baseKey, pressed in
+                emulator.setRawShiftedKey(modifier: modifier, baseKey: baseKey, pressed: pressed)
             }
             .frame(width: 1, height: 1)
             .accessibilityHidden(true)
@@ -257,16 +266,19 @@ struct ContentView: View {
                 )
             }
         }
-        .fileImporter(
-            isPresented: $showImporter,
-            allowedContentTypes: [.data, .archive],
-            allowsMultipleSelection: false
-        ) { result in
+        .sheet(isPresented: $showImporter) {
+            // Capture the requested target when the sheet is created. UIKit may dismiss the
+            // document picker before SwiftUI finishes the sheet transition, so import routing
+            // must not depend on state that can be cleared by dismissal callbacks.
             let target = deviceImportTarget
-            deviceImportTarget = nil
 
-            switch result {
-            case .success(let urls):
+            CopyDocumentPicker(
+                isPresented: $showImporter,
+                allowedContentTypes: [.data, .archive],
+                allowsMultipleSelection: false
+            ) { urls in
+                deviceImportTarget = nil
+
                 guard let url = urls.first,
                       let request = emulator.prepareTemporaryMedia(url: url) else {
                     return
@@ -279,9 +291,8 @@ struct ContentView: View {
                     emulator.discardPreparedMedia(request.media)
                     emulator.presentMediaError(error)
                 }
-
-            case .failure(let error):
-                print("File importer: \(error)")
+            } onCancel: {
+                deviceImportTarget = nil
             }
         }
         .mediaActionPrompt(
@@ -500,9 +511,12 @@ struct ContentView: View {
 
                         if driveStatusVisible {
                             DriveStatusPanel(
-                                drive8PowerOn: emulator.drive8PowerLEDOn,
-                                drive9Enabled: emulator.drive9Configured,
-                                drive9PowerOn: emulator.drive9PowerLEDOn,
+                                units: emulator.availableDriveUnits,
+                                poweredUnits: Set(
+                                    emulator.availableDriveUnits.filter {
+                                        emulator.drivePowerLEDOn(for: $0)
+                                    }
+                                ),
                                 activityOn: emulator.driveActivityLEDOn
                             )
                             .allowsHitTesting(false)
@@ -576,9 +590,12 @@ struct ContentView: View {
 
                         if driveStatusVisible {
                             DriveStatusPanel(
-                                drive8PowerOn: emulator.drive8PowerLEDOn,
-                                drive9Enabled: emulator.drive9Configured,
-                                drive9PowerOn: emulator.drive9PowerLEDOn,
+                                units: emulator.availableDriveUnits,
+                                poweredUnits: Set(
+                                    emulator.availableDriveUnits.filter {
+                                        emulator.drivePowerLEDOn(for: $0)
+                                    }
+                                ),
                                 activityOn: emulator.driveActivityLEDOn
                             )
                             .frame(width: portraitPanelWidth)
@@ -764,9 +781,8 @@ struct ContentView: View {
                 showDevices = true
             } label: {
                 DevicesToolbarLabel(
-                    drive8Mounted: emulator.mountedDisks[8] != nil,
-                    drive9Enabled: emulator.drive9Configured,
-                    drive9Mounted: emulator.mountedDisks[9] != nil,
+                    driveUnits: emulator.availableDriveUnits,
+                    mountedDriveUnits: Set(emulator.mountedDisks.keys),
                     tapeMounted: emulator.mountedTape != nil,
                     cartridgeMounted: emulator.mountedCartridge != nil
                 )
@@ -1317,20 +1333,35 @@ private struct PortsConfigurationView: View {
     var body: some View {
         NavigationStack {
             Form {
-                portSection(1)
-                portSection(2)
-
                 Section {
                     Button {
                         emulator.swapJoyportAssignments()
                     } label: {
-                        Label("Swap Port 1 and Port 2", systemImage: "arrow.left.arrow.right")
+                        HStack(spacing: 12) {
+                            Label("Swap Port 1 and Port 2", systemImage: "arrow.left.arrow.right")
+                            Spacer(minLength: 12)
+                            Text(
+                                "1 \(emulator.joyportCompactAssignmentTitle(for: 1))  ↔  "
+                                + "2 \(emulator.joyportCompactAssignmentTitle(for: 2))"
+                            )
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
+                } header: {
+                    Text("Quick Action")
                 } footer: {
-                    Text("Assignments are applied immediately.")
+                    Text("Swap stays at the top so it remains immediately available while playing.")
                 }
+
+                portSection(1)
+                portSection(2)
             }
-            .navigationTitle("Joystick Ports")
+            .navigationTitle("Control Ports")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
@@ -1370,68 +1401,73 @@ private struct PortsConfigurationView: View {
     private func portSection(_ port: Int) -> some View {
         let assignment = emulator.joyportAssignment(for: port)
 
-        Section("Port \(port)") {
-            assignmentButton(
-                title: "None",
-                systemImage: "circle.slash",
-                assignment: .none,
-                selectedAssignment: assignment,
-                port: port
-            )
+        Section {
+            Menu {
+                assignmentMenuButton(
+                    title: "None",
+                    systemImage: "circle.slash",
+                    assignment: .none,
+                    selectedAssignment: assignment,
+                    port: port
+                )
 
-            assignmentButton(
-                title: "Virtual Joystick",
-                systemImage: "gamecontroller",
-                assignment: .virtualJoystick,
-                selectedAssignment: assignment,
-                port: port
-            )
+                assignmentMenuButton(
+                    title: "Virtual Joystick",
+                    systemImage: "gamecontroller",
+                    assignment: .virtualJoystick,
+                    selectedAssignment: assignment,
+                    port: port
+                )
 
-            assignmentButton(
-                title: "Commodore 1351 Mouse",
-                systemImage: "computermouse",
-                assignment: .commodoreMouse,
-                selectedAssignment: assignment,
-                port: port
-            )
+                assignmentMenuButton(
+                    title: "Commodore 1351 Mouse",
+                    systemImage: "computermouse",
+                    assignment: .commodoreMouse,
+                    selectedAssignment: assignment,
+                    port: port
+                )
 
-            if emulator.physicalControllers.isEmpty {
-                Label("No physical controllers connected", systemImage: "gamecontroller")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(emulator.physicalControllers) { controller in
-                    let controllerAssignment = JoyportAssignment.physicalController(controller.id)
-                    let assignedPort = emulator.controllerAssignedPort(controller.id)
+                if !emulator.physicalControllers.isEmpty {
+                    Divider()
 
-                    Button {
-                        emulator.setJoyportAssignment(controllerAssignment, for: port)
-                    } label: {
-                        HStack {
-                            Label(controller.name, systemImage: "gamecontroller.fill")
-                                .lineLimit(1)
+                    ForEach(emulator.physicalControllers) { controller in
+                        let controllerAssignment = JoyportAssignment.physicalController(controller.id)
+                        let assignedPort = emulator.controllerAssignedPort(controller.id)
 
-                            Spacer()
-
+                        Button {
+                            emulator.setJoyportAssignment(controllerAssignment, for: port)
+                        } label: {
                             if assignment == controllerAssignment {
-                                Image(systemName: "checkmark")
-                                    .font(.body.weight(.semibold))
+                                Label(controller.name, systemImage: "checkmark")
                             } else if let assignedPort, assignedPort != port {
-                                Text("Port \(assignedPort)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                Label("\(controller.name) — Port \(assignedPort)", systemImage: "gamecontroller.fill")
+                            } else {
+                                Label(controller.name, systemImage: "gamecontroller.fill")
                             }
                         }
-                        .contentShape(Rectangle())
+                        .disabled(assignedPort != nil && assignedPort != port)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.primary)
-                    .disabled(assignedPort != nil && assignedPort != port)
                 }
+            } label: {
+                HStack(spacing: 12) {
+                    Label("Device", systemImage: assignmentIcon(assignment))
+                    Spacer(minLength: 12)
+                    Text(emulator.joyportAssignmentTitle(for: port))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
             }
+            .foregroundStyle(.primary)
+        } header: {
+            Text("Port \(port)")
         }
     }
 
-    private func assignmentButton(
+    private func assignmentMenuButton(
         title: String,
         systemImage: String,
         assignment: JoyportAssignment,
@@ -1441,25 +1477,31 @@ private struct PortsConfigurationView: View {
         Button {
             emulator.setJoyportAssignment(assignment, for: port)
         } label: {
-            HStack {
+            if selectedAssignment == assignment {
+                Label(title, systemImage: "checkmark")
+            } else {
                 Label(title, systemImage: systemImage)
-                Spacer()
-                if selectedAssignment == assignment {
-                    Image(systemName: "checkmark")
-                        .font(.body.weight(.semibold))
-                }
             }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.primary)
+    }
+
+    private func assignmentIcon(_ assignment: JoyportAssignment) -> String {
+        switch assignment {
+        case .none:
+            return "circle.slash"
+        case .virtualJoystick:
+            return "gamecontroller"
+        case .commodoreMouse:
+            return "computermouse"
+        case .physicalController:
+            return "gamecontroller.fill"
+        }
     }
 }
 
 private struct DevicesToolbarLabel: View {
-    let drive8Mounted: Bool
-    let drive9Enabled: Bool
-    let drive9Mounted: Bool
+    let driveUnits: [Int]
+    let mountedDriveUnits: Set<Int>
     let tapeMounted: Bool
     let cartridgeMounted: Bool
 
@@ -1469,24 +1511,31 @@ private struct DevicesToolbarLabel: View {
             systemImage: "externaldrive.fill",
             detail: summary
         )
+        // Keep the toolbar footprint stable regardless of how many IEC drives
+        // are enabled. Full per-unit state remains available in the popover
+        // and through VoiceOver.
+        .frame(width: 150, alignment: .leading)
         .accessibilityLabel(accessibilitySummary)
     }
 
     private var summary: String {
-        let drive9 = drive9Enabled
-            ? " · 9 \(drive9Mounted ? "Disk" : "Empty")"
-            : ""
-        return "8 \(drive8Mounted ? "Disk" : "Empty")\(drive9) · T \(tapeMounted ? "Tape" : "Empty") · C \(cartridgeMounted ? "CRT" : "Empty")"
+        let mountedDiskCount = driveUnits.reduce(into: 0) { count, unit in
+            if mountedDriveUnits.contains(unit) {
+                count += 1
+            }
+        }
+        let tape = tapeMounted ? "●" : "—"
+        let cartridge = cartridgeMounted ? "●" : "—"
+        return "Disk \(mountedDiskCount)/\(driveUnits.count) · T \(tape) · C \(cartridge)"
     }
 
     private var accessibilitySummary: String {
-        let drive8 = drive8Mounted ? "Drive 8 loaded" : "Drive 8 empty"
-        let drive9 = drive9Enabled
-            ? (drive9Mounted ? ", Drive 9 loaded" : ", Drive 9 empty")
-            : ""
+        let drives = driveUnits.map { unit in
+            "Drive \(unit) \(mountedDriveUnits.contains(unit) ? "loaded" : "empty")"
+        }.joined(separator: ", ")
         let tape = tapeMounted ? "tape loaded" : "tape empty"
         let cartridge = cartridgeMounted ? "cartridge loaded" : "cartridge empty"
-        return "Devices, \(drive8)\(drive9), \(tape), \(cartridge)"
+        return "Devices, \(drives), \(tape), \(cartridge)"
     }
 }
 
@@ -2786,23 +2835,23 @@ private struct DriveMediaSetSheet: View {
 }
 
 private struct DriveStatusPanel: View {
-    let drive8PowerOn: Bool
-    let drive9Enabled: Bool
-    let drive9PowerOn: Bool
+    let units: [Int]
+    let poweredUnits: Set<Int>
     let activityOn: Bool
 
     var body: some View {
         VStack(spacing: 9) {
-            Text(drive9Enabled ? "DRIVES" : "DRIVE 8")
+            Text(units.count > 1 ? "DRIVES" : "DRIVE 8")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.55))
 
-            if drive9Enabled {
-                powerIndicator(unit: 8, isOn: drive8PowerOn)
-                powerIndicator(unit: 9, isOn: drive9PowerOn)
+            if units.count > 1 {
+                ForEach(units, id: \.self) { unit in
+                    powerIndicator(unit: unit, isOn: poweredUnits.contains(unit))
+                }
                 indicator(title: "ACT", isOn: activityOn, activeColor: .red)
             } else {
-                indicator(title: "PWR", isOn: drive8PowerOn, activeColor: .green)
+                indicator(title: "PWR", isOn: poweredUnits.contains(8), activeColor: .green)
                 indicator(title: "ACT", isOn: activityOn, activeColor: .red)
             }
         }
@@ -2821,10 +2870,10 @@ private struct DriveStatusPanel: View {
     }
 
     private var accessibilitySummary: String {
-        if drive9Enabled {
-            return "Drive 8 power \(drive8PowerOn ? "on" : "off"), Drive 9 power \(drive9PowerOn ? "on" : "off"), disk activity \(activityOn ? "active" : "idle")"
-        }
-        return "Drive 8, power \(drive8PowerOn ? "on" : "off"), activity \(activityOn ? "active" : "idle")"
+        let drives = units.map { unit in
+            "Drive \(unit) power \(poweredUnits.contains(unit) ? "on" : "off")"
+        }.joined(separator: ", ")
+        return "\(drives), disk activity \(activityOn ? "active" : "idle")"
     }
 
     private func powerIndicator(unit: Int, isOn: Bool) -> some View {
@@ -3461,5 +3510,72 @@ private struct StartupErrorView: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+    }
+}
+
+/// UIKit document picker configured to import a private copy of every selected file.
+///
+/// POKE64 never edits the provider-owned document in place. Importing with `asCopy: true`
+/// gives the app a provider-independent file before the normal Library/temporary-media copy
+/// pipeline runs. This avoids making the emulator depend on continued direct access to the
+/// provider-owned URL after selection, including in unsigned IPA builds that are re-signed.
+struct CopyDocumentPicker: UIViewControllerRepresentable {
+    @Binding var isPresented: Bool
+
+    let allowedContentTypes: [UTType]
+    let allowsMultipleSelection: Bool
+    let onPick: ([URL]) -> Void
+    var onCancel: (() -> Void)? = nil
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            isPresented: $isPresented,
+            onPick: onPick,
+            onCancel: onCancel
+        )
+    }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: allowedContentTypes,
+            asCopy: true
+        )
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = allowsMultipleSelection
+        return picker
+    }
+
+    func updateUIViewController(
+        _ uiViewController: UIDocumentPickerViewController,
+        context: Context
+    ) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        private let isPresented: Binding<Bool>
+        private let onPick: ([URL]) -> Void
+        private let onCancel: (() -> Void)?
+
+        init(
+            isPresented: Binding<Bool>,
+            onPick: @escaping ([URL]) -> Void,
+            onCancel: (() -> Void)?
+        ) {
+            self.isPresented = isPresented
+            self.onPick = onPick
+            self.onCancel = onCancel
+        }
+
+        func documentPicker(
+            _ controller: UIDocumentPickerViewController,
+            didPickDocumentsAt urls: [URL]
+        ) {
+            onPick(urls)
+            isPresented.wrappedValue = false
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onCancel?()
+            isPresented.wrappedValue = false
+        }
     }
 }
