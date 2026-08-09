@@ -1652,7 +1652,7 @@ enum C64VirtualModemSettings {
     }
 }
 
-enum SettingsPanel: String, CaseIterable, Identifiable {
+enum SettingsPanel: String, CaseIterable, Identifiable, Hashable {
     case profiles
     case system
     case graphics
@@ -1733,10 +1733,8 @@ struct SettingsView: View {
             Divider()
 
             NavigationSplitView {
-                List(SettingsPanel.allCases) { panel in
-                    Button {
-                        selection = panel
-                    } label: {
+                List(selection: sidebarSelection) {
+                    ForEach(SettingsPanel.allCases) { panel in
                         Label {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(panel.title)
@@ -1748,17 +1746,12 @@ struct SettingsView: View {
                         } icon: {
                             Image(systemName: panel.icon)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                         .contentShape(Rectangle())
+                        .tag(panel)
                     }
-                    .buttonStyle(.plain)
-                    .listRowBackground(
-                        selection == panel
-                            ? Color.accentColor.opacity(0.16)
-                            : Color.clear
-                    )
-                    .padding(.vertical, 3)
                 }
+                .listStyle(.sidebar)
                 .navigationTitle("Settings")
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 340)
             } detail: {
@@ -1766,6 +1759,18 @@ struct SettingsView: View {
             }
             .navigationSplitViewStyle(.balanced)
         }
+    }
+
+
+    private var sidebarSelection: Binding<SettingsPanel?> {
+        Binding(
+            get: { selection },
+            set: { newSelection in
+                if let newSelection {
+                    selection = newSelection
+                }
+            }
+        )
     }
 
     private var settingsHeader: some View {
@@ -3984,6 +3989,21 @@ private struct PrinterSettingsView: View {
         !exportFormat.usesRasterRenderer || printerFirmwareStatus.isValid
     }
 
+    private var printerEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { printerEnabled },
+            set: { enabled in
+                if enabled && !canEnablePrinter {
+                    // A fresh installation defaults to PDF, which requires the
+                    // optional MPS-803 ROM. Keep the IEC printer switch usable
+                    // by falling back to the ROM-free RAW backend.
+                    exportFormatRawValue = C64PrinterExportFormat.raw.rawValue
+                }
+                printerEnabled = enabled
+            }
+        )
+    }
+
     private var capturedSizeDescription: String {
         guard let capturedBytes, capturedBytes > 0 else { return "Empty" }
         return ByteCountFormatter.string(
@@ -3995,8 +4015,16 @@ private struct PrinterSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Enable IEC printer", isOn: $printerEnabled)
-                    .disabled(!canEnablePrinter)
+                Toggle("Enable IEC printer", isOn: printerEnabledBinding)
+
+                if !canEnablePrinter {
+                    Label(
+                        "MPS-803 ROM not installed. Enabling the printer will use RAW capture.",
+                        systemImage: "info.circle"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                }
 
                 Picker("IEC device", selection: $printerDevice) {
                     ForEach(C64PrinterSettings.supportedDevices, id: \.self) { device in
