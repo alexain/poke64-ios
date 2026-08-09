@@ -6,7 +6,7 @@ POKE64 is a C64-only native iPadOS emulator application. It does not embed Retro
 
 ## SwiftUI application layer
 
-`ContentView` owns the main layout, centered toolbar, document importer, full-screen Library and Settings presentation, docked C64 keyboard, optional touch controls, Devices popover and shared media-action dialogs.
+`ContentView` owns the main adaptive layout, centered toolbar, document importer, full-screen Library and Settings presentation, docked C64 keyboard, optional touch controls, Devices popover and shared media-action dialogs. Landscape keeps the single-row scrolling toolbar and reserves a dedicated, vertically centered right-hand rail for side status panels; portrait switches the toolbar to two fixed rows and relocates the drive/datasette/printer/modem status panels below the C64 display. Temporary no-border preserves the existing SwiftUI canvas footprint while VICE changes the cropped source geometry, so status UI is not displaced. Portrait also reserves a small black double-tap gesture strip below the canvas, keeping the no-border shortcut reachable even when the fitted image or docked keyboard leaves no incidental letterbox margin.
 
 `EmulatorModel` exposes session state, blocks emulation startup until the required system firmware is valid, coordinates core restarts after configuration changes and tracks mounted media independently for Drive 8, Drive 9, datasette and cartridge.
 

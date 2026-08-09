@@ -2,7 +2,21 @@
 
 ## Unreleased
 
-No unreleased changes yet.
+### Changed
+
+- Added an adaptive portrait emulator layout: the main toolbar becomes two fixed rows instead of one horizontally scrolling row, while landscape keeps the existing single-row toolbar.
+- Moved drive, datasette, virtual-printer and virtual-modem status panels below the C64 display in portrait, reserving display space so the panels remain visible instead of disappearing with the side margins.
+- Centered the C64 canvas inside its available display region and made the surrounding black letterbox areas the shared double-tap target for temporary no-border mode, including the top/bottom space used naturally in portrait.
+
+### Fixed
+
+- Switched the Settings sidebar to native `List` selection so the full category row has reliable touch handling on iPad instead of depending on nested plain buttons.
+- Kept the IEC printer toggle usable when the optional MPS-803 ROM is missing: enabling it now falls back to ROM-free RAW capture instead of presenting an apparently unresponsive disabled switch.
+- Kept temporary no-border mode inside the same on-screen canvas footprint instead of letting the cropped VICE geometry enlarge the display and crowd out status panels or gesture space.
+- Re-centered the landscape drive/datasette/printer/modem status rail vertically after the responsive-layout change.
+- Reserved a small portrait black gesture strip below the C64 canvas so temporary no-border can always be toggled with a double tap, including while the C64 keyboard is open.
+- Kept landscape drive/datasette/printer/modem status panels visible while temporary no-border mode changes the video aspect ratio by reserving a dedicated status rail instead of relying on incidental side margins.
+- Restored temporary no-border double-tap access in portrait, where the fitted C64 display can have little or no horizontal side margin.
 
 ## 0.7.7 — 2026-08-09
 

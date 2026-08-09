@@ -15,6 +15,7 @@ struct ContentView: View {
     @AppStorage("poke64.toolbar.collapsed")
     private var toolbarCollapsed = false
     @State private var toolbarHeight: CGFloat = 62
+    @State private var portraitLayout = false
     @State private var showImporter = false
     @State private var showKeyboard = false
     @State private var showDatasetteControls = false
@@ -45,6 +46,17 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
+
+            GeometryReader { layoutProxy in
+                Color.clear
+                    .onAppear {
+                        updateInterfaceLayout(for: layoutProxy.size)
+                    }
+                    .onChange(of: layoutProxy.size) { _, newSize in
+                        updateInterfaceLayout(for: newSize)
+                    }
+            }
+            .allowsHitTesting(false)
 
             HardwareKeyboardCapture(isEnabled: emulator.isRunning) { keyCode, pressed in
                 emulator.setRawKey(keyCode, pressed: pressed)
@@ -120,7 +132,7 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.2), value: showKeyboard)
         .animation(.easeInOut(duration: 0.2), value: showDatasetteControls)
         .onAppear {
-            toolbarHeight = toolbarCollapsed ? 0 : 62
+            toolbarHeight = toolbarCollapsed ? 0 : expandedToolbarHeight
             reloadToolbarProfiles()
         }
         .onChange(of: emulator.isRunning) { _, running in
@@ -290,177 +302,324 @@ struct ContentView: View {
 
     private var emulatorArea: some View {
         GeometryReader { proxy in
-            let displayAspectRatio = (!emulator.isPoweredOn || (emulator.isPowerTransitioning && !emulator.isStarting))
+            let currentDisplayAspectRatio = (!emulator.isPoweredOn || (emulator.isPowerTransitioning && !emulator.isStarting))
                 ? emulator.powerOffVideoAspectRatio
                 : emulator.videoAspectRatio
+            let layoutAspectRatio = emulator.temporaryNoBorderEnabled
+                ? (emulator.temporaryNoBorderLayoutAspectRatio ?? currentDisplayAspectRatio)
+                : currentDisplayAspectRatio
+            let networkStatusVisible = virtualModemEnabled && emulator.isRunning
+            let driveStatusVisible = emulator.trueDriveEmulationConfigured
+            let printerStatusVisible = printerEnabled && emulator.isRunning
+            let datasetteStatusVisible = emulator.mountedTapeSupportsPhysicalTransport
+            let statusPanelCount = [
+                networkStatusVisible,
+                driveStatusVisible,
+                printerStatusVisible,
+                datasetteStatusVisible
+            ].filter { $0 }.count
+            let hasStatusPanels = statusPanelCount > 0
+            let portraitStatusPanelSpace: CGFloat = portraitLayout && hasStatusPanels ? 154 : 0
+            let portraitNoBorderGestureSpace: CGFloat = portraitLayout && emulator.isRunning && emulator.isPoweredOn ? 40 : 0
+            let landscapeStatusPanelSpace: CGFloat = !portraitLayout && hasStatusPanels ? 116 : 0
+            let displayRegionSize = CGSize(
+                width: max(0, proxy.size.width - landscapeStatusPanelSpace),
+                height: max(0, proxy.size.height - portraitStatusPanelSpace - portraitNoBorderGestureSpace)
+            )
             let displaySize = Self.fittedC64Size(
-                in: proxy.size,
-                aspectRatio: displayAspectRatio
+                in: displayRegionSize,
+                aspectRatio: layoutAspectRatio
             )
             let powerOffContentSize = Self.fittedC64Size(
                 in: displaySize,
                 aspectRatio: emulator.powerOffVideoContentAspectRatio
             )
-            let sideMargin = max(0, (proxy.size.width - displaySize.width) / 2)
-            let sideStatusPanelWidth = min(sideMargin, 104)
+            let horizontalLetterbox = max(0, (displayRegionSize.width - displaySize.width) / 2)
+            let verticalLetterbox = max(0, (displayRegionSize.height - displaySize.height) / 2)
+            let landscapeStatusPanelWidth = min(104, max(0, landscapeStatusPanelSpace - 12))
+            let portraitPanelSpacing: CGFloat = 12
+            let portraitPanelHorizontalPadding: CGFloat = 16
+            let portraitPanelWidth = min(
+                104,
+                max(
+                    64,
+                    (proxy.size.width
+                        - (portraitPanelHorizontalPadding * 2)
+                        - (portraitPanelSpacing * CGFloat(max(0, statusPanelCount - 1))))
+                        / CGFloat(max(1, statusPanelCount))
+                )
+            )
 
-            ZStack(alignment: .top) {
+            ZStack(alignment: .topLeading) {
                 Color.black
 
-                ZStack(alignment: .bottom) {
-                    if !emulator.isPoweredOn {
-                        ZStack {
-                            CRTNoSignalView()
-                                .frame(
-                                    width: powerOffContentSize.width,
-                                    height: powerOffContentSize.height
+                ZStack {
+                    ZStack(alignment: .bottom) {
+                        if !emulator.isPoweredOn {
+                            ZStack {
+                                CRTNoSignalView()
+                                    .frame(
+                                        width: powerOffContentSize.width,
+                                        height: powerOffContentSize.height
+                                    )
+                                    .frame(
+                                        width: displaySize.width,
+                                        height: displaySize.height,
+                                        alignment: .center
+                                    )
+
+                                if !emulator.firmwareReady {
+                                    firmwareRequiredOverlay
+                                }
+                            }
+                        } else if !emulator.isRunning && emulator.isStarting {
+                            ZStack {
+                                Color.black
+
+                                if hasCompletedInitialStartup && !emulator.isPowerTransitioning {
+                                    ProgressView()
+                                        .controlSize(.large)
+                                        .tint(.white)
+                                }
+                            }
+                            .frame(width: displaySize.width, height: displaySize.height)
+                        } else {
+                            C64ScreenRepresentable()
+                                .environmentObject(emulator)
+                                .frame(width: displaySize.width, height: displaySize.height)
+                                .background(Color.black)
+
+                            if emulator.isPowerTransitioning && !emulator.isStarting {
+                                CRTPowerOffTransitionView()
+                                    .frame(
+                                        width: powerOffContentSize.width,
+                                        height: powerOffContentSize.height
+                                    )
+                                    .frame(
+                                        width: displaySize.width,
+                                        height: displaySize.height,
+                                        alignment: .center
+                                    )
+                                    .allowsHitTesting(false)
+                            }
+
+                            if emulator.isRunning, emulator.mousePort != nil {
+                                C64MouseCaptureView(
+                                    onMove: { deltaX, deltaY in
+                                        emulator.moveMouse(deltaX: deltaX, deltaY: deltaY)
+                                    },
+                                    onButton: { button, pressed in
+                                        emulator.setMouseButton(button, pressed: pressed)
+                                    }
                                 )
-                                .frame(
-                                    width: displaySize.width,
-                                    height: displaySize.height,
-                                    alignment: .center
-                                )
+                            }
 
                             if !emulator.firmwareReady {
                                 firmwareRequiredOverlay
                             }
-                        }
-                    } else if !emulator.isRunning && emulator.isStarting {
-                        ZStack {
-                            Color.black
 
-                            if hasCompletedInitialStartup && !emulator.isPowerTransitioning {
-                                ProgressView()
-                                    .controlSize(.large)
-                                    .tint(.white)
+                            if emulator.isRunning, emulator.virtualJoystickPort != nil {
+                                gameControlsOverlay
+                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                             }
                         }
-                        .frame(width: displaySize.width, height: displaySize.height)
-                    } else {
-                        C64ScreenRepresentable()
-                            .environmentObject(emulator)
-                            .frame(width: displaySize.width, height: displaySize.height)
-                            .background(Color.black)
+                    }
+                    .frame(width: displaySize.width, height: displaySize.height)
+                    .clipped()
 
-                        if emulator.isPowerTransitioning && !emulator.isStarting {
-                            CRTPowerOffTransitionView()
-                                .frame(
-                                    width: powerOffContentSize.width,
-                                    height: powerOffContentSize.height
-                                )
-                                .frame(
-                                    width: displaySize.width,
-                                    height: displaySize.height,
-                                    alignment: .center
-                                )
-                                .allowsHitTesting(false)
+                    if emulator.isRunning, emulator.isPoweredOn {
+                        if horizontalLetterbox >= 12 {
+                            HStack(spacing: 0) {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .frame(width: horizontalLetterbox)
+                                    .onTapGesture(count: 2) {
+                                        emulator.toggleTemporaryNoBorder()
+                                    }
+
+                                Spacer(minLength: 0)
+
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .frame(width: horizontalLetterbox)
+                                    .onTapGesture(count: 2) {
+                                        emulator.toggleTemporaryNoBorder()
+                                    }
+                            }
+                            .frame(
+                                width: displayRegionSize.width,
+                                height: displayRegionSize.height
+                            )
                         }
 
-                        if emulator.isRunning, emulator.mousePort != nil {
-                            C64MouseCaptureView(
-                                onMove: { deltaX, deltaY in
-                                    emulator.moveMouse(deltaX: deltaX, deltaY: deltaY)
-                                },
-                                onButton: { button, pressed in
-                                    emulator.setMouseButton(button, pressed: pressed)
+                        if verticalLetterbox >= 12 {
+                            VStack(spacing: 0) {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .frame(height: verticalLetterbox)
+                                    .onTapGesture(count: 2) {
+                                        emulator.toggleTemporaryNoBorder()
+                                    }
+
+                                Spacer(minLength: 0)
+
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .frame(height: verticalLetterbox)
+                                    .onTapGesture(count: 2) {
+                                        emulator.toggleTemporaryNoBorder()
+                                    }
+                            }
+                            .frame(
+                                width: displaySize.width,
+                                height: displayRegionSize.height
+                            )
+                        }
+                    }
+                }
+                .frame(
+                    width: displayRegionSize.width,
+                    height: displayRegionSize.height,
+                    alignment: .center
+                )
+
+                if !portraitLayout, hasStatusPanels {
+                    VStack(spacing: 12) {
+                        if networkStatusVisible {
+                            NetworkStatusPanel(
+                                connected: emulator.virtualModemConnected,
+                                telemetryAvailable: emulator.virtualModemTelemetryAvailable,
+                                txBytes: emulator.virtualModemTXBytes,
+                                rxBytes: emulator.virtualModemRXBytes,
+                                activityPulse: virtualModemActivityPulse,
+                                onOpen: {
+                                    showVirtualModemControls = true
                                 }
                             )
                         }
 
-                        if !emulator.firmwareReady {
-                            firmwareRequiredOverlay
+                        if driveStatusVisible {
+                            DriveStatusPanel(
+                                drive8PowerOn: emulator.drive8PowerLEDOn,
+                                drive9Enabled: emulator.drive9Configured,
+                                drive9PowerOn: emulator.drive9PowerLEDOn,
+                                activityOn: emulator.driveActivityLEDOn
+                            )
+                            .allowsHitTesting(false)
                         }
 
-                        if emulator.isRunning, emulator.virtualJoystickPort != nil {
-                            gameControlsOverlay
-                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        if printerStatusVisible {
+                            PrinterStatusPanel(
+                                device: printerDevice,
+                                format: C64PrinterSettings.exportFormat,
+                                capturedBytes: printerCapturedBytes,
+                                activityPulse: printerActivityPulse,
+                                onOpen: {
+                                    showPrinterControls = true
+                                }
+                            )
+                        }
+
+                        if datasetteStatusVisible {
+                            DatasetteStatusPanel(
+                                emulator: emulator,
+                                controlsVisible: showDatasetteControls,
+                                onToggleControls: {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        showKeyboard = false
+                                        showDatasetteControls.toggle()
+                                    }
+                                }
+                            )
                         }
                     }
+                    .frame(width: landscapeStatusPanelWidth)
+                    .frame(
+                        width: landscapeStatusPanelSpace,
+                        height: proxy.size.height,
+                        alignment: .center
+                    )
+                    .offset(x: displayRegionSize.width)
+                    .transition(.opacity)
                 }
-                .frame(width: displaySize.width, height: displaySize.height)
-                .clipped()
 
-                if sideMargin >= 12, emulator.isRunning, emulator.isPoweredOn {
-                    HStack(spacing: 0) {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .frame(width: sideMargin)
-                            .onTapGesture(count: 2) {
-                                emulator.toggleTemporaryNoBorder()
-                            }
-
-                        Spacer(minLength: 0)
-
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .frame(width: sideMargin)
-                            .onTapGesture(count: 2) {
-                                emulator.toggleTemporaryNoBorder()
-                            }
-                    }
-                    .frame(width: proxy.size.width, height: proxy.size.height)
+                if portraitLayout, portraitNoBorderGestureSpace > 0 {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .frame(
+                            width: proxy.size.width,
+                            height: portraitNoBorderGestureSpace
+                        )
+                        .offset(y: displayRegionSize.height)
+                        .onTapGesture(count: 2) {
+                            emulator.toggleTemporaryNoBorder()
+                        }
+                        .accessibilityLabel("Toggle temporary no-border view")
+                        .accessibilityHint("Double tap to crop or restore the C64 border")
                 }
 
-                if sideMargin >= 72,
-                   emulator.trueDriveEmulationConfigured
-                    || emulator.mountedTapeSupportsPhysicalTransport
-                    || (printerEnabled && emulator.isRunning)
-                    || (virtualModemEnabled && emulator.isRunning) {
-                    HStack(spacing: 0) {
-                        Spacer(minLength: 0)
-                        VStack(spacing: 12) {
-                            if virtualModemEnabled, emulator.isRunning {
-                                NetworkStatusPanel(
-                                    connected: emulator.virtualModemConnected,
-                                    telemetryAvailable: emulator.virtualModemTelemetryAvailable,
-                                    txBytes: emulator.virtualModemTXBytes,
-                                    rxBytes: emulator.virtualModemRXBytes,
-                                    activityPulse: virtualModemActivityPulse,
-                                    onOpen: {
-                                        showVirtualModemControls = true
-                                    }
-                                )
-                            }
-
-                            if emulator.trueDriveEmulationConfigured {
-                                DriveStatusPanel(
-                                    drive8PowerOn: emulator.drive8PowerLEDOn,
-                                    drive9Enabled: emulator.drive9Configured,
-                                    drive9PowerOn: emulator.drive9PowerLEDOn,
-                                    activityOn: emulator.driveActivityLEDOn
-                                )
-                                .allowsHitTesting(false)
-                            }
-
-                            if printerEnabled, emulator.isRunning {
-                                PrinterStatusPanel(
-                                    device: printerDevice,
-                                    format: C64PrinterSettings.exportFormat,
-                                    capturedBytes: printerCapturedBytes,
-                                    activityPulse: printerActivityPulse,
-                                    onOpen: {
-                                        showPrinterControls = true
-                                    }
-                                )
-                            }
-
-                            if emulator.mountedTapeSupportsPhysicalTransport {
-                                DatasetteStatusPanel(
-                                    emulator: emulator,
-                                    controlsVisible: showDatasetteControls,
-                                    onToggleControls: {
-                                        withAnimation(.easeInOut(duration: 0.2)) {
-                                            showKeyboard = false
-                                            showDatasetteControls.toggle()
-                                        }
-                                    }
-                                )
-                            }
+                if portraitLayout, hasStatusPanels {
+                    HStack(alignment: .top, spacing: portraitPanelSpacing) {
+                        if networkStatusVisible {
+                            NetworkStatusPanel(
+                                connected: emulator.virtualModemConnected,
+                                telemetryAvailable: emulator.virtualModemTelemetryAvailable,
+                                txBytes: emulator.virtualModemTXBytes,
+                                rxBytes: emulator.virtualModemRXBytes,
+                                activityPulse: virtualModemActivityPulse,
+                                onOpen: {
+                                    showVirtualModemControls = true
+                                }
+                            )
+                            .frame(width: portraitPanelWidth)
                         }
-                        .frame(width: sideStatusPanelWidth)
-                        .frame(width: sideMargin)
+
+                        if driveStatusVisible {
+                            DriveStatusPanel(
+                                drive8PowerOn: emulator.drive8PowerLEDOn,
+                                drive9Enabled: emulator.drive9Configured,
+                                drive9PowerOn: emulator.drive9PowerLEDOn,
+                                activityOn: emulator.driveActivityLEDOn
+                            )
+                            .frame(width: portraitPanelWidth)
+                            .allowsHitTesting(false)
+                        }
+
+                        if printerStatusVisible {
+                            PrinterStatusPanel(
+                                device: printerDevice,
+                                format: C64PrinterSettings.exportFormat,
+                                capturedBytes: printerCapturedBytes,
+                                activityPulse: printerActivityPulse,
+                                onOpen: {
+                                    showPrinterControls = true
+                                }
+                            )
+                            .frame(width: portraitPanelWidth)
+                        }
+
+                        if datasetteStatusVisible {
+                            DatasetteStatusPanel(
+                                emulator: emulator,
+                                controlsVisible: showDatasetteControls,
+                                onToggleControls: {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        showKeyboard = false
+                                        showDatasetteControls.toggle()
+                                    }
+                                }
+                            )
+                            .frame(width: portraitPanelWidth)
+                        }
                     }
-                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .padding(.top, 12)
+                    .padding(.horizontal, portraitPanelHorizontalPadding)
+                    .frame(
+                        width: proxy.size.width,
+                        height: portraitStatusPanelSpace,
+                        alignment: .top
+                    )
+                    .offset(y: displayRegionSize.height + portraitNoBorderGestureSpace)
                     .transition(.opacity)
                 }
             }
@@ -494,18 +653,30 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        GeometryReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                toolbarButtons
-                    .frame(
-                        minWidth: max(0, proxy.size.width - 32),
-                        alignment: .center
-                    )
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 4)
+        Group {
+            if portraitLayout {
+                VStack(spacing: 6) {
+                    toolbarPrimaryRow
+                    toolbarSecondaryRow
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+            } else {
+                GeometryReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        toolbarButtons
+                            .frame(
+                                minWidth: max(0, proxy.size.width - 32),
+                                alignment: .center
+                            )
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 4)
+                    }
+                }
             }
         }
-        .frame(height: 62)
+        .frame(height: expandedToolbarHeight)
         .background(.black)
         .popover(isPresented: $showPorts, arrowEdge: .top) {
             PortsConfigurationView(emulator: emulator)
@@ -537,8 +708,14 @@ struct ContentView: View {
         }
     }
 
-    @ViewBuilder
     private var toolbarButtons: some View {
+        HStack(spacing: 10) {
+            toolbarPrimaryRow
+            toolbarSecondaryRow
+        }
+    }
+
+    private var toolbarPrimaryRow: some View {
         HStack(spacing: 10) {
             Button {
                 deviceImportTarget = nil
@@ -596,7 +773,12 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .disabled(!emulator.isRunning)
+        }
+        .buttonBorderShape(.roundedRectangle(radius: 14))
+    }
 
+    private var toolbarSecondaryRow: some View {
+        HStack(spacing: 10) {
             Menu {
                 ForEach(emulationProfiles) { profile in
                     Button {
@@ -764,6 +946,24 @@ struct ContentView: View {
         )
     }
 
+    private var expandedToolbarHeight: CGFloat {
+        portraitLayout ? 116 : 62
+    }
+
+    private func updateInterfaceLayout(for size: CGSize) {
+        guard size.width > 0, size.height > 0 else { return }
+
+        let shouldUsePortraitLayout = size.height > size.width
+        guard shouldUsePortraitLayout != portraitLayout else { return }
+
+        portraitLayout = shouldUsePortraitLayout
+        guard !toolbarCollapsed else { return }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            toolbarHeight = shouldUsePortraitLayout ? 116 : 62
+        }
+    }
+
     private var toolbarRestoreButton: some View {
         Button {
             expandToolbar()
@@ -793,7 +993,7 @@ struct ContentView: View {
         toolbarCollapsed = false
         DispatchQueue.main.async {
             withAnimation(.easeInOut(duration: 0.32)) {
-                toolbarHeight = 62
+                toolbarHeight = expandedToolbarHeight
             }
         }
     }

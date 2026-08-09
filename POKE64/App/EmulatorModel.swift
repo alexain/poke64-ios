@@ -248,6 +248,7 @@ final class EmulatorModel: ObservableObject {
     @Published private(set) var powerOffVideoAspectRatio: CGFloat = 4.0 / 3.0
     @Published private(set) var powerOffVideoContentAspectRatio: CGFloat = 4.0 / 3.0
     @Published private(set) var temporaryNoBorderEnabled = false
+    @Published private(set) var temporaryNoBorderLayoutAspectRatio: CGFloat?
     @Published var presentedError: String?
     @Published private(set) var joyport1Assignment: JoyportAssignment = .none
     @Published private(set) var joyport2Assignment: JoyportAssignment = .none
@@ -886,6 +887,7 @@ final class EmulatorModel: ObservableObject {
             session.stop()
             isRunning = false
             temporaryNoBorderEnabled = false
+            temporaryNoBorderLayoutAspectRatio = nil
             clearMediaState(removeTemporaryFiles: true)
         }
 
@@ -1221,6 +1223,7 @@ final class EmulatorModel: ObservableObject {
         }
         isRunning = false
         temporaryNoBorderEnabled = false
+        temporaryNoBorderLayoutAspectRatio = nil
         isPoweredOn = false
         isPowerTransitioning = false
         UserDefaults.standard.set(false, forKey: Self.machinePowerStateKey)
@@ -1343,6 +1346,8 @@ final class EmulatorModel: ObservableObject {
         PersistentSessionStore.clear()
         session.stop()
         isRunning = false
+        temporaryNoBorderEnabled = false
+        temporaryNoBorderLayoutAspectRatio = nil
         driveLEDOffTask?.cancel()
         driveLEDOffTask = nil
         drive8ActivityLEDOn = false
@@ -1353,8 +1358,17 @@ final class EmulatorModel: ObservableObject {
     func toggleTemporaryNoBorder() {
         guard isRunning, isPoweredOn, !isPowerTransitioning else { return }
         let enabled = !temporaryNoBorderEnabled
+        if enabled {
+            // Preserve the on-screen canvas footprint while VICE changes the
+            // cropped video geometry. No-border should crop the source, not
+            // unexpectedly expand the SwiftUI layout around it.
+            temporaryNoBorderLayoutAspectRatio = videoAspectRatio
+        }
         session.setTemporaryMaximumVideoCropEnabled(enabled)
         temporaryNoBorderEnabled = enabled
+        if !enabled {
+            temporaryNoBorderLayoutAspectRatio = nil
+        }
         status = enabled ? "Temporary no-border view" : "Configured borders restored"
     }
 
@@ -1362,6 +1376,7 @@ final class EmulatorModel: ObservableObject {
         guard temporaryNoBorderEnabled else { return }
         session.setTemporaryMaximumVideoCropEnabled(false)
         temporaryNoBorderEnabled = false
+        temporaryNoBorderLayoutAspectRatio = nil
     }
 
     func softReset() {

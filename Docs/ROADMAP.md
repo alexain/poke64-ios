@@ -1,6 +1,6 @@
 # POKE64 roadmap
 
-POKE64 is designed for **iPadOS first**, with landscape iPad use as the primary interface target. iPhone and macOS adaptations will be considered after the core iPad experience is stable.
+POKE64 is designed for **iPadOS first**. Landscape remains the primary interface target, with an adaptive portrait layout for the emulator toolbar and status panels. iPhone and macOS adaptations will be considered after the core iPad experience is stable.
 
 This document lists only work that is still pending. Completed Library foundations, G64 support, duplicate handling, disk inspection, Library artwork/screenshots, multi-disk detection, keyboard, Devices, video, audio, Drive 8/9, REU including external `.reu` image import, datasette transport, the MPS-803 virtual printer, the Virtual Hayes modem/BBS foundation, Emulation/Firmware Profiles, C64 Power control and automatic Previous Session restore have been removed.
 
