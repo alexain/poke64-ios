@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+No unreleased changes yet.
+
+## 0.8.0 — 2026-08-09
+
 ### Changed
 
 - Added an adaptive portrait emulator layout: the main toolbar becomes two fixed rows instead of one horizontally scrolling row, while landscape keeps the existing single-row toolbar.

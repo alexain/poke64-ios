@@ -67,7 +67,7 @@ A cartridge, disk or tape remains mounted across Soft and Hard Reset, matching p
 ## Documentation
 
 - [Build and development guide](Docs/BUILDING.md)
-- [VICE revision used by v0.7.7](Docs/VICE_REVISION.md)
+- [VICE revision used by v0.8.0](Docs/VICE_REVISION.md)
 - [Architecture](Docs/ARCHITECTURE.md)
 - [Roadmap](Docs/ROADMAP.md)
 - [External-firmware testing](Docs/TESTING_EXTERNAL_FIRMWARE.md)
