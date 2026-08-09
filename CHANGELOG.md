@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-No unreleased changes yet.
+### Documentation
+
+- Added a README Downloads section linking to GitHub Releases and clarifying unsigned IPA sideloading and firmware/media redistribution requirements.
 
 ## 0.8.0 — 2026-08-09
 

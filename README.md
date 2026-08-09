@@ -45,6 +45,12 @@ POKE64 can download the generic BASIC, KERNAL and character files from a pinned 
 
 Users and redistributors are responsible for ensuring that every imported or redistributed firmware and media file is lawfully obtained and used.
 
+## Downloads
+
+Prebuilt release artifacts are published on the [GitHub Releases](https://github.com/alexain/poke64-ios/releases) page.
+
+When an **unsigned IPA** is provided, it is intended for sideloading on a physical iPhone or iPad. The IPA is not signed by Apple and cannot be installed directly from iPadOS; it must first be signed and installed with a compatible sideloading solution. Release archives do not include Commodore ROMs, commercial firmware, games or other copyrighted media.
+
 ## Development status
 
 POKE64 is under active development and currently targets iPadOS 17 or later. iPhone and macOS adaptations are planned for a later stage.
