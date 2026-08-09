@@ -2126,12 +2126,33 @@ static void applyStoredPrinterOptions(SessionImpl *session) {
 static void applyStoredDriveOptions(SessionImpl *session) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     const bool trueDrive = storedTrueDriveEmulationEnabled();
+    NSString *loadWarpMode = validatedDefaultString(
+        @"poke64.drive.loadWarpMode",
+        @[@"off", @"automatic", @"maximum"],
+        @"off"
+    );
 
+    NSString *autoloadWarp = @"disabled";
+    NSString *warpBoost = @"disabled";
+    if (trueDrive && [loadWarpMode isEqualToString:@"automatic"]) {
+        autoloadWarp = @"disk";
+    } else if (trueDrive && [loadWarpMode isEqualToString:@"maximum"]) {
+        autoloadWarp = @"disk_mute";
+        warpBoost = @"enabled";
+    }
+
+    // In the pinned vice-libretro core, this option is also the Drive 8/9
+    // backend selector: disabling True Drive enables TrapDevice8/9, while
+    // enabling it disables those drive traps. The separate
+    // vice_virtual_device_traps option is used by this core for printer
+    // TrapDevice4, so POKE64 intentionally exposes no second drive-trap switch.
     assignCoreOption(
         session,
         "vice_drive_true_emulation",
         trueDrive ? @"enabled" : @"disabled"
     );
+    assignCoreOption(session, "vice_autoloadwarp", autoloadWarp);
+    assignCoreOption(session, "vice_warp_boost", warpBoost);
     assignCoreOption(
         session,
         "vice_floppy_write_protection",
@@ -2199,6 +2220,15 @@ static void applyStoredAudioOptions(SessionImpl *session) {
             @"poke64.audio.sidModel",
             @[@"default", @"6581", @"8580", @"8580RD"],
             @"default"
+        )
+    );
+    assignCoreOption(
+        session,
+        "vice_sid_extra",
+        validatedDefaultString(
+            @"poke64.audio.sidExtra",
+            @[@"disabled", @"0xd420", @"0xd500", @"0xde00", @"0xdf00"],
+            @"disabled"
         )
     );
     assignCoreOption(

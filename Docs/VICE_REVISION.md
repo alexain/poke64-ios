@@ -1,6 +1,6 @@
-# VICE/libretro revision used by POKE64 0.7.6
+# VICE/libretro revision used by POKE64 0.7.7
 
-POKE64 0.7.6 builds its `vice_x64sc` libretro core from the following
+POKE64 0.7.7 builds its `vice_x64sc` libretro core from the following
 upstream `vice-libretro` revision:
 
 ```text

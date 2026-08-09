@@ -1358,6 +1358,43 @@ enum C64SIDModel: String, CaseIterable, Identifiable {
     }
 }
 
+enum C64SIDExtra: String, CaseIterable, Identifiable {
+    case disabled
+    case d420 = "0xd420"
+    case d500 = "0xd500"
+    case de00 = "0xde00"
+    case df00 = "0xdf00"
+
+    static let defaultsKey = "poke64.audio.sidExtra"
+    static let defaultValue: C64SIDExtra = .disabled
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .disabled:
+            return "Off"
+        case .d420:
+            return "$D420"
+        case .d500:
+            return "$D500"
+        case .de00:
+            return "$DE00"
+        case .df00:
+            return "$DF00"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .disabled:
+            return "Single SID"
+        default:
+            return "Second SID at \(title)"
+        }
+    }
+}
+
 enum C64ReSIDSampling: String, CaseIterable, Identifiable {
     case fast
     case interpolation
@@ -1419,6 +1456,8 @@ enum C64AudioSettings {
                 ?? C64SIDEngine.defaultValue.rawValue,
             defaults.string(forKey: C64SIDModel.defaultsKey)
                 ?? C64SIDModel.defaultValue.rawValue,
+            defaults.string(forKey: C64SIDExtra.defaultsKey)
+                ?? C64SIDExtra.defaultValue.rawValue,
             defaults.string(forKey: C64ReSIDSampling.defaultsKey)
                 ?? C64ReSIDSampling.defaultValue.rawValue,
             defaults.string(forKey: C64AudioSampleRate.defaultsKey)
@@ -1510,16 +1549,56 @@ enum C64DriveModel: String, CaseIterable, Identifiable {
     }
 }
 
+enum C64DriveLoadWarpMode: String, CaseIterable, Identifiable {
+    case off
+    case automatic
+    case maximum
+
+    static let defaultValue: C64DriveLoadWarpMode = .off
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .off:
+            return "Off"
+        case .automatic:
+            return "Automatic"
+        case .maximum:
+            return "Maximum"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .off:
+            return "Run the emulated drive at normal C64 speed."
+        case .automatic:
+            return "Warp while the drive is active, but stop when C64 audio is detected."
+        case .maximum:
+            return "Ignore audio detection during disk access and enable VICE Warp Boost."
+        }
+    }
+}
+
 enum C64DriveSettings {
     static let trueDriveEmulationKey = "poke64.drive.trueEmulation"
+    static let loadWarpModeKey = "poke64.drive.loadWarpMode"
     static let drive9EnabledKey = "poke64.drive9.enabled"
     static let writeProtectionKey = "poke64.drive.writeProtection"
     static let soundLevelKey = "poke64.drive.soundLevel"
 
     static let defaultTrueDriveEmulation = false
+    static let defaultLoadWarpMode = C64DriveLoadWarpMode.defaultValue
     static let defaultDrive9Enabled = false
     static let defaultWriteProtection = false
     static let defaultSoundLevel = 20
+
+    static var loadWarpMode: C64DriveLoadWarpMode {
+        let rawValue = UserDefaults.standard.string(forKey: loadWarpModeKey)
+            ?? defaultLoadWarpMode.rawValue
+        return C64DriveLoadWarpMode(rawValue: rawValue) ?? defaultLoadWarpMode
+    }
 
     static var configurationFingerprint: String {
         let defaults = UserDefaults.standard
@@ -1534,6 +1613,7 @@ enum C64DriveSettings {
             String(defaults.object(forKey: trueDriveEmulationKey) == nil
                 ? defaultTrueDriveEmulation
                 : defaults.bool(forKey: trueDriveEmulationKey)),
+            loadWarpMode.rawValue,
             String(defaults.object(forKey: writeProtectionKey) == nil
                 ? defaultWriteProtection
                 : defaults.bool(forKey: writeProtectionKey)),
@@ -1629,7 +1709,7 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
         case .tape:
             "Datasette behavior and tape transport options."
         case .diskDrives:
-            "Drive units, models and True Drive Emulation."
+            "Drive units, models and disk-access backend."
         case .printer:
             "IEC printer emulation and output capture."
         case .firmware:
@@ -3066,6 +3146,9 @@ private struct AudioSettingsView: View {
     @AppStorage(C64SIDModel.defaultsKey)
     private var sidModelRawValue = C64SIDModel.defaultValue.rawValue
 
+    @AppStorage(C64SIDExtra.defaultsKey)
+    private var sidExtraRawValue = C64SIDExtra.defaultValue.rawValue
+
     @AppStorage(C64ReSIDSampling.defaultsKey)
     private var residSamplingRawValue = C64ReSIDSampling.defaultValue.rawValue
 
@@ -3080,6 +3163,10 @@ private struct AudioSettingsView: View {
 
     private var selectedEngine: C64SIDEngine {
         C64SIDEngine(rawValue: sidEngineRawValue) ?? .defaultValue
+    }
+
+    private var selectedSIDExtra: C64SIDExtra {
+        C64SIDExtra(rawValue: sidExtraRawValue) ?? .defaultValue
     }
 
     var body: some View {
@@ -3099,11 +3186,19 @@ private struct AudioSettingsView: View {
                 }
                 .pickerStyle(.menu)
 
+                Picker("Second SID", selection: $sidExtraRawValue) {
+                    ForEach(C64SIDExtra.allCases) { sidExtra in
+                        Text(sidExtra.title).tag(sidExtra.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                LabeledContent("SID configuration", value: selectedSIDExtra.detail)
                 LabeledContent("Engine profile", value: selectedEngine.detail)
             } header: {
                 Text("SID")
             } footer: {
-                Text("Automatic selects the traditional 6581 for C64 models and the later 8580 for C64C models. ReSID-FP is the most accurate option; FastSID is intended for lower-powered hardware.")
+                Text("Automatic selects the traditional 6581 for C64 models and the later 8580 for C64C models. Second SID exposes every dual-SID base address offered by the pinned VICE/libretro core: $D420, $D500, $DE00 and $DF00. ReSID-FP is the most accurate engine option.")
             }
 
             Section {
@@ -3165,6 +3260,7 @@ private struct AudioSettingsView: View {
     private var isUsingDefaults: Bool {
         sidEngineRawValue == C64SIDEngine.defaultValue.rawValue
             && sidModelRawValue == C64SIDModel.defaultValue.rawValue
+            && sidExtraRawValue == C64SIDExtra.defaultValue.rawValue
             && residSamplingRawValue == C64ReSIDSampling.defaultValue.rawValue
             && sampleRateRawValue == C64AudioSampleRate.defaultValue.rawValue
             && audioLeakLevel == C64AudioSettings.defaultAudioLeakLevel
@@ -3174,6 +3270,7 @@ private struct AudioSettingsView: View {
     private func restoreDefaults() {
         sidEngineRawValue = C64SIDEngine.defaultValue.rawValue
         sidModelRawValue = C64SIDModel.defaultValue.rawValue
+        sidExtraRawValue = C64SIDExtra.defaultValue.rawValue
         residSamplingRawValue = C64ReSIDSampling.defaultValue.rawValue
         sampleRateRawValue = C64AudioSampleRate.defaultValue.rawValue
         audioLeakLevel = C64AudioSettings.defaultAudioLeakLevel
@@ -4083,6 +4180,9 @@ private struct DiskDriveSettingsView: View {
     @AppStorage(C64DriveSettings.trueDriveEmulationKey)
     private var trueDriveEmulation = C64DriveSettings.defaultTrueDriveEmulation
 
+    @AppStorage(C64DriveSettings.loadWarpModeKey)
+    private var loadWarpModeRawValue = C64DriveSettings.defaultLoadWarpMode.rawValue
+
     @AppStorage(C64DriveSettings.writeProtectionKey)
     private var writeProtection = C64DriveSettings.defaultWriteProtection
 
@@ -4095,6 +4195,10 @@ private struct DiskDriveSettingsView: View {
 
     private var drive9Model: C64DriveModel {
         C64DriveModel(rawValue: drive9ModelRawValue) ?? .defaultValue
+    }
+
+    private var loadWarpMode: C64DriveLoadWarpMode {
+        C64DriveLoadWarpMode(rawValue: loadWarpModeRawValue) ?? .defaultValue
     }
 
     private var drive8FirmwareStatus: FirmwareStatus {
@@ -4118,22 +4222,40 @@ private struct DiskDriveSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle(
-                    "True Drive Emulation",
-                    isOn: $trueDriveEmulation
-                )
-                .disabled(!canEnableTrueDrive)
+                Picker("Drive mode", selection: $trueDriveEmulation) {
+                    Text("Fast Virtual — Traps").tag(false)
+                    Text("True Drive — Hardware")
+                        .tag(true)
+                        .disabled(!canEnableTrueDrive)
+                }
+                .pickerStyle(.menu)
 
-                LabeledContent(
-                    "Active backend",
-                    value: trueDriveEmulation ? "Hardware-level drives" : "Fast virtual drives"
-                )
+                if trueDriveEmulation {
+                    LabeledContent("Disk access", value: "Full drive / IEC emulation")
+
+                    Picker("True Drive acceleration", selection: $loadWarpModeRawValue) {
+                        ForEach(C64DriveLoadWarpMode.allCases) { mode in
+                            Text(mode.title).tag(mode.rawValue)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Text(loadWarpMode.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    LabeledContent("Disk access", value: "Virtual Device Traps")
+
+                    Text("VICE automatically enables the Drive 8/9 traps when True Drive is disabled. No separate trap switch is required.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             } header: {
                 Text("Drive Emulation")
             } footer: {
                 Text(trueDriveEmulation
-                    ? "True Drive Emulation applies to every enabled drive. It executes each selected model's ROM and is required for complete JiffyDOS compatibility, accurate timing and mechanical drive sound."
-                    : "Fast virtual drive mode applies to every enabled drive and uses VICE traps for convenient loading. It does not execute drive firmware, so drive-side JiffyDOS commands are unavailable.")
+                    ? "True Drive emulates the selected drive CPU, ROM and IEC behavior for every enabled unit. Use it for JiffyDOS drive firmware, custom fastloaders and software that depends on real drive behavior; Automatic or Maximum can accelerate loading without switching to traps."
+                    : "Fast Virtual is the maximum-speed path for standard KERNAL disk I/O and REU preload workflows. It automatically uses VICE Virtual Device Traps for Drive 8 and Drive 9 and does not execute drive firmware.")
             }
 
             Section {
@@ -4161,7 +4283,7 @@ private struct DiskDriveSettingsView: View {
                 LabeledContent(
                     "Active backend",
                     value: drive9Enabled
-                        ? (trueDriveEmulation ? "Hardware-level drive" : "Fast virtual drive")
+                        ? (trueDriveEmulation ? "True Drive — Hardware" : "Fast Virtual — Traps")
                         : "Disabled"
                 )
 
@@ -4191,7 +4313,7 @@ private struct DiskDriveSettingsView: View {
 
                 if !canEnableTrueDrive {
                     Label(
-                        "Import every required drive ROM in Firmware / ROMs before enabling True Drive Emulation.",
+                        "Import every required drive ROM in Firmware / ROMs before selecting True Drive — Hardware.",
                         systemImage: "info.circle"
                     )
                     .font(.footnote)
@@ -4226,7 +4348,7 @@ private struct DiskDriveSettingsView: View {
                 if !anyEnabledDriveSupportsSound {
                     Text("The VICE libretro drive-sound option supports 1541-family and 1571 drives, not the 1581.")
                 } else if !trueDriveEmulation {
-                    Text("Mechanical drive sound requires True Drive Emulation and a compatible disk image.")
+                    Text("Mechanical drive sound requires True Drive — Hardware and a compatible disk image.")
                 } else {
                     Text("Mechanical drive sound is shared by the enabled 1541-family and 1571 drives.")
                 }
@@ -4330,6 +4452,7 @@ private struct DiskDriveSettingsView: View {
             && drive9Enabled == C64DriveSettings.defaultDrive9Enabled
             && drive9ModelRawValue == C64DriveModel.defaultValue.rawValue
             && trueDriveEmulation == C64DriveSettings.defaultTrueDriveEmulation
+            && loadWarpModeRawValue == C64DriveSettings.defaultLoadWarpMode.rawValue
             && writeProtection == C64DriveSettings.defaultWriteProtection
             && driveSoundLevel == C64DriveSettings.defaultSoundLevel
     }
@@ -4345,6 +4468,7 @@ private struct DiskDriveSettingsView: View {
         drive9Enabled = C64DriveSettings.defaultDrive9Enabled
         drive9ModelRawValue = C64DriveModel.defaultValue.rawValue
         trueDriveEmulation = C64DriveSettings.defaultTrueDriveEmulation
+        loadWarpModeRawValue = C64DriveSettings.defaultLoadWarpMode.rawValue
         writeProtection = C64DriveSettings.defaultWriteProtection
         driveSoundLevel = C64DriveSettings.defaultSoundLevel
     }

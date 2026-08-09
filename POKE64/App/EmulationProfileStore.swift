@@ -32,6 +32,7 @@ struct EmulationProfileSnapshot: Codable, Equatable {
 
     var sidEngine: String
     var sidModel: String
+    var sidExtra: String? = nil
     var reSIDSampling: String
     var audioSampleRate: String
     var audioLeakLevel: Int
@@ -41,6 +42,7 @@ struct EmulationProfileSnapshot: Codable, Equatable {
     var drive9Enabled: Bool
     var drive9Model: String
     var trueDriveEmulation: Bool
+    var driveLoadWarpMode: String? = nil
     var driveWriteProtection: Bool
     var driveSoundLevel: Int
 
@@ -143,6 +145,8 @@ struct EmulationProfileSnapshot: Codable, Equatable {
                 ?? C64SIDEngine.defaultValue.rawValue,
             sidModel: defaults.string(forKey: C64SIDModel.defaultsKey)
                 ?? C64SIDModel.defaultValue.rawValue,
+            sidExtra: defaults.string(forKey: C64SIDExtra.defaultsKey)
+                ?? C64SIDExtra.defaultValue.rawValue,
             reSIDSampling: defaults.string(forKey: C64ReSIDSampling.defaultsKey)
                 ?? C64ReSIDSampling.defaultValue.rawValue,
             audioSampleRate: defaults.string(forKey: C64AudioSampleRate.defaultsKey)
@@ -171,6 +175,7 @@ struct EmulationProfileSnapshot: Codable, Equatable {
                 key: C64DriveSettings.trueDriveEmulationKey,
                 defaultValue: C64DriveSettings.defaultTrueDriveEmulation
             ),
+            driveLoadWarpMode: C64DriveSettings.loadWarpMode.rawValue,
             driveWriteProtection: boolValue(
                 defaults,
                 key: C64DriveSettings.writeProtectionKey,
@@ -222,6 +227,7 @@ struct EmulationProfileSnapshot: Codable, Equatable {
             crtPresetID: C64CRTPresetStore.builtInPresetID,
             sidEngine: C64SIDEngine.defaultValue.rawValue,
             sidModel: C64SIDModel.defaultValue.rawValue,
+            sidExtra: C64SIDExtra.defaultValue.rawValue,
             reSIDSampling: C64ReSIDSampling.defaultValue.rawValue,
             audioSampleRate: C64AudioSampleRate.defaultValue.rawValue,
             audioLeakLevel: C64AudioSettings.defaultAudioLeakLevel,
@@ -230,6 +236,7 @@ struct EmulationProfileSnapshot: Codable, Equatable {
             drive9Enabled: C64DriveSettings.defaultDrive9Enabled,
             drive9Model: C64DriveModel.defaultValue.rawValue,
             trueDriveEmulation: C64DriveSettings.defaultTrueDriveEmulation,
+            driveLoadWarpMode: C64DriveSettings.defaultLoadWarpMode.rawValue,
             driveWriteProtection: C64DriveSettings.defaultWriteProtection,
             driveSoundLevel: C64DriveSettings.defaultSoundLevel,
             virtualModemEnabled: C64VirtualModemSettings.defaultEnabled,
@@ -245,6 +252,12 @@ struct EmulationProfileSnapshot: Codable, Equatable {
         }
         if normalized.crtPresetID == nil {
             normalized.crtPresetID = current.crtPresetID
+        }
+        if normalized.driveLoadWarpMode == nil {
+            normalized.driveLoadWarpMode = C64DriveSettings.defaultLoadWarpMode.rawValue
+        }
+        if normalized.sidExtra == nil {
+            normalized.sidExtra = C64SIDExtra.defaultValue.rawValue
         }
         return normalized == current
     }
@@ -307,6 +320,9 @@ struct EmulationProfileSnapshot: Codable, Equatable {
 
         defaults.set(sidEngine, forKey: C64SIDEngine.defaultsKey)
         defaults.set(sidModel, forKey: C64SIDModel.defaultsKey)
+        let sidExtraValue = C64SIDExtra(rawValue: sidExtra ?? "")
+            ?? C64SIDExtra.defaultValue
+        defaults.set(sidExtraValue.rawValue, forKey: C64SIDExtra.defaultsKey)
         defaults.set(reSIDSampling, forKey: C64ReSIDSampling.defaultsKey)
         defaults.set(audioSampleRate, forKey: C64AudioSampleRate.defaultsKey)
         defaults.set(audioLeakLevel, forKey: C64AudioSettings.audioLeakLevelKey)
@@ -316,6 +332,9 @@ struct EmulationProfileSnapshot: Codable, Equatable {
         defaults.set(drive9Enabled, forKey: C64DriveSettings.drive9EnabledKey)
         defaults.set(drive9Model, forKey: C64DriveModel.drive9DefaultsKey)
         defaults.set(trueDriveEmulation, forKey: C64DriveSettings.trueDriveEmulationKey)
+        let loadWarpMode = C64DriveLoadWarpMode(rawValue: driveLoadWarpMode ?? "")
+            ?? C64DriveSettings.defaultLoadWarpMode
+        defaults.set(loadWarpMode.rawValue, forKey: C64DriveSettings.loadWarpModeKey)
         defaults.set(driveWriteProtection, forKey: C64DriveSettings.writeProtectionKey)
         defaults.set(driveSoundLevel, forKey: C64DriveSettings.soundLevelKey)
 

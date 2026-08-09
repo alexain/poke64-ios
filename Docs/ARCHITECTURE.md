@@ -20,7 +20,7 @@ Implemented panels:
 
 - System: C64/C64C and PAL/NTSC machine profiles;
 - Graphics: aspect ratio, crop, palette, PAL filter and color controls;
-- Audio: SID engine/model, ReSID sampling, output sample rate, VIC-II leak and datasette sound;
+- Audio: SID engine/model, optional second SID at the core-supported $D420/$D500/$DE00/$DF00 addresses, ReSID sampling, output sample rate, VIC-II leak and datasette sound;
 - Disk Drives: Drive 8, optional Drive 9, models, shared backend, write protection and mechanical sound;
 - Firmware / ROMs: system and drive slots plus pinned OpenROMs installation.
 
@@ -76,10 +76,13 @@ The OpenROMs profile downloads a pinned generic BASIC, KERNAL and character set 
 
 Drive 8 is always enabled. Drive 9 is optional and has an independent model and mounted image.
 
-The emulation backend is global:
+The emulation backend is global and is presented as one mutually exclusive **Drive mode** choice:
 
-- Fast Virtual Drive enables VICE virtual-device traps for every enabled drive;
-- True Drive Emulation loads the selected drive ROMs, activates the configured hardware models and disables the corresponding traps.
+- **Fast Virtual — Traps** sets `vice_drive_true_emulation=disabled`. In the pinned vice-libretro core this automatically disables hardware-level Drive 8/9 emulation and enables `TrapDevice8`/`TrapDevice9`, providing the preferred maximum-speed path for standard KERNAL I/O and REU preload workflows;
+- **True Drive — Hardware** sets `vice_drive_true_emulation=enabled`, loads the selected drive ROMs, activates the configured hardware models and automatically disables the Drive 8/9 traps;
+- optional True Drive load acceleration is a libretro-core path used only with True Drive. `Automatic` warps during disk activity while respecting detected C64 audio; `Maximum` ignores audio detection and enables VICE Warp Boost. The setting is forced off at the core boundary whenever Fast Virtual is active.
+
+POKE64 intentionally does not expose an independent Drive 8/9 trap toggle. The pinned core already couples those traps to the True Drive option, so a second switch would create misleading or invalid backend combinations. The core option named `vice_virtual_device_traps` is handled separately for printer device 4 in this revision.
 
 Drive model and ROM resources are established during core initialization. Runtime insertion ensures the selected ROM and drive type are active before attaching the image.
 
@@ -142,7 +145,7 @@ VICE supplies a framebuffer through the video callback. `C64MetalView` uploads i
 
 ## Audio
 
-Stereo 16-bit samples from the batch callback are written to a ring buffer consumed by `AVAudioEngine`. SID, sample-rate and peripheral-audio options are applied through libretro core variables and VICE runtime resources where required.
+Stereo 16-bit samples from the batch callback are written to a ring buffer consumed by `AVAudioEngine`. SID, sample-rate and peripheral-audio options are applied through libretro core variables and VICE runtime resources where required. `vice_sid_extra` is used for the optional second SID; the pinned core maps its four exposed addresses to VICE `Sid2AddressStart` and enables `SidStereo`.
 
 ## Reset and media lifecycle
 

@@ -9,10 +9,10 @@ POKE64 is an independent open-source project. It is not affiliated with Commodor
 ## Current features
 
 - Native iPadOS interface with a real C64 Power control, full-screen Library and Settings, and guided first-run firmware setup.
-- VICE `x64sc` emulation for C64/C64C PAL and NTSC systems, with configurable VIC-II video and SID audio.
+- VICE `x64sc` emulation for C64/C64C PAL and NTSC systems, with configurable VIC-II video and SID audio, including optional dual-SID addresses supported by the pinned core.
 - C64 keyboard, virtual joystick, physical game controllers and Commodore 1351 mouse support from touch, trackpad or external mouse.
 - Persistent Library for D64, D71, D81, G64, PRG, CRT, TAP and T64 media, including artwork, screenshots, disk inspection and automatic multi-disk sets.
-- Drive 8 and optional Drive 9 with 1541/1541-II/1571/1581 models, Fast Virtual Drive or True Drive Emulation, plus datasette and cartridge controls.
+- Drive 8 and optional Drive 9 with 1541/1541-II/1571/1581 models, an explicit Fast Virtual (VICE traps) or True Drive backend, optional True Drive load acceleration, plus datasette and cartridge controls; CRT cartridge auto-detection inherits VICE support including Prophet64 images.
 - Commodore REU support from 128 KB to 16 MB, including persistent memory and external `.reu` images.
 - User-managed Commodore and compatible firmware, one-step MEGA65 OpenROMs installation, and shared Firmware Profiles.
 - Emulation Profiles for complete machine configurations, including a permanent editable `Default` profile and optional Power-on Profile behavior.
@@ -53,7 +53,7 @@ System, Graphics, Audio, Disk Drives, Tape, Printer, Networking and Firmware / R
 
 POKE64 maintains an automatic Previous Session checkpoint for normal app backgrounding and cold-launch restoration. A deliberate C64 Power OFF ends that resumable machine state; Power ON performs a fresh boot using the current profile or the optional Power-on Profile.
 
-Drive 8 is always available. Drive 9 can be enabled independently. Fast Virtual Drive uses VICE virtual-device traps; True Drive executes the selected drive ROMs for all enabled drives and enables hardware-level timing, compatible drive-side firmware and mechanical sound.
+Drive 8 is always available. Drive 9 can be enabled independently. **Fast Virtual** is the trap-based backend: selecting it disables True Drive and the pinned VICE/libretro core automatically enables the corresponding Drive 8/9 Virtual Device Traps. **True Drive** executes the selected drive ROMs for all enabled drives and enables hardware-level timing, compatible drive-side firmware and mechanical sound; optional Automatic or Maximum load acceleration can speed up this compatibility path. There is intentionally no separate drive-trap toggle in POKE64.
 
 Current drive-status limitations:
 
@@ -67,7 +67,7 @@ A cartridge, disk or tape remains mounted across Soft and Hard Reset, matching p
 ## Documentation
 
 - [Build and development guide](Docs/BUILDING.md)
-- [VICE revision used by v0.7.6](Docs/VICE_REVISION.md)
+- [VICE revision used by v0.7.7](Docs/VICE_REVISION.md)
 - [Architecture](Docs/ARCHITECTURE.md)
 - [Roadmap](Docs/ROADMAP.md)
 - [External-firmware testing](Docs/TESTING_EXTERNAL_FIRMWARE.md)

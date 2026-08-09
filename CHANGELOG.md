@@ -4,6 +4,27 @@
 
 No unreleased changes yet.
 
+## 0.7.7 — 2026-08-09
+
+### Added
+
+- Added optional second-SID configuration with every address exposed by the pinned VICE/libretro core: `$D420`, `$D500`, `$DE00` and `$DF00`, plus `Off`. The setting is preserved in Emulation Profiles with backward-compatible defaults.
+- Added True Drive disk acceleration with `Off`, `Automatic` and `Maximum` modes. Automatic uses the existing VICE/libretro disk autoload-warp path while respecting detected C64 audio; Maximum ignores audio detection and enables Warp Boost. Fast Virtual Drive continues to use VICE Virtual Device Traps instead.
+- Preserved disk-acceleration mode in Emulation Profiles with backward-compatible defaults for profiles created before this setting existed.
+
+### Changed
+
+- Reworked Drive Emulation settings into an explicit **Fast Virtual — Traps** or **True Drive — Hardware** backend choice instead of presenting True Drive as an isolated toggle.
+- Made the trap relationship explicit in the UI: the pinned vice-libretro core automatically enables Drive 8/9 traps when True Drive is disabled, so POKE64 intentionally exposes no separate disk-trap switch.
+- Included the True Drive acceleration mode when deciding whether **Restore Drive Defaults** is available.
+
+### Documentation
+
+- Documented that Prophet64 `.crt` images already use VICE's native Prophet64 cartridge emulation through normal CRT auto-detection; raw 256 KiB `.bin` images remain a separate future import workflow because the binary format carries no safe cartridge-type identification.
+- Clarified the two fast-I/O paths: Virtual Device Traps for maximum-speed standard KERNAL/REU workflows, and Automatic Load Warp for True Drive/JiffyDOS-compatible workflows.
+- Documented that `vice_drive_true_emulation` controls the Drive 8/9 trap pairing in the pinned core, while `vice_virtual_device_traps` is used separately for printer device 4.
+- Updated README, VICE revision notes and version metadata for the v0.7.7 checkpoint.
+
 ## 0.7.6 — 2026-08-08
 
 ### Added
