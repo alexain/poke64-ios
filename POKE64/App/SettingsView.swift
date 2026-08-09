@@ -987,6 +987,328 @@ enum C64VideoSettings {
     }
 }
 
+enum C64CRTMaskType: Int, CaseIterable, Identifiable, Codable {
+    case off = 0
+    case dotMask = 1
+    case apertureGrille = 2
+    case vga = 3
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .off:
+            "Off"
+        case .dotMask:
+            "Dot Mask"
+        case .apertureGrille:
+            "Aperture Grille"
+        case .vga:
+            "VGA Mask"
+        }
+    }
+}
+
+struct C64CRTParameters: Codable, Equatable {
+    var scanlineIntensity: Double
+    var beamSoftness: Double
+    var sharpness: Double
+    var maskIntensity: Double
+    var maskType: Int
+    var curvature: Double
+    var brightness: Double
+    var bloomAmount: Double
+    var bloomSoftness: Double
+
+    private enum CodingKeys: String, CodingKey {
+        case scanlineIntensity
+        case beamSoftness
+        case sharpness
+        case maskIntensity
+        case maskType
+        case curvature
+        case brightness
+        case bloomAmount
+        case bloomSoftness
+    }
+}
+
+extension C64CRTParameters {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        scanlineIntensity = try container.decode(Double.self, forKey: .scanlineIntensity)
+        beamSoftness = try container.decode(Double.self, forKey: .beamSoftness)
+        sharpness = try container.decode(Double.self, forKey: .sharpness)
+        maskIntensity = try container.decode(Double.self, forKey: .maskIntensity)
+        maskType = try container.decodeIfPresent(Int.self, forKey: .maskType)
+            ?? C64CRTMaskType.dotMask.rawValue
+        curvature = try container.decode(Double.self, forKey: .curvature)
+        brightness = try container.decode(Double.self, forKey: .brightness)
+        bloomAmount = try container.decodeIfPresent(Double.self, forKey: .bloomAmount) ?? 0.16
+        bloomSoftness = try container.decodeIfPresent(Double.self, forKey: .bloomSoftness) ?? 0.55
+    }
+}
+
+struct C64CRTPreset: Identifiable, Codable, Equatable {
+    let id: UUID
+    var name: String
+    var parameters: C64CRTParameters
+    let isBuiltIn: Bool
+}
+
+enum C64CRTSettings {
+    static let enabledKey = "poke64.crt.enabled"
+    static let scanlineIntensityKey = "poke64.crt.scanlineIntensity"
+    static let beamSoftnessKey = "poke64.crt.beamSoftness"
+    static let sharpnessKey = "poke64.crt.sharpness"
+    static let maskIntensityKey = "poke64.crt.maskIntensity"
+    static let maskTypeKey = "poke64.crt.maskType"
+    static let curvatureKey = "poke64.crt.curvature"
+    static let brightnessKey = "poke64.crt.brightness"
+    static let bloomAmountKey = "poke64.crt.bloomAmount"
+    static let bloomSoftnessKey = "poke64.crt.bloomSoftness"
+
+    static let defaultEnabled = false
+    static let defaultParameters = C64CRTParameters(
+        scanlineIntensity: 0.52,
+        beamSoftness: 0.58,
+        sharpness: 0.82,
+        maskIntensity: 0.22,
+        maskType: C64CRTMaskType.dotMask.rawValue,
+        curvature: 0.12,
+        brightness: 1.06,
+        bloomAmount: 0.16,
+        bloomSoftness: 0.55
+    )
+
+    static var currentParameters: C64CRTParameters {
+        let defaults = UserDefaults.standard
+        return C64CRTParameters(
+            scanlineIntensity: doubleValue(
+                defaults,
+                key: scanlineIntensityKey,
+                defaultValue: defaultParameters.scanlineIntensity
+            ),
+            beamSoftness: doubleValue(
+                defaults,
+                key: beamSoftnessKey,
+                defaultValue: defaultParameters.beamSoftness
+            ),
+            sharpness: doubleValue(
+                defaults,
+                key: sharpnessKey,
+                defaultValue: defaultParameters.sharpness
+            ),
+            maskIntensity: doubleValue(
+                defaults,
+                key: maskIntensityKey,
+                defaultValue: defaultParameters.maskIntensity
+            ),
+            maskType: integerValue(
+                defaults,
+                key: maskTypeKey,
+                defaultValue: defaultParameters.maskType
+            ),
+            curvature: doubleValue(
+                defaults,
+                key: curvatureKey,
+                defaultValue: defaultParameters.curvature
+            ),
+            brightness: doubleValue(
+                defaults,
+                key: brightnessKey,
+                defaultValue: defaultParameters.brightness
+            ),
+            bloomAmount: doubleValue(
+                defaults,
+                key: bloomAmountKey,
+                defaultValue: defaultParameters.bloomAmount
+            ),
+            bloomSoftness: doubleValue(
+                defaults,
+                key: bloomSoftnessKey,
+                defaultValue: defaultParameters.bloomSoftness
+            )
+        )
+    }
+
+    static func apply(_ parameters: C64CRTParameters) {
+        let defaults = UserDefaults.standard
+        defaults.set(parameters.scanlineIntensity, forKey: scanlineIntensityKey)
+        defaults.set(parameters.beamSoftness, forKey: beamSoftnessKey)
+        defaults.set(parameters.sharpness, forKey: sharpnessKey)
+        defaults.set(parameters.maskIntensity, forKey: maskIntensityKey)
+        defaults.set(parameters.maskType, forKey: maskTypeKey)
+        defaults.set(parameters.curvature, forKey: curvatureKey)
+        defaults.set(parameters.brightness, forKey: brightnessKey)
+        defaults.set(parameters.bloomAmount, forKey: bloomAmountKey)
+        defaults.set(parameters.bloomSoftness, forKey: bloomSoftnessKey)
+    }
+
+    private static func doubleValue(
+        _ defaults: UserDefaults,
+        key: String,
+        defaultValue: Double
+    ) -> Double {
+        defaults.object(forKey: key) == nil ? defaultValue : defaults.double(forKey: key)
+    }
+
+    private static func integerValue(
+        _ defaults: UserDefaults,
+        key: String,
+        defaultValue: Int
+    ) -> Int {
+        guard defaults.object(forKey: key) != nil else { return defaultValue }
+        let value = defaults.integer(forKey: key)
+        return C64CRTMaskType(rawValue: value) == nil ? defaultValue : value
+    }
+}
+
+enum C64CRTPresetStoreError: LocalizedError {
+    case invalidName
+    case builtInPresetProtected
+    case presetNotFound
+    case presetInUse([String])
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidName:
+            return "Enter a CRT preset name."
+        case .builtInPresetProtected:
+            return "The built-in Commodore Monitor preset cannot be changed or deleted."
+        case .presetNotFound:
+            return "The selected CRT preset no longer exists."
+        case .presetInUse(let profileNames):
+            return "This CRT preset is used by: \(profileNames.joined(separator: ", "))."
+        }
+    }
+}
+
+enum C64CRTPresetStore {
+    static let builtInPresetID = UUID(uuidString: "00000000-0000-4000-8000-000000001702")!
+    private static let activePresetIDKey = "poke64.crt.activePresetID"
+    private static let userPresetsKey = "poke64.crt.userPresets.data"
+
+    static var builtInPreset: C64CRTPreset {
+        C64CRTPreset(
+            id: builtInPresetID,
+            name: "Commodore Monitor",
+            parameters: C64CRTSettings.defaultParameters,
+            isBuiltIn: true
+        )
+    }
+
+    static var activePresetID: UUID {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: activePresetIDKey),
+                  let id = UUID(uuidString: raw),
+                  loadPresets().contains(where: { $0.id == id }) else {
+                return builtInPresetID
+            }
+            return id
+        }
+        set {
+            UserDefaults.standard.set(newValue.uuidString, forKey: activePresetIDKey)
+        }
+    }
+
+    static var activePreset: C64CRTPreset {
+        loadPresets().first(where: { $0.id == activePresetID }) ?? builtInPreset
+    }
+
+    static var activePresetIsModified: Bool {
+        C64CRTSettings.currentParameters != activePreset.parameters
+    }
+
+    static func loadPresets() -> [C64CRTPreset] {
+        let userPresets: [C64CRTPreset]
+        if let data = UserDefaults.standard.data(forKey: userPresetsKey),
+           let decoded = try? JSONDecoder().decode([C64CRTPreset].self, from: data) {
+            userPresets = decoded.filter { $0.id != builtInPresetID }
+        } else {
+            userPresets = []
+        }
+        return [builtInPreset] + userPresets.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    @discardableResult
+    static func applyPreset(_ presetID: UUID) -> C64CRTPreset {
+        let preset = loadPresets().first(where: { $0.id == presetID }) ?? builtInPreset
+        C64CRTSettings.apply(preset.parameters)
+        activePresetID = preset.id
+        return preset
+    }
+
+    @discardableResult
+    static func saveCurrentPreset(named rawName: String) throws -> C64CRTPreset {
+        let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw C64CRTPresetStoreError.invalidName }
+
+        var userPresets = loadPresets().filter { !$0.isBuiltIn }
+        let existingNames = Set(userPresets.map { $0.name.lowercased() })
+        var name = trimmed
+        var suffix = 2
+        while existingNames.contains(name.lowercased()) || name.caseInsensitiveCompare(builtInPreset.name) == .orderedSame {
+            name = "\(trimmed) \(suffix)"
+            suffix += 1
+        }
+
+        let preset = C64CRTPreset(
+            id: UUID(),
+            name: name,
+            parameters: C64CRTSettings.currentParameters,
+            isBuiltIn: false
+        )
+        userPresets.append(preset)
+        try saveUserPresets(userPresets)
+        activePresetID = preset.id
+        return preset
+    }
+
+    @discardableResult
+    static func updateActivePreset() throws -> C64CRTPreset {
+        let id = activePresetID
+        guard id != builtInPresetID else {
+            throw C64CRTPresetStoreError.builtInPresetProtected
+        }
+        var userPresets = loadPresets().filter { !$0.isBuiltIn }
+        guard let index = userPresets.firstIndex(where: { $0.id == id }) else {
+            throw C64CRTPresetStoreError.presetNotFound
+        }
+        userPresets[index].parameters = C64CRTSettings.currentParameters
+        try saveUserPresets(userPresets)
+        return userPresets[index]
+    }
+
+    static func deletePreset(_ presetID: UUID) throws {
+        guard presetID != builtInPresetID else {
+            throw C64CRTPresetStoreError.builtInPresetProtected
+        }
+        let wasActive = activePresetID == presetID
+        let referencingProfiles = EmulationProfileStore.profileNamesReferencingCRTPreset(presetID)
+        guard referencingProfiles.isEmpty else {
+            throw C64CRTPresetStoreError.presetInUse(referencingProfiles)
+        }
+
+        var userPresets = loadPresets().filter { !$0.isBuiltIn }
+        guard userPresets.contains(where: { $0.id == presetID }) else {
+            throw C64CRTPresetStoreError.presetNotFound
+        }
+        userPresets.removeAll { $0.id == presetID }
+        try saveUserPresets(userPresets)
+        if wasActive {
+            _ = applyPreset(builtInPresetID)
+        }
+    }
+
+    private static func saveUserPresets(_ presets: [C64CRTPreset]) throws {
+        let data = try JSONEncoder().encode(presets)
+        UserDefaults.standard.set(data, forKey: userPresetsKey)
+    }
+}
+
 enum C64SIDEngine: String, CaseIterable, Identifiable {
     case fastSID = "FastSID"
     case reSID = "ReSID"
@@ -1032,6 +1354,43 @@ enum C64SIDModel: String, CaseIterable, Identifiable {
             return "MOS 8580"
         case .mos8580RD:
             return "MOS 8580 RD"
+        }
+    }
+}
+
+enum C64SIDExtra: String, CaseIterable, Identifiable {
+    case disabled
+    case d420 = "0xd420"
+    case d500 = "0xd500"
+    case de00 = "0xde00"
+    case df00 = "0xdf00"
+
+    static let defaultsKey = "poke64.audio.sidExtra"
+    static let defaultValue: C64SIDExtra = .disabled
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .disabled:
+            return "Off"
+        case .d420:
+            return "$D420"
+        case .d500:
+            return "$D500"
+        case .de00:
+            return "$DE00"
+        case .df00:
+            return "$DF00"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .disabled:
+            return "Single SID"
+        default:
+            return "Second SID at \(title)"
         }
     }
 }
@@ -1097,6 +1456,8 @@ enum C64AudioSettings {
                 ?? C64SIDEngine.defaultValue.rawValue,
             defaults.string(forKey: C64SIDModel.defaultsKey)
                 ?? C64SIDModel.defaultValue.rawValue,
+            defaults.string(forKey: C64SIDExtra.defaultsKey)
+                ?? C64SIDExtra.defaultValue.rawValue,
             defaults.string(forKey: C64ReSIDSampling.defaultsKey)
                 ?? C64ReSIDSampling.defaultValue.rawValue,
             defaults.string(forKey: C64AudioSampleRate.defaultsKey)
@@ -1188,16 +1549,56 @@ enum C64DriveModel: String, CaseIterable, Identifiable {
     }
 }
 
+enum C64DriveLoadWarpMode: String, CaseIterable, Identifiable {
+    case off
+    case automatic
+    case maximum
+
+    static let defaultValue: C64DriveLoadWarpMode = .off
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .off:
+            return "Off"
+        case .automatic:
+            return "Automatic"
+        case .maximum:
+            return "Maximum"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .off:
+            return "Run the emulated drive at normal C64 speed."
+        case .automatic:
+            return "Warp while the drive is active, but stop when C64 audio is detected."
+        case .maximum:
+            return "Ignore audio detection during disk access and enable VICE Warp Boost."
+        }
+    }
+}
+
 enum C64DriveSettings {
     static let trueDriveEmulationKey = "poke64.drive.trueEmulation"
+    static let loadWarpModeKey = "poke64.drive.loadWarpMode"
     static let drive9EnabledKey = "poke64.drive9.enabled"
     static let writeProtectionKey = "poke64.drive.writeProtection"
     static let soundLevelKey = "poke64.drive.soundLevel"
 
     static let defaultTrueDriveEmulation = false
+    static let defaultLoadWarpMode = C64DriveLoadWarpMode.defaultValue
     static let defaultDrive9Enabled = false
     static let defaultWriteProtection = false
     static let defaultSoundLevel = 20
+
+    static var loadWarpMode: C64DriveLoadWarpMode {
+        let rawValue = UserDefaults.standard.string(forKey: loadWarpModeKey)
+            ?? defaultLoadWarpMode.rawValue
+        return C64DriveLoadWarpMode(rawValue: rawValue) ?? defaultLoadWarpMode
+    }
 
     static var configurationFingerprint: String {
         let defaults = UserDefaults.standard
@@ -1212,6 +1613,7 @@ enum C64DriveSettings {
             String(defaults.object(forKey: trueDriveEmulationKey) == nil
                 ? defaultTrueDriveEmulation
                 : defaults.bool(forKey: trueDriveEmulationKey)),
+            loadWarpMode.rawValue,
             String(defaults.object(forKey: writeProtectionKey) == nil
                 ? defaultWriteProtection
                 : defaults.bool(forKey: writeProtectionKey)),
@@ -1301,13 +1703,13 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
         case .system:
             "C64 model, timing and memory expansion."
         case .graphics:
-            "Display geometry, palette and VIC-II filtering."
+            "Display geometry, palette, VIC-II and CRT filtering."
         case .audio:
             "SID model, emulation engine and audio output."
         case .tape:
             "Datasette behavior and tape transport options."
         case .diskDrives:
-            "Drive units, models and True Drive Emulation."
+            "Drive units, models and disk-access backend."
         case .printer:
             "IEC printer emulation and output capture."
         case .firmware:
@@ -2095,6 +2497,11 @@ private struct SystemSettingsView: View {
 
 
 private struct VideoSettingsView: View {
+    @State private var showCRTAdvanced = false
+
+    @AppStorage(C64CRTSettings.enabledKey)
+    private var crtFilterEnabled = C64CRTSettings.defaultEnabled
+
     @AppStorage(C64VideoAspectRatio.defaultsKey)
     private var aspectRatioRawValue = C64VideoAspectRatio.defaultValue.rawValue
 
@@ -2175,7 +2582,29 @@ private struct VideoSettingsView: View {
             } header: {
                 Text("VIC-II Appearance")
             } footer: {
-                Text("The VIC-II filter is VICE's PAL emulation filter. Metal CRT shaders will be added separately in a future release.")
+                Text("The VIC-II filter runs inside VICE. The CRT filter below is a separate Metal post-process and can be adjusted live.")
+            }
+
+            Section {
+                Toggle("CRT Filter", isOn: $crtFilterEnabled)
+
+                Button {
+                    showCRTAdvanced = true
+                } label: {
+                    HStack {
+                        Text("Advanced…")
+                        Spacer()
+                        Text(C64CRTPresetStore.activePresetIsModified
+                            ? "\(C64CRTPresetStore.activePreset.name) · Modified"
+                            : C64CRTPresetStore.activePreset.name)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("CRT Filter")
+            } footer: {
+                Text("CRT-Lottes-inspired Metal filtering. Advanced controls are applied immediately and do not restart the C64.")
             }
 
             Section {
@@ -2232,6 +2661,9 @@ private struct VideoSettingsView: View {
                 Text("Video changes are applied when Settings is closed and the C64 restarts.")
             }
         }
+        .fullScreenCover(isPresented: $showCRTAdvanced) {
+            CRTAdvancedSettingsView()
+        }
     }
 
     private var isUsingDefaults: Bool {
@@ -2245,6 +2677,9 @@ private struct VideoSettingsView: View {
             && saturation == C64VideoSettings.defaultSaturation
             && gamma == C64VideoSettings.defaultGamma
             && tint == C64VideoSettings.defaultTint
+            && crtFilterEnabled == C64CRTSettings.defaultEnabled
+            && C64CRTPresetStore.activePresetID == C64CRTPresetStore.builtInPresetID
+            && !C64CRTPresetStore.activePresetIsModified
     }
 
     private func restoreDefaults() {
@@ -2258,6 +2693,8 @@ private struct VideoSettingsView: View {
         saturation = C64VideoSettings.defaultSaturation
         gamma = C64VideoSettings.defaultGamma
         tint = C64VideoSettings.defaultTint
+        crtFilterEnabled = C64CRTSettings.defaultEnabled
+        _ = C64CRTPresetStore.applyPreset(C64CRTPresetStore.builtInPresetID)
     }
 
     private static func percentageText(_ value: Int) -> String {
@@ -2299,12 +2736,418 @@ private struct VideoAdjustmentSlider: View {
     }
 }
 
+private struct CRTAdvancedSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var emulator: EmulatorModel
+
+    @AppStorage(C64CRTSettings.scanlineIntensityKey)
+    private var scanlineIntensity = C64CRTSettings.defaultParameters.scanlineIntensity
+    @AppStorage(C64CRTSettings.beamSoftnessKey)
+    private var beamSoftness = C64CRTSettings.defaultParameters.beamSoftness
+    @AppStorage(C64CRTSettings.sharpnessKey)
+    private var sharpness = C64CRTSettings.defaultParameters.sharpness
+    @AppStorage(C64CRTSettings.maskIntensityKey)
+    private var maskIntensity = C64CRTSettings.defaultParameters.maskIntensity
+    @AppStorage(C64CRTSettings.maskTypeKey)
+    private var maskType = C64CRTSettings.defaultParameters.maskType
+    @AppStorage(C64CRTSettings.curvatureKey)
+    private var curvature = C64CRTSettings.defaultParameters.curvature
+    @AppStorage(C64CRTSettings.brightnessKey)
+    private var brightness = C64CRTSettings.defaultParameters.brightness
+    @AppStorage(C64CRTSettings.bloomAmountKey)
+    private var bloomAmount = C64CRTSettings.defaultParameters.bloomAmount
+    @AppStorage(C64CRTSettings.bloomSoftnessKey)
+    private var bloomSoftness = C64CRTSettings.defaultParameters.bloomSoftness
+
+    @State private var presets = C64CRTPresetStore.loadPresets()
+    @State private var selectedPresetID = C64CRTPresetStore.activePresetID
+    @State private var showSaveAs = false
+    @State private var newPresetName = ""
+    @State private var pendingDelete = false
+    @State private var errorMessage: String?
+
+    private var selectedPreset: C64CRTPreset {
+        presets.first(where: { $0.id == selectedPresetID }) ?? C64CRTPresetStore.builtInPreset
+    }
+
+    private var isModified: Bool {
+        C64CRTSettings.currentParameters != selectedPreset.parameters
+    }
+
+    var body: some View {
+        NavigationStack {
+            GeometryReader { geometry in
+                if usesSideBySideLayout(geometry.size) {
+                    HStack(spacing: 0) {
+                        Form {
+                            presetSection
+                            pictureSection
+                            maskSection
+                            tubeSection
+                            actionsSection
+                        }
+                        .frame(
+                            width: min(
+                                500,
+                                max(360, geometry.size.width * 0.44)
+                            )
+                        )
+
+                        Divider()
+
+                        landscapePreviewPane
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } else {
+                    Form {
+                        portraitPreviewSection
+                        presetSection
+                        pictureSection
+                        maskSection
+                        tubeSection
+                        actionsSection
+                    }
+                }
+            }
+            .navigationTitle("CRT Filter")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .alert("Save CRT Preset", isPresented: $showSaveAs) {
+                TextField("Preset name", text: $newPresetName)
+                Button("Cancel", role: .cancel) {}
+                Button("Save") {
+                    do {
+                        let preset = try C64CRTPresetStore.saveCurrentPreset(named: newPresetName)
+                        selectedPresetID = preset.id
+                        reloadPresets()
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                }
+            } message: {
+                Text("Save the current CRT adjustments as a reusable preset.")
+            }
+            .confirmationDialog(
+                "Delete \"\(selectedPreset.name)\"?",
+                isPresented: $pendingDelete,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Preset", role: .destructive) {
+                    do {
+                        try C64CRTPresetStore.deletePreset(selectedPresetID)
+                        selectedPresetID = C64CRTPresetStore.activePresetID
+                        reloadPresets()
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+            .alert(
+                "CRT Preset Error",
+                isPresented: Binding(
+                    get: { errorMessage != nil },
+                    set: { if !$0 { errorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { errorMessage = nil }
+            } message: {
+                Text(errorMessage ?? "Unknown error")
+            }
+        }
+    }
+
+    private func usesSideBySideLayout(_ size: CGSize) -> Bool {
+        size.width > size.height && size.width >= 760
+    }
+
+    @ViewBuilder
+    private var previewContent: some View {
+        if emulator.isRunning, emulator.isPoweredOn {
+            CRTLivePreviewRepresentable()
+                .environmentObject(emulator)
+                .background(.black)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(.white.opacity(0.08), lineWidth: 1)
+                }
+        } else {
+            ContentUnavailableView(
+                "Live Preview Unavailable",
+                systemImage: "display.slash",
+                description: Text("Power on the C64 to preview CRT adjustments live.")
+            )
+        }
+    }
+
+    private var portraitPreviewSection: some View {
+        Section {
+            previewContent
+                .frame(maxWidth: .infinity)
+                .frame(height: 220)
+        } header: {
+            Text("Live Preview")
+        }
+    }
+
+    private var landscapePreviewPane: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Live Preview")
+                .font(.headline)
+
+            previewContent
+                .aspectRatio(4.0 / 3.0, contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Text("CRT adjustments update here immediately.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(20)
+    }
+
+    private var presetSection: some View {
+        Section {
+            Picker("Preset", selection: $selectedPresetID) {
+                ForEach(presets) { preset in
+                    Text(preset.name).tag(preset.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .onChange(of: selectedPresetID) { _, newValue in
+                _ = C64CRTPresetStore.applyPreset(newValue)
+                reloadPresets()
+            }
+
+            LabeledContent("Status") {
+                Text(isModified ? "Modified" : "Preset values")
+                    .foregroundStyle(isModified ? .orange : .secondary)
+            }
+        } header: {
+            Text("Preset")
+        }
+    }
+
+    private var pictureSection: some View {
+        Section {
+            CRTAdjustmentSlider(
+                title: "Scanlines",
+                value: $scanlineIntensity,
+                range: 0...1
+            )
+            CRTAdjustmentSlider(
+                title: "Beam Softness",
+                value: $beamSoftness,
+                range: 0...1
+            )
+            CRTAdjustmentSlider(
+                title: "Sharpness",
+                value: $sharpness,
+                range: 0...1
+            )
+            CRTAdjustmentSlider(
+                title: "Brightness",
+                value: $brightness,
+                range: 0.80...1.30,
+                valueText: { "\(Int(($0 * 100).rounded()))%" }
+            )
+        } header: {
+            Text("Picture")
+        }
+    }
+
+    private var maskSection: some View {
+        Section {
+            Picker("Mask Type", selection: $maskType) {
+                ForEach(C64CRTMaskType.allCases) { type in
+                    Text(type.title).tag(type.rawValue)
+                }
+            }
+            .pickerStyle(.menu)
+
+            CRTAdjustmentSlider(
+                title: "Mask Strength",
+                value: $maskIntensity,
+                range: 0...1
+            )
+            .disabled(maskType == C64CRTMaskType.off.rawValue)
+        } header: {
+            Text("Phosphor Mask")
+        } footer: {
+            Text("Dot Mask gives a classic shadow-mask look; Aperture Grille uses vertical RGB stripes; VGA uses wider staggered phosphor groups.")
+        }
+    }
+
+    private var tubeSection: some View {
+        Section {
+            CRTAdjustmentSlider(
+                title: "Curvature",
+                value: $curvature,
+                range: 0...1
+            )
+            CRTAdjustmentSlider(
+                title: "Bloom",
+                value: $bloomAmount,
+                range: 0...1
+            )
+            CRTAdjustmentSlider(
+                title: "Bloom Softness",
+                value: $bloomSoftness,
+                range: 0...1
+            )
+        } header: {
+            Text("Tube")
+        } footer: {
+            Text("Bloom adds a restrained phosphor glow around bright pixels. Softness controls how broadly that glow spreads.")
+        }
+    }
+
+    private var actionsSection: some View {
+        Section {
+            Button("Reset to Preset") {
+                _ = C64CRTPresetStore.applyPreset(selectedPresetID)
+            }
+            .disabled(!isModified)
+
+            if !selectedPreset.isBuiltIn {
+                Button("Update \"\(selectedPreset.name)\"") {
+                    do {
+                        _ = try C64CRTPresetStore.updateActivePreset()
+                        reloadPresets()
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                }
+                .disabled(!isModified)
+            }
+
+            Button("Save As…") {
+                newPresetName = selectedPreset.isBuiltIn
+                    ? "My Commodore Monitor"
+                    : "\(selectedPreset.name) Copy"
+                showSaveAs = true
+            }
+
+            if !selectedPreset.isBuiltIn {
+                Button("Delete Preset", role: .destructive) {
+                    pendingDelete = true
+                }
+            }
+        }
+    }
+
+    private func reloadPresets() {
+        presets = C64CRTPresetStore.loadPresets()
+        let activeID = C64CRTPresetStore.activePresetID
+        if presets.contains(where: { $0.id == activeID }) {
+            selectedPresetID = activeID
+        } else {
+            selectedPresetID = C64CRTPresetStore.builtInPresetID
+        }
+    }
+}
+
+private struct CRTLivePreviewRepresentable: UIViewRepresentable {
+    @EnvironmentObject private var emulator: EmulatorModel
+
+    final class Coordinator {
+        let emulator: EmulatorModel
+
+        init(emulator: EmulatorModel) {
+            self.emulator = emulator
+        }
+    }
+
+    @AppStorage(C64CRTSettings.scanlineIntensityKey)
+    private var scanlineIntensity = C64CRTSettings.defaultParameters.scanlineIntensity
+    @AppStorage(C64CRTSettings.beamSoftnessKey)
+    private var beamSoftness = C64CRTSettings.defaultParameters.beamSoftness
+    @AppStorage(C64CRTSettings.sharpnessKey)
+    private var sharpness = C64CRTSettings.defaultParameters.sharpness
+    @AppStorage(C64CRTSettings.maskIntensityKey)
+    private var maskIntensity = C64CRTSettings.defaultParameters.maskIntensity
+    @AppStorage(C64CRTSettings.maskTypeKey)
+    private var maskType = C64CRTSettings.defaultParameters.maskType
+    @AppStorage(C64CRTSettings.curvatureKey)
+    private var curvature = C64CRTSettings.defaultParameters.curvature
+    @AppStorage(C64CRTSettings.brightnessKey)
+    private var brightness = C64CRTSettings.defaultParameters.brightness
+    @AppStorage(C64CRTSettings.bloomAmountKey)
+    private var bloomAmount = C64CRTSettings.defaultParameters.bloomAmount
+    @AppStorage(C64CRTSettings.bloomSoftnessKey)
+    private var bloomSoftness = C64CRTSettings.defaultParameters.bloomSoftness
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(emulator: emulator)
+    }
+
+    func makeUIView(context: Context) -> C64MetalView {
+        let view = C64MetalView(frame: .zero)
+        view.isUserInteractionEnabled = false
+        applyCRTSettings(to: view)
+        emulator.attach(crtPreviewVideoView: view)
+        return view
+    }
+
+    func updateUIView(_ uiView: C64MetalView, context: Context) {
+        applyCRTSettings(to: uiView)
+        emulator.attach(crtPreviewVideoView: uiView)
+    }
+
+    static func dismantleUIView(_ uiView: C64MetalView, coordinator: Coordinator) {
+        coordinator.emulator.attach(crtPreviewVideoView: nil)
+    }
+
+    private func applyCRTSettings(to view: C64MetalView) {
+        view.crtFilterEnabled = true
+        view.crtScanlineIntensity = Float(scanlineIntensity)
+        view.crtBeamSoftness = Float(beamSoftness)
+        view.crtSharpness = Float(sharpness)
+        view.crtMaskIntensity = Float(maskIntensity)
+        view.crtMaskType = maskType
+        view.crtCurvature = Float(curvature)
+        view.crtBrightness = Float(brightness)
+        view.crtBloomAmount = Float(bloomAmount)
+        view.crtBloomSoftness = Float(bloomSoftness)
+        view.setNeedsDisplay()
+    }
+}
+
+private struct CRTAdjustmentSlider: View {
+    let title: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    var valueText: (Double) -> String = { "\(Int(($0 * 100).rounded()))%" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(valueText(value))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: $value, in: range)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 private struct AudioSettingsView: View {
     @AppStorage(C64SIDEngine.defaultsKey)
     private var sidEngineRawValue = C64SIDEngine.defaultValue.rawValue
 
     @AppStorage(C64SIDModel.defaultsKey)
     private var sidModelRawValue = C64SIDModel.defaultValue.rawValue
+
+    @AppStorage(C64SIDExtra.defaultsKey)
+    private var sidExtraRawValue = C64SIDExtra.defaultValue.rawValue
 
     @AppStorage(C64ReSIDSampling.defaultsKey)
     private var residSamplingRawValue = C64ReSIDSampling.defaultValue.rawValue
@@ -2320,6 +3163,10 @@ private struct AudioSettingsView: View {
 
     private var selectedEngine: C64SIDEngine {
         C64SIDEngine(rawValue: sidEngineRawValue) ?? .defaultValue
+    }
+
+    private var selectedSIDExtra: C64SIDExtra {
+        C64SIDExtra(rawValue: sidExtraRawValue) ?? .defaultValue
     }
 
     var body: some View {
@@ -2339,11 +3186,19 @@ private struct AudioSettingsView: View {
                 }
                 .pickerStyle(.menu)
 
+                Picker("Second SID", selection: $sidExtraRawValue) {
+                    ForEach(C64SIDExtra.allCases) { sidExtra in
+                        Text(sidExtra.title).tag(sidExtra.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                LabeledContent("SID configuration", value: selectedSIDExtra.detail)
                 LabeledContent("Engine profile", value: selectedEngine.detail)
             } header: {
                 Text("SID")
             } footer: {
-                Text("Automatic selects the traditional 6581 for C64 models and the later 8580 for C64C models. ReSID-FP is the most accurate option; FastSID is intended for lower-powered hardware.")
+                Text("Automatic selects the traditional 6581 for C64 models and the later 8580 for C64C models. Second SID exposes every dual-SID base address offered by the pinned VICE/libretro core: $D420, $D500, $DE00 and $DF00. ReSID-FP is the most accurate engine option.")
             }
 
             Section {
@@ -2405,6 +3260,7 @@ private struct AudioSettingsView: View {
     private var isUsingDefaults: Bool {
         sidEngineRawValue == C64SIDEngine.defaultValue.rawValue
             && sidModelRawValue == C64SIDModel.defaultValue.rawValue
+            && sidExtraRawValue == C64SIDExtra.defaultValue.rawValue
             && residSamplingRawValue == C64ReSIDSampling.defaultValue.rawValue
             && sampleRateRawValue == C64AudioSampleRate.defaultValue.rawValue
             && audioLeakLevel == C64AudioSettings.defaultAudioLeakLevel
@@ -2414,6 +3270,7 @@ private struct AudioSettingsView: View {
     private func restoreDefaults() {
         sidEngineRawValue = C64SIDEngine.defaultValue.rawValue
         sidModelRawValue = C64SIDModel.defaultValue.rawValue
+        sidExtraRawValue = C64SIDExtra.defaultValue.rawValue
         residSamplingRawValue = C64ReSIDSampling.defaultValue.rawValue
         sampleRateRawValue = C64AudioSampleRate.defaultValue.rawValue
         audioLeakLevel = C64AudioSettings.defaultAudioLeakLevel
@@ -3323,6 +4180,9 @@ private struct DiskDriveSettingsView: View {
     @AppStorage(C64DriveSettings.trueDriveEmulationKey)
     private var trueDriveEmulation = C64DriveSettings.defaultTrueDriveEmulation
 
+    @AppStorage(C64DriveSettings.loadWarpModeKey)
+    private var loadWarpModeRawValue = C64DriveSettings.defaultLoadWarpMode.rawValue
+
     @AppStorage(C64DriveSettings.writeProtectionKey)
     private var writeProtection = C64DriveSettings.defaultWriteProtection
 
@@ -3335,6 +4195,10 @@ private struct DiskDriveSettingsView: View {
 
     private var drive9Model: C64DriveModel {
         C64DriveModel(rawValue: drive9ModelRawValue) ?? .defaultValue
+    }
+
+    private var loadWarpMode: C64DriveLoadWarpMode {
+        C64DriveLoadWarpMode(rawValue: loadWarpModeRawValue) ?? .defaultValue
     }
 
     private var drive8FirmwareStatus: FirmwareStatus {
@@ -3358,22 +4222,40 @@ private struct DiskDriveSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle(
-                    "True Drive Emulation",
-                    isOn: $trueDriveEmulation
-                )
-                .disabled(!canEnableTrueDrive)
+                Picker("Drive mode", selection: $trueDriveEmulation) {
+                    Text("Fast Virtual — Traps").tag(false)
+                    Text("True Drive — Hardware")
+                        .tag(true)
+                        .disabled(!canEnableTrueDrive)
+                }
+                .pickerStyle(.menu)
 
-                LabeledContent(
-                    "Active backend",
-                    value: trueDriveEmulation ? "Hardware-level drives" : "Fast virtual drives"
-                )
+                if trueDriveEmulation {
+                    LabeledContent("Disk access", value: "Full drive / IEC emulation")
+
+                    Picker("True Drive acceleration", selection: $loadWarpModeRawValue) {
+                        ForEach(C64DriveLoadWarpMode.allCases) { mode in
+                            Text(mode.title).tag(mode.rawValue)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Text(loadWarpMode.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    LabeledContent("Disk access", value: "Virtual Device Traps")
+
+                    Text("VICE automatically enables the Drive 8/9 traps when True Drive is disabled. No separate trap switch is required.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             } header: {
                 Text("Drive Emulation")
             } footer: {
                 Text(trueDriveEmulation
-                    ? "True Drive Emulation applies to every enabled drive. It executes each selected model's ROM and is required for complete JiffyDOS compatibility, accurate timing and mechanical drive sound."
-                    : "Fast virtual drive mode applies to every enabled drive and uses VICE traps for convenient loading. It does not execute drive firmware, so drive-side JiffyDOS commands are unavailable.")
+                    ? "True Drive emulates the selected drive CPU, ROM and IEC behavior for every enabled unit. Use it for JiffyDOS drive firmware, custom fastloaders and software that depends on real drive behavior; Automatic or Maximum can accelerate loading without switching to traps."
+                    : "Fast Virtual is the maximum-speed path for standard KERNAL disk I/O and REU preload workflows. It automatically uses VICE Virtual Device Traps for Drive 8 and Drive 9 and does not execute drive firmware.")
             }
 
             Section {
@@ -3401,7 +4283,7 @@ private struct DiskDriveSettingsView: View {
                 LabeledContent(
                     "Active backend",
                     value: drive9Enabled
-                        ? (trueDriveEmulation ? "Hardware-level drive" : "Fast virtual drive")
+                        ? (trueDriveEmulation ? "True Drive — Hardware" : "Fast Virtual — Traps")
                         : "Disabled"
                 )
 
@@ -3431,7 +4313,7 @@ private struct DiskDriveSettingsView: View {
 
                 if !canEnableTrueDrive {
                     Label(
-                        "Import every required drive ROM in Firmware / ROMs before enabling True Drive Emulation.",
+                        "Import every required drive ROM in Firmware / ROMs before selecting True Drive — Hardware.",
                         systemImage: "info.circle"
                     )
                     .font(.footnote)
@@ -3466,7 +4348,7 @@ private struct DiskDriveSettingsView: View {
                 if !anyEnabledDriveSupportsSound {
                     Text("The VICE libretro drive-sound option supports 1541-family and 1571 drives, not the 1581.")
                 } else if !trueDriveEmulation {
-                    Text("Mechanical drive sound requires True Drive Emulation and a compatible disk image.")
+                    Text("Mechanical drive sound requires True Drive — Hardware and a compatible disk image.")
                 } else {
                     Text("Mechanical drive sound is shared by the enabled 1541-family and 1571 drives.")
                 }
@@ -3570,6 +4452,7 @@ private struct DiskDriveSettingsView: View {
             && drive9Enabled == C64DriveSettings.defaultDrive9Enabled
             && drive9ModelRawValue == C64DriveModel.defaultValue.rawValue
             && trueDriveEmulation == C64DriveSettings.defaultTrueDriveEmulation
+            && loadWarpModeRawValue == C64DriveSettings.defaultLoadWarpMode.rawValue
             && writeProtection == C64DriveSettings.defaultWriteProtection
             && driveSoundLevel == C64DriveSettings.defaultSoundLevel
     }
@@ -3585,6 +4468,7 @@ private struct DiskDriveSettingsView: View {
         drive9Enabled = C64DriveSettings.defaultDrive9Enabled
         drive9ModelRawValue = C64DriveModel.defaultValue.rawValue
         trueDriveEmulation = C64DriveSettings.defaultTrueDriveEmulation
+        loadWarpModeRawValue = C64DriveSettings.defaultLoadWarpMode.rawValue
         writeProtection = C64DriveSettings.defaultWriteProtection
         driveSoundLevel = C64DriveSettings.defaultSoundLevel
     }

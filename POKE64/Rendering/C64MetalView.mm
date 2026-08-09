@@ -14,9 +14,16 @@ struct C64MetalVertex {
     simd_float2 texCoord;
 };
 
+struct C64CRTParameters {
+    simd_float4 appearance;
+    simd_float4 geometry;
+    simd_float4 effects;
+};
+
 struct C64MetalState {
     id<MTLCommandQueue> commandQueue = nil;
     id<MTLRenderPipelineState> pipeline = nil;
+    id<MTLRenderPipelineState> crtPipeline = nil;
     id<MTLTexture> texture = nil;
     std::mutex mutex;
     std::vector<uint8_t> pixels;
@@ -44,12 +51,23 @@ struct C64MetalState {
     self.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
     self.clearColor = MTLClearColorMake(0.02, 0.02, 0.025, 1.0);
     self.autoResizeDrawable = YES;
+    self.crtFilterEnabled = NO;
+    self.crtScanlineIntensity = 0.52f;
+    self.crtBeamSoftness = 0.58f;
+    self.crtSharpness = 0.82f;
+    self.crtMaskIntensity = 0.22f;
+    self.crtMaskType = 1;
+    self.crtCurvature = 0.12f;
+    self.crtBrightness = 1.06f;
+    self.crtBloomAmount = 0.16f;
+    self.crtBloomSoftness = 0.55f;
 
     _state->commandQueue = [device newCommandQueue];
 
     id<MTLLibrary> library = [device newDefaultLibrary];
     id<MTLFunction> vertex = [library newFunctionWithName:@"c64Vertex"];
     id<MTLFunction> fragment = [library newFunctionWithName:@"c64Fragment"];
+    id<MTLFunction> crtFragment = [library newFunctionWithName:@"c64CRTFragment"];
 
     MTLRenderPipelineDescriptor *descriptor = [[MTLRenderPipelineDescriptor alloc] init];
     descriptor.vertexFunction = vertex;
@@ -60,6 +78,15 @@ struct C64MetalState {
     _state->pipeline = [device newRenderPipelineStateWithDescriptor:descriptor error:&error];
     if (!_state->pipeline) {
         NSLog(@"Metal pipeline error: %@", error);
+    }
+
+    if (crtFragment) {
+        descriptor.fragmentFunction = crtFragment;
+        error = nil;
+        _state->crtPipeline = [device newRenderPipelineStateWithDescriptor:descriptor error:&error];
+        if (!_state->crtPipeline) {
+            NSLog(@"Metal CRT pipeline error: %@", error);
+        }
     }
 }
 
@@ -130,6 +157,15 @@ struct C64MetalState {
         _state->width = width;
         _state->height = height;
         _state->dirty = true;
+    }
+
+    C64MetalView *previewMirrorView = self.crtPreviewMirrorView;
+    if (previewMirrorView && previewMirrorView != self) {
+        [previewMirrorView submitFrame:data
+                                width:width
+                               height:height
+                                pitch:pitch
+                          pixelFormat:pixelFormat];
     }
 
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -222,9 +258,16 @@ struct C64MetalState {
                            bytesPerRow:width * 4];
     }
 
+    // MTKView may request a draw before VICE has submitted its first frame.
+    // Do not encode a draw until the fragment texture actually exists.
+    if (!_state->texture) {
+        return;
+    }
+
     id<MTLCommandBuffer> commandBuffer = [_state->commandQueue commandBuffer];
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:view.currentRenderPassDescriptor];
-    [encoder setRenderPipelineState:_state->pipeline];
+    BOOL useCRT = self.crtFilterEnabled && _state->crtPipeline != nil;
+    [encoder setRenderPipelineState:useCRT ? _state->crtPipeline : _state->pipeline];
 
     float sourceAspect = _state->height > 0 ? (float)_state->width / (float)_state->height : 4.0f / 3.0f;
     float targetAspect = view.drawableSize.height > 0 ? (float)view.drawableSize.width / (float)view.drawableSize.height : sourceAspect;
@@ -244,8 +287,29 @@ struct C64MetalState {
     };
 
     [encoder setVertexBytes:vertices length:sizeof(vertices) atIndex:0];
-    if (_state->texture) {
-        [encoder setFragmentTexture:_state->texture atIndex:0];
+    [encoder setFragmentTexture:_state->texture atIndex:0];
+    if (useCRT) {
+        const C64CRTParameters parameters = {
+            {
+                self.crtScanlineIntensity,
+                self.crtBeamSoftness,
+                self.crtSharpness,
+                self.crtMaskIntensity
+            },
+            {
+                self.crtCurvature,
+                self.crtBrightness,
+                self.crtBloomAmount,
+                self.crtBloomSoftness
+            },
+            {
+                (float)self.crtMaskType,
+                0.0f,
+                0.0f,
+                0.0f
+            }
+        };
+        [encoder setFragmentBytes:&parameters length:sizeof(parameters) atIndex:0];
     }
     [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
     [encoder endEncoding];

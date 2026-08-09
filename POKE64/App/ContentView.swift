@@ -380,6 +380,27 @@ struct ContentView: View {
                 .frame(width: displaySize.width, height: displaySize.height)
                 .clipped()
 
+                if sideMargin >= 12, emulator.isRunning, emulator.isPoweredOn {
+                    HStack(spacing: 0) {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .frame(width: sideMargin)
+                            .onTapGesture(count: 2) {
+                                emulator.toggleTemporaryNoBorder()
+                            }
+
+                        Spacer(minLength: 0)
+
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .frame(width: sideMargin)
+                            .onTapGesture(count: 2) {
+                                emulator.toggleTemporaryNoBorder()
+                            }
+                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                }
+
                 if sideMargin >= 72,
                    emulator.trueDriveEmulationConfigured
                     || emulator.mountedTapeSupportsPhysicalTransport
@@ -2635,14 +2656,51 @@ private struct DriveStatusPanel: View {
 private struct C64ScreenRepresentable: UIViewRepresentable {
     @EnvironmentObject private var emulator: EmulatorModel
 
+    @AppStorage(C64CRTSettings.enabledKey)
+    private var crtFilterEnabled = C64CRTSettings.defaultEnabled
+    @AppStorage(C64CRTSettings.scanlineIntensityKey)
+    private var crtScanlineIntensity = C64CRTSettings.defaultParameters.scanlineIntensity
+    @AppStorage(C64CRTSettings.beamSoftnessKey)
+    private var crtBeamSoftness = C64CRTSettings.defaultParameters.beamSoftness
+    @AppStorage(C64CRTSettings.sharpnessKey)
+    private var crtSharpness = C64CRTSettings.defaultParameters.sharpness
+    @AppStorage(C64CRTSettings.maskIntensityKey)
+    private var crtMaskIntensity = C64CRTSettings.defaultParameters.maskIntensity
+    @AppStorage(C64CRTSettings.maskTypeKey)
+    private var crtMaskType = C64CRTSettings.defaultParameters.maskType
+    @AppStorage(C64CRTSettings.curvatureKey)
+    private var crtCurvature = C64CRTSettings.defaultParameters.curvature
+    @AppStorage(C64CRTSettings.brightnessKey)
+    private var crtBrightness = C64CRTSettings.defaultParameters.brightness
+    @AppStorage(C64CRTSettings.bloomAmountKey)
+    private var crtBloomAmount = C64CRTSettings.defaultParameters.bloomAmount
+    @AppStorage(C64CRTSettings.bloomSoftnessKey)
+    private var crtBloomSoftness = C64CRTSettings.defaultParameters.bloomSoftness
+
     func makeUIView(context: Context) -> C64MetalView {
         let view = C64MetalView(frame: .zero)
+        applyCRTSettings(to: view)
         emulator.attach(videoView: view)
         return view
     }
 
     func updateUIView(_ uiView: C64MetalView, context: Context) {
+        applyCRTSettings(to: uiView)
         emulator.attach(videoView: uiView)
+    }
+
+    private func applyCRTSettings(to view: C64MetalView) {
+        view.crtFilterEnabled = crtFilterEnabled
+        view.crtScanlineIntensity = Float(crtScanlineIntensity)
+        view.crtBeamSoftness = Float(crtBeamSoftness)
+        view.crtSharpness = Float(crtSharpness)
+        view.crtMaskIntensity = Float(crtMaskIntensity)
+        view.crtMaskType = crtMaskType
+        view.crtCurvature = Float(crtCurvature)
+        view.crtBrightness = Float(crtBrightness)
+        view.crtBloomAmount = Float(crtBloomAmount)
+        view.crtBloomSoftness = Float(crtBloomSoftness)
+        view.setNeedsDisplay()
     }
 }
 
@@ -3029,6 +3087,21 @@ private struct CRTPowerOffTransitionView: View {
 }
 
 private struct CRTNoSignalView: View {
+    @AppStorage(C64CRTSettings.enabledKey)
+    private var crtFilterEnabled = C64CRTSettings.defaultEnabled
+    @AppStorage(C64CRTSettings.scanlineIntensityKey)
+    private var crtScanlineIntensity = C64CRTSettings.defaultParameters.scanlineIntensity
+    @AppStorage(C64CRTSettings.maskIntensityKey)
+    private var crtMaskIntensity = C64CRTSettings.defaultParameters.maskIntensity
+    @AppStorage(C64CRTSettings.maskTypeKey)
+    private var crtMaskType = C64CRTSettings.defaultParameters.maskType
+    @AppStorage(C64CRTSettings.curvatureKey)
+    private var crtCurvature = C64CRTSettings.defaultParameters.curvature
+    @AppStorage(C64CRTSettings.brightnessKey)
+    private var crtBrightness = C64CRTSettings.defaultParameters.brightness
+    @AppStorage(C64CRTSettings.bloomAmountKey)
+    private var crtBloomAmount = C64CRTSettings.defaultParameters.bloomAmount
+
     private let columns = 72
     private let refreshInterval = 1.0 / 15.0
 
@@ -3046,6 +3119,7 @@ private struct CRTNoSignalView: View {
                 let rows = max(24, Int(Double(columns) * aspect))
                 let cellWidth = size.width / CGFloat(columns)
                 let cellHeight = size.height / CGFloat(rows)
+                let brightness = crtFilterEnabled ? crtBrightness : 1.0
                 let frame = UInt64(
                     max(0, timeline.date.timeIntervalSinceReferenceDate * 30.0)
                 )
@@ -3065,7 +3139,7 @@ private struct CRTNoSignalView: View {
                         )
                         context.fill(
                             Path(rect),
-                            with: .color(Color(white: min(1, white)))
+                            with: .color(Color(white: min(1, white * brightness)))
                         )
                     }
                 }
@@ -3076,22 +3150,73 @@ private struct CRTNoSignalView: View {
                 let bandY = CGFloat(
                     travel.truncatingRemainder(dividingBy: Double(size.height + 70))
                 ) - 35
+                let bandOpacity = crtFilterEnabled
+                    ? 0.045 + 0.035 * crtBloomAmount
+                    : 0.055
                 context.fill(
                     Path(CGRect(x: 0, y: bandY, width: size.width, height: 28)),
-                    with: .color(.white.opacity(0.055))
+                    with: .color(.white.opacity(bandOpacity))
                 )
 
+                let scanlineOpacity = crtFilterEnabled
+                    ? 0.07 + 0.18 * crtScanlineIntensity
+                    : 0.12
                 var y: CGFloat = 1
                 while y < size.height {
                     context.fill(
                         Path(CGRect(x: 0, y: y, width: size.width, height: 1)),
-                        with: .color(.black.opacity(0.12))
+                        with: .color(.black.opacity(scanlineOpacity))
                     )
                     y += 4
+                }
+
+                if crtFilterEnabled,
+                   crtMaskType != C64CRTMaskType.off.rawValue,
+                   crtMaskIntensity > 0.001 {
+                    let stripeWidth = max(1.0, size.width / CGFloat(columns * 3))
+                    let maskOpacity = 0.045 * crtMaskIntensity
+                    var x: CGFloat = 0
+                    var phase = 0
+                    while x < size.width {
+                        let color: Color
+                        switch phase {
+                        case 0: color = .red
+                        case 1: color = .green
+                        default: color = .blue
+                        }
+                        context.fill(
+                            Path(CGRect(
+                                x: x,
+                                y: 0,
+                                width: stripeWidth + 0.35,
+                                height: size.height
+                            )),
+                            with: .color(color.opacity(maskOpacity))
+                        )
+                        x += stripeWidth
+                        phase = (phase + 1) % 3
+                    }
+                }
+
+                if crtFilterEnabled, crtCurvature > 0.001 {
+                    let edge = min(size.width, size.height) * 0.018 * crtCurvature
+                    let radius = min(size.width, size.height) * 0.055 * crtCurvature
+                    let tube = CGRect(origin: .zero, size: size).insetBy(dx: edge, dy: edge)
+                    context.stroke(
+                        Path(roundedRect: tube, cornerRadius: radius),
+                        with: .color(.black.opacity(0.55 * crtCurvature)),
+                        lineWidth: max(1, edge * 2.6)
+                    )
                 }
             }
         }
         .background(.black)
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: crtFilterEnabled ? CGFloat(22 * crtCurvature) : 0,
+                style: .continuous
+            )
+        )
         .clipped()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("C64 powered off")

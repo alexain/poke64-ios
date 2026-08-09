@@ -40,18 +40,58 @@ This document lists only work that is still pending. Completed Library foundatio
 ## 5. Media and expansion devices
 
 - Add optional drive units 10 and 11.
-- Refine drive-emulation controls around VICE Virtual Device Traps: make the fast/virtual versus accurate/True Drive choice explicit, preserve it in Emulation Profiles and test standard loaders plus common fastloaders.
+- Expand compatibility testing for the explicit Fast Virtual — Traps and True Drive — Hardware backends across standard KERNAL loaders, JiffyDOS, common fastloaders and REU-heavy software such as ReadyOS; keep ReadyOS CRT+D64 with a 16 MB REU as a regression case for fast trap-based preload.
 - Expose independent per-drive activity indicators by connecting to a VICE API that identifies the active unit; the current libretro LED is aggregate.
 - Add safe writable TAP recording, explicit write-back and export before exposing the datasette RECORD control.
-- Extend cartridge handling for supported expansion devices beyond basic CRT attachment.
+- Extend cartridge handling for supported expansion devices beyond basic CRT attachment, including cartridge-type identification in the Library. Prophet64 CRT images already use VICE's native type-43 emulation through normal CRT auto-detection; optional raw 256 KiB Prophet64 BIN import can be evaluated separately because a bare `.bin` does not identify its cartridge type safely.
 - Add explicit export/share for modified external REU images and clarify snapshot/write-back workflows.
+
+### Historical storage and expansion hardware
+
+Add historical expansion hardware incrementally, preferring devices already emulated by the pinned VICE core and exposing them through coherent POKE64 media, firmware and device workflows rather than raw core-option switches. Planned order:
+
+1. **CMD FD-2000 / FD-4000**
+   - Expose CMD FD-2000 and FD-4000 as selectable drive models.
+   - Add Library/import/mount support for D1M, D2M and D4M media as supported by the active VICE/libretro revision.
+   - Add external CMD drive-ROM handling to Firmware Profiles and validate write-back, formatting, disk swapping and compatibility with standard/JiffyDOS environments.
+2. **CMD HD**
+   - Expose the VICE CMD HD emulation and DHD hard-disk images through a POKE64-owned storage workflow.
+   - Support creation/import/mount/eject and safe persistence/export of DHD media.
+   - Investigate Normal, Configuration and Installation modes and ensure CMD DOS initialization can be performed without exposing unsafe or confusing low-level controls.
+3. **CMD RAMLink**
+   - Expose RAMLink and persistent RAMCard images.
+   - Validate combinations with REU/GeoRAM-compatible configurations and, where supported by VICE, CMD HD parallel-link behavior.
+   - Keep RAMLink state/media persistence explicit and recoverable across app lifecycle transitions.
+4. **GeoRAM**
+   - Add GeoRAM as a first-class alternative memory expansion, including supported capacity selection and persistent image import/export where available.
+   - Keep REU and GeoRAM configuration mutually clear in profiles so software-specific requirements are easy to reproduce.
+5. **KoalaPad / Apple Pencil**
+   - Expose VICE KoalaPad emulation using iPad touch and Apple Pencil as the primary modern input surface.
+   - Map position/buttons deliberately, validate coordinate scaling/latency and test period graphics software.
+6. **SwiftLink / Turbo232**
+   - Expose ACIA-based SwiftLink/Turbo232 emulation as an advanced networking device.
+   - Bridge the emulated serial device to an iPadOS-safe TCP transport for terminal software and BBS access, reusing the Virtual Hayes networking foundation where practical.
+   - Keep connection state, baud configuration and disconnect behavior explicit.
+7. **CMD SuperCPU 64**
+   - Investigate a dedicated `xscpu64` libretro/direct-VICE backend rather than treating SuperCPU as a normal x64sc peripheral option.
+   - Evaluate 65C816 execution, 20 MHz timing, SuperRAM/SIMM configuration, firmware requirements, save-state implications and software compatibility.
+   - Validate interaction with other CMD devices, especially RAMLink, only after the standalone SuperCPU path is stable.
+
+After the ordered items above, evaluate additional historically relevant hardware where VICE support and iPadOS integration make it practical:
+
+- **IDE64**, including supported cartridge revisions and persistent HDD images.
+- **Lt. Kernal** SCSI hard-disk/host-adapter emulation.
+- **Dolphin DOS, Professional DOS and SpeedDOS** configurations, including parallel-cable requirements and matching drive ROMs.
+- **SFX Sound Expander** and other historically relevant sound expansions where audio routing is reliable.
+- **MIDI interfaces** such as Sequential, Passport, Datel/Siel/JMS, Namesoft and Maplin, with a future CoreMIDI bridge where feasible.
+- **IEEE-488 storage**, including compatible interfaces and 8050/8250/D9090/D9060-class devices, as a preservation/advanced-user feature.
 
 ## 6. Graphics and audio
 
 - Add Metal CRT shaders and presets based on compatible openly licensed shader projects.
 - Add scanlines, shadow mask, curvature, bloom, vignette and phosphor-persistence controls.
 - Add reusable performance/quality presets for iPad hardware classes.
-- Add SID filter controls, stereo output and supported dual-SID configurations.
+- Add SID filter controls and finer stereo/mixing controls beyond the completed core-supported second-SID address selection.
 - Add external-display mode for connected monitors/TVs: move the C64 video output to the external screen at full screen while keeping the iPad as the control surface for the keyboard, datasette, Devices and other emulator controls.
 - Add an explicit move/return display action, preserve the running emulation while switching screens, and handle external-display connection/disconnection gracefully.
 
@@ -131,11 +171,6 @@ Experimental research only; do not tie this work to a specific release until the
 - Treat the original C64 Reloaded separately unless a comparable programmable/debug interface is identified; prioritize the MK2-specific integration where documented remote-control capabilities exist.
 - Keep all real-hardware write/control operations opt-in, explicit and recoverable; never issue reset, memory-write or firmware-related commands merely because an MK2 is connected.
 
-### SuperCPU
-
-- Investigate technical and licensing feasibility for CMD SuperCPU emulation.
-- Evaluate 65C816 execution, accelerated timing, SuperRAM and software compatibility requirements.
-
 ### Integrated development environment
 
 - Add BASIC and 6502 assembler editors.
@@ -156,6 +191,7 @@ lifecycle hardening + modem/printer resume validation
 → Library per-title save states and per-title Emulation Profile overrides
 → advanced CRT graphics, SID options and external-display support
 → manual multi-disk management and additional drives
+→ historical expansion phase: CMD FD-2000/4000 → CMD HD → RAMLink → GeoRAM → KoalaPad/Pencil → SwiftLink/Turbo232 → SuperCPU
 → printer validation and broader compatibility testing
 → release engineering / unsigned IPA distribution / App Store preparation
 → hardware link and experimental features
