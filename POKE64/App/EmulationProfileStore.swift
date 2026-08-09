@@ -41,6 +41,10 @@ struct EmulationProfileSnapshot: Codable, Equatable {
     var drive8Model: String
     var drive9Enabled: Bool
     var drive9Model: String
+    var drive10Enabled: Bool? = nil
+    var drive10Model: String? = nil
+    var drive11Enabled: Bool? = nil
+    var drive11Model: String? = nil
     var trueDriveEmulation: Bool
     var driveLoadWarpMode: String? = nil
     var driveWriteProtection: Bool
@@ -170,6 +174,20 @@ struct EmulationProfileSnapshot: Codable, Equatable {
             ),
             drive9Model: defaults.string(forKey: C64DriveModel.drive9DefaultsKey)
                 ?? C64DriveModel.defaultValue.rawValue,
+            drive10Enabled: boolValue(
+                defaults,
+                key: C64DriveSettings.drive10EnabledKey,
+                defaultValue: C64DriveSettings.defaultDrive10Enabled
+            ),
+            drive10Model: defaults.string(forKey: C64DriveModel.drive10DefaultsKey)
+                ?? C64DriveModel.defaultValue.rawValue,
+            drive11Enabled: boolValue(
+                defaults,
+                key: C64DriveSettings.drive11EnabledKey,
+                defaultValue: C64DriveSettings.defaultDrive11Enabled
+            ),
+            drive11Model: defaults.string(forKey: C64DriveModel.drive11DefaultsKey)
+                ?? C64DriveModel.defaultValue.rawValue,
             trueDriveEmulation: boolValue(
                 defaults,
                 key: C64DriveSettings.trueDriveEmulationKey,
@@ -235,6 +253,10 @@ struct EmulationProfileSnapshot: Codable, Equatable {
             drive8Model: C64DriveModel.defaultValue.rawValue,
             drive9Enabled: C64DriveSettings.defaultDrive9Enabled,
             drive9Model: C64DriveModel.defaultValue.rawValue,
+            drive10Enabled: C64DriveSettings.defaultDrive10Enabled,
+            drive10Model: C64DriveModel.defaultValue.rawValue,
+            drive11Enabled: C64DriveSettings.defaultDrive11Enabled,
+            drive11Model: C64DriveModel.defaultValue.rawValue,
             trueDriveEmulation: C64DriveSettings.defaultTrueDriveEmulation,
             driveLoadWarpMode: C64DriveSettings.defaultLoadWarpMode.rawValue,
             driveWriteProtection: C64DriveSettings.defaultWriteProtection,
@@ -259,6 +281,18 @@ struct EmulationProfileSnapshot: Codable, Equatable {
         if normalized.sidExtra == nil {
             normalized.sidExtra = C64SIDExtra.defaultValue.rawValue
         }
+        if normalized.drive10Enabled == nil {
+            normalized.drive10Enabled = C64DriveSettings.defaultDrive10Enabled
+        }
+        if normalized.drive10Model == nil {
+            normalized.drive10Model = C64DriveModel.defaultValue.rawValue
+        }
+        if normalized.drive11Enabled == nil {
+            normalized.drive11Enabled = C64DriveSettings.defaultDrive11Enabled
+        }
+        if normalized.drive11Model == nil {
+            normalized.drive11Model = C64DriveModel.defaultValue.rawValue
+        }
         return normalized == current
     }
 
@@ -271,6 +305,15 @@ struct EmulationProfileSnapshot: Codable, Equatable {
 
         let driveTitle = C64DriveModel(rawValue: drive8Model)?.rawValue ?? drive8Model
         components.append("Drive 8: \(driveTitle)")
+        if drive9Enabled {
+            components.append("Drive 9")
+        }
+        if drive10Enabled ?? C64DriveSettings.defaultDrive10Enabled {
+            components.append("Drive 10")
+        }
+        if drive11Enabled ?? C64DriveSettings.defaultDrive11Enabled {
+            components.append("Drive 11")
+        }
 
         if let reu = C64REUSize(rawValue: reuSize), reu != .disabled {
             components.append("REU \(reu.capacityTitle)")
@@ -331,6 +374,22 @@ struct EmulationProfileSnapshot: Codable, Equatable {
         defaults.set(drive8Model, forKey: C64DriveModel.drive8DefaultsKey)
         defaults.set(drive9Enabled, forKey: C64DriveSettings.drive9EnabledKey)
         defaults.set(drive9Model, forKey: C64DriveModel.drive9DefaultsKey)
+        defaults.set(
+            drive10Enabled ?? C64DriveSettings.defaultDrive10Enabled,
+            forKey: C64DriveSettings.drive10EnabledKey
+        )
+        defaults.set(
+            drive10Model ?? C64DriveModel.defaultValue.rawValue,
+            forKey: C64DriveModel.drive10DefaultsKey
+        )
+        defaults.set(
+            drive11Enabled ?? C64DriveSettings.defaultDrive11Enabled,
+            forKey: C64DriveSettings.drive11EnabledKey
+        )
+        defaults.set(
+            drive11Model ?? C64DriveModel.defaultValue.rawValue,
+            forKey: C64DriveModel.drive11DefaultsKey
+        )
         defaults.set(trueDriveEmulation, forKey: C64DriveSettings.trueDriveEmulationKey)
         let loadWarpMode = C64DriveLoadWarpMode(rawValue: driveLoadWarpMode ?? "")
             ?? C64DriveSettings.defaultLoadWarpMode

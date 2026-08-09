@@ -164,16 +164,13 @@ struct LibraryView: View {
                 )
             }
         }
-        .fileImporter(
-            isPresented: $showImporter,
-            allowedContentTypes: [.data],
-            allowsMultipleSelection: true
-        ) { result in
-            switch result {
-            case .success(let urls):
+        .sheet(isPresented: $showImporter) {
+            CopyDocumentPicker(
+                isPresented: $showImporter,
+                allowedContentTypes: [.data],
+                allowsMultipleSelection: true
+            ) { urls in
                 importFiles(urls)
-            case .failure(let error):
-                errorMessage = error.localizedDescription
             }
         }
         .confirmationDialog(

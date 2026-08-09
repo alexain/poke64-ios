@@ -102,6 +102,9 @@ typedef NS_ENUM(NSInteger, C64DatasetteCommand) {
 - (void)setMouseButton:(NSInteger)button pressed:(BOOL)pressed;
 - (void)setKey:(C64KeyCode)key pressed:(BOOL)pressed;
 - (void)setRawKeyCode:(NSUInteger)keyCode pressed:(BOOL)pressed;
+- (void)setRawShiftedKeyModifier:(NSUInteger)modifierKeyCode
+                      baseKey:(NSUInteger)baseKeyCode
+                      pressed:(BOOL)pressed;
 
 @end
 

@@ -196,6 +196,7 @@ struct StateCommand {
 struct KeyEvent {
     bool down;
     unsigned key;
+    uint64_t dueFrame;
 };
 
 static bool storedDriveEnabled(unsigned int unit);
@@ -226,6 +227,10 @@ struct SessionImpl {
     std::atomic<uint32_t> mouseButtons{0};
     std::mutex keyMutex;
     std::vector<KeyEvent> keyEvents;
+    std::atomic<uint64_t> keyFrameCounter{0};
+    std::map<unsigned, uint64_t> stagedKeyDownFrames;
+    std::map<unsigned, unsigned> stagedModifierReferenceCounts;
+    std::map<unsigned, uint64_t> stagedModifierHoldUntilFrames;
     std::mutex mediaCommandMutex;
     std::deque<std::shared_ptr<MediaCommand>> mediaCommands;
     std::mutex stateCommandMutex;
@@ -1110,14 +1115,34 @@ struct SessionImpl {
     }
 
     bool applyRuntimeDriveConfiguration(unsigned int unit, std::string &error) {
-        if (unit < 8 || unit > 9) {
+        if (unit < 8 || unit > 11) {
             return true;
         }
         if (!storedDriveEnabled(unit)) {
             error = std::string("Drive ") + std::to_string(unit) + " is disabled";
             return false;
         }
+
+        const std::string prefix = std::string("Drive") + std::to_string(unit);
+        const std::string trueDriveResource = prefix + "TrueEmulation";
+        const std::string trapResource = std::string("TrapDevice") + std::to_string(unit);
+        const std::string filesystemResource = std::string("FileSystemDevice") + std::to_string(unit);
+
         if (!storedTrueDriveEmulationEnabled()) {
+            const std::pair<std::string, int> resources[] = {
+                {trueDriveResource, 0},
+                {trapResource, 1},
+                {filesystemResource, 0}
+            };
+            for (const auto &resource : resources) {
+                if (!setRuntimeIntegerResource(
+                        resource.first.c_str(),
+                        resource.second,
+                        error
+                    )) {
+                    return false;
+                }
+            }
             return true;
         }
 
@@ -1127,7 +1152,6 @@ struct SessionImpl {
         }
 
         const int expectedDriveType = storedDriveTypeResourceValue(unit);
-        const std::string prefix = std::string("Drive") + std::to_string(unit);
         const std::string typeResource = prefix + "Type";
         int currentDriveType = 0;
         if (api.resources_get_int(typeResource.c_str(), &currentDriveType) < 0) {
@@ -1149,9 +1173,6 @@ struct SessionImpl {
             }
         }
 
-        const std::string trueDriveResource = prefix + "TrueEmulation";
-        const std::string trapResource = std::string("TrapDevice") + std::to_string(unit);
-        const std::string filesystemResource = std::string("FileSystemDevice") + std::to_string(unit);
         const std::pair<std::string, int> resources[] = {
             {trueDriveResource, 1},
             {trapResource, 0},
@@ -1172,9 +1193,15 @@ struct SessionImpl {
 
     bool applyRuntimeDriveSoundConfiguration(std::string &error) {
         const int volume = storedDriveSoundVolumeResourceValue();
+        bool anyDriveSupportsSound = false;
+        for (unsigned int unit = 8; unit <= 11; ++unit) {
+            if (storedDriveEnabled(unit) && storedDriveTypeResourceValue(unit) != 1581) {
+                anyDriveSupportsSound = true;
+                break;
+            }
+        }
         const bool enabled = storedTrueDriveEmulationEnabled()
-            && ((storedDriveEnabled(8) && storedDriveTypeResourceValue(8) != 1581)
-                || (storedDriveEnabled(9) && storedDriveTypeResourceValue(9) != 1581))
+            && anyDriveSupportsSound
             && volume > 0;
 
         if (!setRuntimeIntegerResource(
@@ -1826,10 +1853,20 @@ struct SessionImpl {
     }
 
     void drainKeyEvents() {
+        const uint64_t currentFrame = keyFrameCounter.fetch_add(1, std::memory_order_acq_rel) + 1;
         std::vector<KeyEvent> pending;
         {
             std::lock_guard<std::mutex> lock(keyMutex);
-            pending.swap(keyEvents);
+            std::vector<KeyEvent> deferred;
+            deferred.reserve(keyEvents.size());
+            for (const KeyEvent &event : keyEvents) {
+                if (event.dueFrame <= currentFrame) {
+                    pending.push_back(event);
+                } else {
+                    deferred.push_back(event);
+                }
+            }
+            keyEvents.swap(deferred);
         }
         if (!keyboardCallback) return;
         for (const KeyEvent &event : pending) {
@@ -1955,11 +1992,17 @@ static void applyStoredVideoOptions(SessionImpl *session) {
 
 static bool storedDriveEnabled(unsigned int unit) {
     if (unit == 8) return true;
-    if (unit != 9) return false;
+
+    NSString *key = nil;
+    switch (unit) {
+        case 9: key = @"poke64.drive9.enabled"; break;
+        case 10: key = @"poke64.drive10.enabled"; break;
+        case 11: key = @"poke64.drive11.enabled"; break;
+        default: return false;
+    }
+
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    return [defaults objectForKey:@"poke64.drive9.enabled"] != nil
-        ? [defaults boolForKey:@"poke64.drive9.enabled"]
-        : false;
+    return [defaults objectForKey:key] != nil ? [defaults boolForKey:key] : false;
 }
 
 static bool storedTrueDriveEmulationEnabled() {
@@ -2009,7 +2052,13 @@ static int storedVirtualModemBaud() {
 }
 
 static NSString *storedDriveModel(unsigned int unit) {
-    NSString *key = unit == 9 ? @"poke64.drive9.model" : @"poke64.drive.model";
+    NSString *key = @"poke64.drive.model";
+    switch (unit) {
+        case 9: key = @"poke64.drive9.model"; break;
+        case 10: key = @"poke64.drive10.model"; break;
+        case 11: key = @"poke64.drive11.model"; break;
+        default: break;
+    }
     return validatedDefaultString(
         key,
         @[@"1541", @"1541-II", @"1571", @"1581"],
@@ -2123,6 +2172,13 @@ static void applyStoredPrinterOptions(SessionImpl *session) {
     );
 }
 
+static void applyStoredKeyboardOptions(SessionImpl *session) {
+    // The libretro keyboard keymap is global: switching it for a physical
+    // keyboard also changes the codes used by POKE64's on-screen C64 keyboard.
+    // Keep the core positional and perform host-layout translation in UIKit.
+    assignCoreOption(session, "vice_keyboard_keymap", @"positional");
+}
+
 static void applyStoredDriveOptions(SessionImpl *session) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     const bool trueDrive = storedTrueDriveEmulationEnabled();
@@ -2173,9 +2229,13 @@ static void applyStoredDriveOptions(SessionImpl *session) {
         static_cast<NSInteger>(0),
         static_cast<NSInteger>(100)
     );
-    const bool supportsSound =
-        (storedDriveEnabled(8) && storedDriveTypeResourceValue(8) != 1581)
-        || (storedDriveEnabled(9) && storedDriveTypeResourceValue(9) != 1581);
+    bool supportsSound = false;
+    for (unsigned int unit = 8; unit <= 11; ++unit) {
+        if (storedDriveEnabled(unit) && storedDriveTypeResourceValue(unit) != 1581) {
+            supportsSound = true;
+            break;
+        }
+    }
     assignCoreOption(
         session,
         "vice_drive_sound_emulation",
@@ -2381,6 +2441,7 @@ static bool environmentCallback(unsigned command, void *data) {
             applyStoredREUOptions(session);
             applyStoredVideoOptions(session);
             applyStoredAudioOptions(session);
+            applyStoredKeyboardOptions(session);
             applyStoredDriveOptions(session);
             applyStoredPrinterOptions(session);
             return true;
@@ -2723,14 +2784,18 @@ bool SessionImpl::start(const char *path, std::string &error) {
                         recordCoreMessage(printerError.c_str(), true);
                     }
                 }
-                if (storedTrueDriveEmulationEnabled()) {
+                {
                     std::string driveError;
-                    if (!applyRuntimeDriveConfiguration(8, driveError)) {
-                        recordCoreMessage(driveError.c_str(), true);
-                    } else if (storedDriveEnabled(9)
-                               && !applyRuntimeDriveConfiguration(9, driveError)) {
-                        recordCoreMessage(driveError.c_str(), true);
-                    } else {
+                    bool driveConfigurationOK = true;
+                    for (unsigned int unit = 8; unit <= 11; ++unit) {
+                        if (!storedDriveEnabled(unit)) continue;
+                        if (!applyRuntimeDriveConfiguration(unit, driveError)) {
+                            recordCoreMessage(driveError.c_str(), true);
+                            driveConfigurationOK = false;
+                            break;
+                        }
+                    }
+                    if (driveConfigurationOK && storedTrueDriveEmulationEnabled()) {
                         std::string soundError;
                         if (!applyRuntimeDriveSoundConfiguration(soundError)) {
                             std::fprintf(
@@ -3151,8 +3216,72 @@ bool SessionImpl::start(const char *path, std::string &error) {
 
 - (void)setRawKeyCode:(NSUInteger)keyCode pressed:(BOOL)pressed {
     if (keyCode > UINT_MAX) return;
+    const uint64_t nextFrame = _impl->keyFrameCounter.load(std::memory_order_acquire) + 1;
     std::lock_guard<std::mutex> lock(_impl->keyMutex);
-    _impl->keyEvents.push_back({static_cast<bool>(pressed), static_cast<unsigned>(keyCode)});
+    _impl->keyEvents.push_back({
+        static_cast<bool>(pressed),
+        static_cast<unsigned>(keyCode),
+        nextFrame
+    });
+}
+
+- (void)setRawShiftedKeyModifier:(NSUInteger)modifierKeyCode
+                      baseKey:(NSUInteger)baseKeyCode
+                      pressed:(BOOL)pressed {
+    if (modifierKeyCode > UINT_MAX || baseKeyCode > UINT_MAX) return;
+
+    const unsigned modifier = static_cast<unsigned>(modifierKeyCode);
+    const unsigned baseKey = static_cast<unsigned>(baseKeyCode);
+    const uint64_t nextFrame = _impl->keyFrameCounter.load(std::memory_order_acquire) + 1;
+
+    std::lock_guard<std::mutex> lock(_impl->keyMutex);
+    if (pressed) {
+        unsigned &references = _impl->stagedModifierReferenceCounts[modifier];
+        if (references == 0) {
+            _impl->keyEvents.push_back({true, modifier, nextFrame});
+        }
+        references += 1;
+
+        // libretro's VICE mapper scans key codes in numeric order. Printable
+        // base keys have lower codes than RETROK_RSHIFT/LSHIFT, so submitting
+        // both in one frame can momentarily type `3` before `#`, or `,` before
+        // `<`. Stage the base key one emulated frame after the modifier.
+        const uint64_t baseDownFrame = nextFrame + 1;
+        _impl->keyEvents.push_back({true, baseKey, baseDownFrame});
+        _impl->stagedKeyDownFrames[baseKey] = baseDownFrame;
+        uint64_t &holdUntil = _impl->stagedModifierHoldUntilFrames[modifier];
+        holdUntil = std::max(holdUntil, baseDownFrame + 1);
+        return;
+    }
+
+    uint64_t baseDownFrame = nextFrame;
+    auto baseIt = _impl->stagedKeyDownFrames.find(baseKey);
+    if (baseIt != _impl->stagedKeyDownFrames.end()) {
+        baseDownFrame = baseIt->second;
+        _impl->stagedKeyDownFrames.erase(baseIt);
+    }
+
+    // Even a very quick tap must leave the base key asserted for at least one
+    // complete emulated frame after its staged key-down.
+    const uint64_t baseUpFrame = std::max(nextFrame, baseDownFrame + 1);
+    _impl->keyEvents.push_back({false, baseKey, baseUpFrame});
+
+    auto referencesIt = _impl->stagedModifierReferenceCounts.find(modifier);
+    if (referencesIt == _impl->stagedModifierReferenceCounts.end()) return;
+
+    if (referencesIt->second > 1) {
+        referencesIt->second -= 1;
+        return;
+    }
+
+    _impl->stagedModifierReferenceCounts.erase(referencesIt);
+    uint64_t modifierUpFrame = baseUpFrame;
+    auto holdIt = _impl->stagedModifierHoldUntilFrames.find(modifier);
+    if (holdIt != _impl->stagedModifierHoldUntilFrames.end()) {
+        modifierUpFrame = std::max(modifierUpFrame, holdIt->second);
+        _impl->stagedModifierHoldUntilFrames.erase(holdIt);
+    }
+    _impl->keyEvents.push_back({false, modifier, modifierUpFrame});
 }
 
 @end

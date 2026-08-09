@@ -2,7 +2,7 @@
 
 POKE64 is designed for **iPadOS first**. Landscape remains the primary interface target, with an adaptive portrait layout for the emulator toolbar and status panels. iPhone and macOS adaptations will be considered after the core iPad experience is stable.
 
-This document lists only work that is still pending. Completed Library foundations, G64 support, duplicate handling, disk inspection, Library artwork/screenshots, multi-disk detection, keyboard, Devices, video, audio, Drive 8/9, REU including external `.reu` image import, datasette transport, the MPS-803 virtual printer, the Virtual Hayes modem/BBS foundation, Emulation/Firmware Profiles, C64 Power control and automatic Previous Session restore have been removed.
+This document lists only work that is still pending. Completed Library foundations, G64 support, duplicate handling, disk inspection, Library artwork/screenshots, multi-disk detection, keyboard, Devices, video, audio, Drive 8–11, physical-keyboard host-layout mapping, REU including external `.reu` image import, datasette transport, the MPS-803 virtual printer, the Virtual Hayes modem/BBS foundation, Emulation/Firmware Profiles, C64 Power control and automatic Previous Session restore have been removed.
 
 ## 1. Core, firmware and diagnostics
 
@@ -19,6 +19,8 @@ This document lists only work that is still pending. Completed Library foundatio
 - Add known-ROM identification/status to Firmware Profiles, including recognized Commodore and JiffyDOS replacements where licensing permits identification.
 - Extend logical input/joyport configuration into profiles without binding a profile to a specific physical controller instance.
 - Add advanced options only where they can be applied safely without destabilizing the current core lifecycle.
+- Evolve Emulation Profiles toward complete machine/hardware profiles backed by the same hardware-configuration model used by the emulator, including expansion devices, SID layout, drive topology and conflict validation.
+- Add profile import/export for hardware configurations once the schema is stable, without embedding copyrighted ROMs, firmware or media.
 
 ## 3. Library and media management
 
@@ -30,12 +32,15 @@ This document lists only work that is still pending. Completed Library foundatio
 - Add explicit export/share workflows for created or modified disk images.
 - Add optional iCloud Drive and Google Drive backup/synchronization for the library, imported media and user-supplied firmware/ROM files, supporting recovery after app reinstallation and synchronization across multiple devices.
 
-## 4. Keyboard and input
+## 4. Keyboard, control ports and input
 
-- Improve Apple Magic Keyboard and other hardware-keyboard mappings.
-- Add paddle support.
+- Redesign the **Control Ports** panel before adding more joyport devices so it remains compact and device-oriented rather than becoming a long list of controls. Keep the frequently used **Swap ports** action at the top and always reachable without scrolling.
+- Generalize each control port around a selected emulated device (Joystick, Paddles, KoalaPad, 1351 mouse and future VICE-supported devices), with a dedicated device-specific virtual control surface instead of crowding every option into the port configuration panel.
+- Add virtual **Paddles** with the real two-controls-per-port topology: two independent analog controls and two fire buttons on one C64 control port, multi-touch operation for simultaneous players, and an iPad-friendly drag gesture rather than requiring literal circular knob motion. Evaluate split mapping to separate physical game controllers where supported by the pinned core.
+- Add a **KoalaPad** control surface presented as a bottom sheet/panel that keeps the C64 display visible. Map touch and Apple Pencil position absolutely to the emulated tablet X/Y coordinates, expose both KoalaPad buttons, and validate latency/scaling with period graphics software.
+- Make the Control Ports state part of `HardwareConfiguration`/Hardware Map so mutually exclusive devices on the same port are represented and validated by the same compatibility system as other expansion hardware.
 - Test additional Commodore 1351 software and refine pointer sensitivity where needed.
-- Investigate Apple Pencil as a Commodore mouse, light pen or graphics pointer.
+- Investigate Apple Pencil as a Commodore mouse, light pen or graphics pointer in addition to the dedicated KoalaPad mapping.
 
 ## 5. Media and expansion devices
 
@@ -45,6 +50,23 @@ This document lists only work that is still pending. Completed Library foundatio
 - Add safe writable TAP recording, explicit write-back and export before exposing the datasette RECORD control.
 - Extend cartridge handling for supported expansion devices beyond basic CRT attachment, including cartridge-type identification in the Library. Prophet64 CRT images already use VICE's native type-43 emulation through normal CRT auto-detection; optional raw 256 KiB Prophet64 BIN import can be evaluated separately because a bare `.bin` does not identify its cartridge type safely.
 - Add explicit export/share for modified external REU images and clarify snapshot/write-back workflows.
+
+### Hardware configuration, conflict management and Hardware Map
+
+Build this before the historical-expansion list grows substantially so new devices plug into one shared model rather than accumulating device-specific UI rules.
+
+- Introduce a POKE64-owned `HardwareConfiguration` model as the single source of truth for the emulated machine's hardware topology. It should describe machine/firmware selection, memory expansions, cartridge slot, SID configuration, IEC devices, I/O expansions and other resources that affect compatibility.
+- Add a central compatibility/conflict resolver. Each emulated device should declare the resources it consumes, including CPU/I/O address ranges, cartridge/expansion slots, IEC device numbers and mutually exclusive or size-limited relationships.
+- Distinguish hard conflicts from compatibility warnings and informational/shared-resource states. Prevent known-invalid configurations by default and, where possible, offer safe fixes such as moving SID #2 to a free address or choosing another IEC device number.
+- Add an **Advanced Hardware Map** in Settings → System that visualizes the active machine rather than maintaining separate state. Initial views should cover:
+  - the C64 CPU/I/O address space, highlighting occupied areas such as SID, IO1/IO2 and expansion registers;
+  - cartridge/expansion-port topology and relationships between connected devices;
+  - the IEC bus, including printer and Drives 8, 9, 10 and 11;
+  - the two control ports, showing the selected joyport device and per-port exclusivity (for example Joystick vs Paddles vs KoalaPad vs 1351 mouse).
+- Make Hardware Map entries interactive so a selected address/device can show ownership, active configuration, detected conflicts and available resolutions.
+- Keep VICE's own collision behavior as the final backend safeguard, but detect and explain conflicts in POKE64 before applying them whenever the configuration is known.
+- Store the complete validated `HardwareConfiguration` inside Emulation Profiles so a profile can reconstruct a complete virtual machine quickly and reproducibly. Loading an older or conflicting profile should run through the same compatibility resolver before it is applied.
+- Treat the Hardware Map as both diagnostics and documentation: show enough information to explain why REU, GeoRAM, RAMLink, second SID, cartridges and IEC devices can or cannot coexist without exposing raw VICE options unnecessarily.
 
 ### Historical storage and expansion hardware
 
@@ -171,13 +193,22 @@ Experimental research only; do not tie this work to a specific release until the
 - Treat the original C64 Reloaded separately unless a comparable programmable/debug interface is identified; prioritize the MK2-specific integration where documented remote-control capabilities exist.
 - Keep all real-hardware write/control operations opt-in, explicit and recoverable; never issue reset, memory-write or firmware-related commands merely because an MK2 is connected.
 
-### Integrated development environment
+### Integrated C64 development workspace
 
-- Add BASIC and 6502 assembler editors.
-- Build or assemble locally or through an optional web-based editor component.
-- Launch generated programs directly in the emulator.
-- Add registers, accumulator, flags, program counter, stack, disassembly and memory inspection.
-- Add breakpoints, single-step execution and memory watches through a VICE monitor/debug extension.
+Future/experimental work, intentionally scheduled after the first App Store release. Treat this as a switchable **Development Mode** built around the running emulator rather than as a separate application.
+
+- Add a dedicated development workspace with project/file browser, source editor and build/output console for Commodore BASIC and 6502/6510 assembly. Keep normal emulation UI uncluttered when Development Mode is off.
+- For BASIC, support editable plain-text source and a local tokenizer/export path that produces a normal C64 PRG, with direct injection/load into the running machine for rapid edit → run cycles.
+- For assembly, evaluate an embedded assembler/linker that can run entirely inside the app sandbox. Prefer a permissively licensed toolchain suitable for App Store distribution (for example the `ca65`/`ld65` subset of cc65) before considering GPL-only tools such as ACME. Record exact third-party source/license obligations for whichever implementation is selected.
+- Keep the build pipeline self-contained and deterministic: source files remain user-visible/editable, generated 6502 code runs only inside the emulated C64, and the feature must not depend on downloading executable native code, plug-ins or compiler extensions. Re-check the current App Store Review Guidelines before implementation/submission.
+- Add **Build & Run**, **Build & Inject**, **Reset & Run** and configurable load/start address workflows. Allow generated PRGs to be saved into the Library or exported as normal files rather than existing only as transient emulator state.
+- Preserve assembler symbols/source mappings where possible so the debugger can resolve addresses back to labels and source lines.
+- Build a POKE64 debugger bridge on top of VICE monitor/debug capabilities rather than polling unrelated frontend state. Expose live CPU registers (`A`, `X`, `Y`, `SP`, `PC` and status flags), disassembly, memory, stack and selected VIC/SID/CIA registers with a controlled refresh rate that does not disturb emulation timing.
+- Add breakpoints, conditional breakpoints where the backend permits them, watchpoints, single-step/step-over/continue, memory watches and a compact execution trace. Keep debugger pause/resume semantics explicit so normal emulation audio/video state remains predictable.
+- Allow useful debugger layouts such as source + disassembly + registers + memory, with panes that can be shown/hidden independently rather than forcing a desktop-style IDE onto every iPad size.
+- Make external-display support a first-class development workflow: for example keep the editor/debugger on the iPad while the connected display shows the C64 output full-screen, and later evaluate the inverse arrangement where supported by iPadOS multi-window/external-display APIs.
+- Integrate Development Mode with `HardwareConfiguration`/Emulation Profiles so a project can request a reproducible target machine (PAL/NTSC, SID layout, REU, drives and other compatible hardware) without embedding copyrighted firmware or media. Validate the target through the normal conflict resolver before Build & Run.
+- Keep any future online/source-sharing integration separate from the first implementation. The initial development workspace should work fully offline and should never turn remotely downloaded code into new native app functionality.
 
 ### Additional platforms
 
@@ -189,10 +220,12 @@ Experimental research only; do not tie this work to a specific release until the
 ```text
 lifecycle hardening + modem/printer resume validation
 → Library per-title save states and per-title Emulation Profile overrides
+→ Control Ports redesign + always-visible Swap + virtual Paddles/KoalaPad framework
 → advanced CRT graphics, SID options and external-display support
-→ manual multi-disk management and additional drives
+→ HardwareConfiguration/conflict resolver + Hardware Map v1
 → historical expansion phase: CMD FD-2000/4000 → CMD HD → RAMLink → GeoRAM → KoalaPad/Pencil → SwiftLink/Turbo232 → SuperCPU
+→ complete hardware profiles + profile import/export as the expansion model stabilizes
 → printer validation and broader compatibility testing
-→ release engineering / unsigned IPA distribution / App Store preparation
-→ hardware link and experimental features
+→ release engineering / App Store preparation and first iPad release
+→ post-App-Store platform work and other experimental features
 ```

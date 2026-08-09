@@ -58,6 +58,42 @@ enum C64MachineModel: String, CaseIterable, Identifiable {
 }
 
 
+enum C64PhysicalKeyboardMode: String, CaseIterable, Identifiable {
+    case positional
+    case hostLayout
+
+    static let defaultsKey = "poke64.input.physicalKeyboardMode"
+    static let defaultValue: C64PhysicalKeyboardMode = .positional
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .positional:
+            return "C64 positional"
+        case .hostLayout:
+            return "Host keyboard layout"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .positional:
+            return "Maps physical key positions directly, matching the existing POKE64 keyboard behavior."
+        case .hostLayout:
+            return "Uses the characters produced by iPadOS and translates normal PC-keyboard text into C64 keys while keeping the emulator's own keyboard map unchanged."
+        }
+    }
+
+    static var selected: C64PhysicalKeyboardMode {
+        guard let rawValue = UserDefaults.standard.string(forKey: defaultsKey),
+              let mode = C64PhysicalKeyboardMode(rawValue: rawValue) else {
+            return defaultValue
+        }
+        return mode
+    }
+}
+
 enum C64REUSize: String, CaseIterable, Identifiable {
     case disabled = "none"
     case kb128 = "128kB"
@@ -1480,6 +1516,8 @@ enum C64DriveModel: String, CaseIterable, Identifiable {
 
     static let drive8DefaultsKey = "poke64.drive.model"
     static let drive9DefaultsKey = "poke64.drive9.model"
+    static let drive10DefaultsKey = "poke64.drive10.model"
+    static let drive11DefaultsKey = "poke64.drive11.model"
     static let defaultsKey = drive8DefaultsKey
     static let defaultValue: C64DriveModel = .cbm1541II
 
@@ -1532,7 +1570,12 @@ enum C64DriveModel: String, CaseIterable, Identifiable {
     }
 
     static func defaultsKey(for unit: Int) -> String {
-        unit == 9 ? drive9DefaultsKey : drive8DefaultsKey
+        switch unit {
+        case 9: return drive9DefaultsKey
+        case 10: return drive10DefaultsKey
+        case 11: return drive11DefaultsKey
+        default: return drive8DefaultsKey
+        }
     }
 
     static func selected(for unit: Int) -> C64DriveModel {
@@ -1585,12 +1628,16 @@ enum C64DriveSettings {
     static let trueDriveEmulationKey = "poke64.drive.trueEmulation"
     static let loadWarpModeKey = "poke64.drive.loadWarpMode"
     static let drive9EnabledKey = "poke64.drive9.enabled"
+    static let drive10EnabledKey = "poke64.drive10.enabled"
+    static let drive11EnabledKey = "poke64.drive11.enabled"
     static let writeProtectionKey = "poke64.drive.writeProtection"
     static let soundLevelKey = "poke64.drive.soundLevel"
 
     static let defaultTrueDriveEmulation = false
     static let defaultLoadWarpMode = C64DriveLoadWarpMode.defaultValue
     static let defaultDrive9Enabled = false
+    static let defaultDrive10Enabled = false
+    static let defaultDrive11Enabled = false
     static let defaultWriteProtection = false
     static let defaultSoundLevel = 20
 
@@ -1600,27 +1647,52 @@ enum C64DriveSettings {
         return C64DriveLoadWarpMode(rawValue: rawValue) ?? defaultLoadWarpMode
     }
 
+    static func isEnabled(_ unit: Int, defaults: UserDefaults = .standard) -> Bool {
+        switch unit {
+        case 8:
+            return true
+        case 9:
+            return defaults.object(forKey: drive9EnabledKey) == nil
+                ? defaultDrive9Enabled
+                : defaults.bool(forKey: drive9EnabledKey)
+        case 10:
+            return defaults.object(forKey: drive10EnabledKey) == nil
+                ? defaultDrive10Enabled
+                : defaults.bool(forKey: drive10EnabledKey)
+        case 11:
+            return defaults.object(forKey: drive11EnabledKey) == nil
+                ? defaultDrive11Enabled
+                : defaults.bool(forKey: drive11EnabledKey)
+        default:
+            return false
+        }
+    }
+
+    static var enabledUnits: [Int] {
+        (8...11).filter { isEnabled($0) }
+    }
+
     static var configurationFingerprint: String {
         let defaults = UserDefaults.standard
-        return [
-            defaults.string(forKey: C64DriveModel.drive8DefaultsKey)
-                ?? C64DriveModel.defaultValue.rawValue,
-            String(defaults.object(forKey: drive9EnabledKey) == nil
-                ? defaultDrive9Enabled
-                : defaults.bool(forKey: drive9EnabledKey)),
-            defaults.string(forKey: C64DriveModel.drive9DefaultsKey)
-                ?? C64DriveModel.defaultValue.rawValue,
-            String(defaults.object(forKey: trueDriveEmulationKey) == nil
-                ? defaultTrueDriveEmulation
-                : defaults.bool(forKey: trueDriveEmulationKey)),
-            loadWarpMode.rawValue,
-            String(defaults.object(forKey: writeProtectionKey) == nil
-                ? defaultWriteProtection
-                : defaults.bool(forKey: writeProtectionKey)),
-            String(defaults.object(forKey: soundLevelKey) == nil
-                ? defaultSoundLevel
-                : defaults.integer(forKey: soundLevelKey))
-        ].joined(separator: ":")
+        var values: [String] = []
+        for unit in 8...11 {
+            values.append(String(isEnabled(unit, defaults: defaults)))
+            values.append(
+                defaults.string(forKey: C64DriveModel.defaultsKey(for: unit))
+                    ?? C64DriveModel.defaultValue.rawValue
+            )
+        }
+        values.append(String(defaults.object(forKey: trueDriveEmulationKey) == nil
+            ? defaultTrueDriveEmulation
+            : defaults.bool(forKey: trueDriveEmulationKey)))
+        values.append(loadWarpMode.rawValue)
+        values.append(String(defaults.object(forKey: writeProtectionKey) == nil
+            ? defaultWriteProtection
+            : defaults.bool(forKey: writeProtectionKey)))
+        values.append(String(defaults.object(forKey: soundLevelKey) == nil
+            ? defaultSoundLevel
+            : defaults.integer(forKey: soundLevelKey)))
+        return values.joined(separator: ":")
     }
 }
 
@@ -2332,6 +2404,9 @@ private struct SystemSettingsView: View {
     @AppStorage(C64MachineModel.defaultsKey)
     private var selectedModelRawValue = C64MachineModel.defaultModel.rawValue
 
+    @AppStorage(C64PhysicalKeyboardMode.defaultsKey)
+    private var physicalKeyboardModeRawValue = C64PhysicalKeyboardMode.defaultValue.rawValue
+
     @AppStorage(C64REUSize.defaultsKey)
     private var selectedREUSizeRawValue = C64REUSize.defaultValue.rawValue
 
@@ -2339,6 +2414,7 @@ private struct SystemSettingsView: View {
     private var persistentREUMemory = C64REUSettings.defaultPersistentMemory
 
     @State private var showREUImporter = false
+    @State private var showPhysicalKeyboardHelp = false
     @State private var reuImageInfo = FirmwareStore.importedREUImageInfo()
     @State private var reuImageError: String?
 
@@ -2350,8 +2426,65 @@ private struct SystemSettingsView: View {
         C64REUSize(rawValue: selectedREUSizeRawValue) ?? .defaultValue
     }
 
+    private var physicalKeyboardMode: C64PhysicalKeyboardMode {
+        C64PhysicalKeyboardMode(rawValue: physicalKeyboardModeRawValue) ?? .defaultValue
+    }
+
+    private var useHostKeyboardLayout: Binding<Bool> {
+        Binding(
+            get: { physicalKeyboardMode == .hostLayout },
+            set: { enabled in
+                physicalKeyboardModeRawValue = enabled
+                    ? C64PhysicalKeyboardMode.hostLayout.rawValue
+                    : C64PhysicalKeyboardMode.positional.rawValue
+            }
+        )
+    }
+
+    private var physicalKeyboardMappingHelp: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Host Keyboard Mapping")
+                .font(.headline)
+
+            Text("Dedicated C64 keys while Host Keyboard Layout is enabled:")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            keyboardMappingRow("Right Option ⌥", "Commodore (C=)")
+            keyboardMappingRow("Control ⌃", "CTRL")
+            keyboardMappingRow("Esc", "RUN/STOP")
+            keyboardMappingRow("Page Up", "RESTORE")
+            keyboardMappingRow("Home", "CLR/HOME")
+            keyboardMappingRow("Caps Lock", "SHIFT LOCK")
+            keyboardMappingRow("Backspace", "DEL")
+            keyboardMappingRow("Arrow keys", "C64 cursors")
+            keyboardMappingRow("Return", "RETURN")
+
+            Divider()
+
+            Text("Left Option/AltGr remains a host-layout modifier so symbols such as #, @ and brackets can still be typed normally. Tab remains an additional CTRL alias.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .frame(width: 360)
+    }
+
+    private func keyboardMappingRow(_ hostKey: String, _ c64Key: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(hostKey)
+            Spacer(minLength: 24)
+            Text(c64Key)
+                .foregroundStyle(.secondary)
+        }
+        .font(.subheadline)
+    }
+
     private var systemDefaultsAreSelected: Bool {
         selectedModel == .defaultModel
+            && physicalKeyboardMode == .defaultValue
             && selectedREUSize == .defaultValue
             && persistentREUMemory == C64REUSettings.defaultPersistentMemory
             && reuImageInfo == nil
@@ -2374,6 +2507,34 @@ private struct SystemSettingsView: View {
                 Text("Machine")
             } footer: {
                 Text("Changing the machine model restarts the C64 when Settings is closed. PAL and NTSC also change the core timing and video geometry.")
+            }
+
+            Section {
+                HStack(spacing: 12) {
+                    Toggle("Use host keyboard layout", isOn: useHostKeyboardLayout)
+
+                    Button {
+                        showPhysicalKeyboardHelp = true
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .imageScale(.large)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Physical keyboard mapping")
+                    .popover(isPresented: $showPhysicalKeyboardHelp, arrowEdge: .trailing) {
+                        physicalKeyboardMappingHelp
+                    }
+                }
+
+                LabeledContent("Mapping", value: physicalKeyboardMode.title)
+
+                Text(physicalKeyboardMode.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Physical Keyboard")
+            } footer: {
+                Text("Host layout follows normal PC/Mac text entry, including Italian layouts. Left Option/AltGr remains available for host symbols; Right Option is reserved for the C64 Commodore key and Control maps to C64 CTRL. Use C64 positional mode when exact matrix-oriented Shift/graphics behavior is required. This is a host preference and is not stored in Emulation Profiles.")
             }
 
             Section {
@@ -2446,6 +2607,7 @@ private struct SystemSettingsView: View {
                             reuImageInfo = nil
                         }
                         selectedModelRawValue = C64MachineModel.defaultModel.rawValue
+                        physicalKeyboardModeRawValue = C64PhysicalKeyboardMode.defaultValue.rawValue
                         selectedREUSizeRawValue = C64REUSize.defaultValue.rawValue
                         persistentREUMemory = C64REUSettings.defaultPersistentMemory
                     } catch {
@@ -2455,26 +2617,27 @@ private struct SystemSettingsView: View {
                 .disabled(systemDefaultsAreSelected)
             }
         }
-        .fileImporter(
-            isPresented: $showREUImporter,
-            allowedContentTypes: [.data],
-            allowsMultipleSelection: false
-        ) { result in
-            do {
-                let urls = try result.get()
-                guard let url = urls.first else { return }
-                let accessing = url.startAccessingSecurityScopedResource()
-                defer {
-                    if accessing {
-                        url.stopAccessingSecurityScopedResource()
+        .sheet(isPresented: $showREUImporter) {
+            CopyDocumentPicker(
+                isPresented: $showREUImporter,
+                allowedContentTypes: [.data],
+                allowsMultipleSelection: false
+            ) { urls in
+                do {
+                    guard let url = urls.first else { return }
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if accessing {
+                            url.stopAccessingSecurityScopedResource()
+                        }
                     }
-                }
 
-                let info = try FirmwareStore.importREUImage(from: url)
-                selectedREUSizeRawValue = info.size.rawValue
-                reuImageInfo = info
-            } catch {
-                reuImageError = error.localizedDescription
+                    let info = try FirmwareStore.importREUImage(from: url)
+                    selectedREUSizeRawValue = info.size.rawValue
+                    reuImageInfo = info
+                } catch {
+                    reuImageError = error.localizedDescription
+                }
             }
         }
         .alert(
@@ -4205,6 +4368,18 @@ private struct DiskDriveSettingsView: View {
     @AppStorage(C64DriveModel.drive9DefaultsKey)
     private var drive9ModelRawValue = C64DriveModel.defaultValue.rawValue
 
+    @AppStorage(C64DriveSettings.drive10EnabledKey)
+    private var drive10Enabled = C64DriveSettings.defaultDrive10Enabled
+
+    @AppStorage(C64DriveModel.drive10DefaultsKey)
+    private var drive10ModelRawValue = C64DriveModel.defaultValue.rawValue
+
+    @AppStorage(C64DriveSettings.drive11EnabledKey)
+    private var drive11Enabled = C64DriveSettings.defaultDrive11Enabled
+
+    @AppStorage(C64DriveModel.drive11DefaultsKey)
+    private var drive11ModelRawValue = C64DriveModel.defaultValue.rawValue
+
     @AppStorage(C64DriveSettings.trueDriveEmulationKey)
     private var trueDriveEmulation = C64DriveSettings.defaultTrueDriveEmulation
 
@@ -4225,26 +4400,48 @@ private struct DiskDriveSettingsView: View {
         C64DriveModel(rawValue: drive9ModelRawValue) ?? .defaultValue
     }
 
+    private var drive10Model: C64DriveModel {
+        C64DriveModel(rawValue: drive10ModelRawValue) ?? .defaultValue
+    }
+
+    private var drive11Model: C64DriveModel {
+        C64DriveModel(rawValue: drive11ModelRawValue) ?? .defaultValue
+    }
+
     private var loadWarpMode: C64DriveLoadWarpMode {
         C64DriveLoadWarpMode(rawValue: loadWarpModeRawValue) ?? .defaultValue
     }
 
-    private var drive8FirmwareStatus: FirmwareStatus {
-        FirmwareStore.status(for: drive8Model.firmwareSlot)
+    private var configuredDriveUnits: [Int] {
+        [8]
+            + (drive9Enabled ? [9] : [])
+            + (drive10Enabled ? [10] : [])
+            + (drive11Enabled ? [11] : [])
     }
 
-    private var drive9FirmwareStatus: FirmwareStatus {
-        FirmwareStore.status(for: drive9Model.firmwareSlot)
+    private func driveModel(for unit: Int) -> C64DriveModel {
+        switch unit {
+        case 9: return drive9Model
+        case 10: return drive10Model
+        case 11: return drive11Model
+        default: return drive8Model
+        }
     }
 
     private var canEnableTrueDrive: Bool {
-        drive8FirmwareStatus.isValid
-            && (!drive9Enabled || drive9FirmwareStatus.isValid)
+        configuredDriveUnits.allSatisfy { unit in
+            FirmwareStore.status(for: driveModel(for: unit).firmwareSlot).isValid
+        }
     }
 
     private var anyEnabledDriveSupportsSound: Bool {
-        drive8Model.supportsMechanicalSound
-            || (drive9Enabled && drive9Model.supportsMechanicalSound)
+        configuredDriveUnits.contains { driveModel(for: $0).supportsMechanicalSound }
+    }
+
+    private var configuredDriveModels: [C64DriveModel] {
+        C64DriveModel.allCases.filter { model in
+            configuredDriveUnits.contains { driveModel(for: $0) == model }
+        }
     }
 
     var body: some View {
@@ -4274,7 +4471,7 @@ private struct DiskDriveSettingsView: View {
                 } else {
                     LabeledContent("Disk access", value: "Virtual Device Traps")
 
-                    Text("VICE automatically enables the Drive 8/9 traps when True Drive is disabled. No separate trap switch is required.")
+                    Text("VICE automatically enables the traps for every enabled IEC drive (8–11) when True Drive is disabled. No separate trap switch is required.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -4283,7 +4480,7 @@ private struct DiskDriveSettingsView: View {
             } footer: {
                 Text(trueDriveEmulation
                     ? "True Drive emulates the selected drive CPU, ROM and IEC behavior for every enabled unit. Use it for JiffyDOS drive firmware, custom fastloaders and software that depends on real drive behavior; Automatic or Maximum can accelerate loading without switching to traps."
-                    : "Fast Virtual is the maximum-speed path for standard KERNAL disk I/O and REU preload workflows. It automatically uses VICE Virtual Device Traps for Drive 8 and Drive 9 and does not execute drive firmware.")
+                    : "Fast Virtual is the maximum-speed path for standard KERNAL disk I/O and REU preload workflows. It uses VICE Virtual Device Traps for each enabled drive from 8 through 11 and does not execute drive firmware.")
             }
 
             Section {
@@ -4299,43 +4496,33 @@ private struct DiskDriveSettingsView: View {
                 Text("Drive 8 is always enabled. Its model is independent, while the emulation backend is shared by all enabled drives.")
             }
 
-            Section {
-                Toggle("Enable Drive 9", isOn: $drive9Enabled)
+            optionalDriveSection(
+                unit: 9,
+                enabled: $drive9Enabled,
+                modelSelection: $drive9ModelRawValue,
+                model: drive9Model
+            )
 
-                driveModelPicker(
-                    title: "Drive model",
-                    selection: $drive9ModelRawValue
-                )
-                .disabled(!drive9Enabled)
+            optionalDriveSection(
+                unit: 10,
+                enabled: $drive10Enabled,
+                modelSelection: $drive10ModelRawValue,
+                model: drive10Model
+            )
 
-                LabeledContent(
-                    "Active backend",
-                    value: drive9Enabled
-                        ? (trueDriveEmulation ? "True Drive — Hardware" : "Fast Virtual — Traps")
-                        : "Disabled"
-                )
-
-                if drive9Enabled {
-                    LabeledContent("Typical media", value: drive9Model.mediaSummary)
-                }
-            } header: {
-                Text("Drive 9")
-            } footer: {
-                Text("Drive 9 is optional. Its model can be configured independently, while the emulation backend is shared by all enabled drives.")
-            }
+            optionalDriveSection(
+                unit: 11,
+                enabled: $drive11Enabled,
+                modelSelection: $drive11ModelRawValue,
+                model: drive11Model
+            )
 
             Section {
-                firmwareRow(
-                    units: drive9Enabled && drive9Model == drive8Model ? [8, 9] : [8],
-                    model: drive8Model,
-                    status: drive8FirmwareStatus
-                )
-
-                if drive9Enabled && drive9Model != drive8Model {
+                ForEach(configuredDriveModels) { model in
                     firmwareRow(
-                        units: [9],
-                        model: drive9Model,
-                        status: drive9FirmwareStatus
+                        units: configuredDriveUnits.filter { driveModel(for: $0) == model },
+                        model: model,
+                        status: FirmwareStore.status(for: model.firmwareSlot)
                     )
                 }
 
@@ -4350,7 +4537,7 @@ private struct DiskDriveSettingsView: View {
             } header: {
                 Text("Drive Firmware")
             } footer: {
-                Text("Drive ROMs are shared by model, not assigned separately to unit 8 or 9. Two enabled drives using the same model must therefore use the same ROM. POKE64 accepts standard or compatible replacement firmware; for JiffyDOS, use matching C64 KERNAL and drive ROMs.")
+                Text("Drive ROMs are shared by model, not assigned separately to units 8–11. Enabled drives using the same model therefore use the same ROM. POKE64 accepts standard or compatible replacement firmware; for JiffyDOS, use matching C64 KERNAL and drive ROMs.")
             }
 
             Section {
@@ -4358,7 +4545,7 @@ private struct DiskDriveSettingsView: View {
             } header: {
                 Text("Media Safety")
             } footer: {
-                Text("When enabled, newly attached images in Drive 8 and Drive 9 are opened read-only. Existing files are not modified by this setting.")
+                Text("When enabled, newly attached images in Drives 8–11 are opened read-only. Existing files are not modified by this setting.")
             }
 
             Section {
@@ -4407,15 +4594,13 @@ private struct DiskDriveSettingsView: View {
                 .disabled(isUsingDefaults)
             }
         }
-        .onChange(of: drive8ModelRawValue) { _, _ in
-            sanitizeTrueDriveSelection()
-        }
-        .onChange(of: drive9ModelRawValue) { _, _ in
-            sanitizeTrueDriveSelection()
-        }
-        .onChange(of: drive9Enabled) { _, _ in
-            sanitizeTrueDriveSelection()
-        }
+        .onChange(of: drive8ModelRawValue) { _, _ in sanitizeTrueDriveSelection() }
+        .onChange(of: drive9ModelRawValue) { _, _ in sanitizeTrueDriveSelection() }
+        .onChange(of: drive10ModelRawValue) { _, _ in sanitizeTrueDriveSelection() }
+        .onChange(of: drive11ModelRawValue) { _, _ in sanitizeTrueDriveSelection() }
+        .onChange(of: drive9Enabled) { _, _ in sanitizeTrueDriveSelection() }
+        .onChange(of: drive10Enabled) { _, _ in sanitizeTrueDriveSelection() }
+        .onChange(of: drive11Enabled) { _, _ in sanitizeTrueDriveSelection() }
         .onChange(of: trueDriveEmulation) { _, enabled in
             if enabled && !canEnableTrueDrive {
                 trueDriveEmulation = false
@@ -4435,6 +4620,38 @@ private struct DiskDriveSettingsView: View {
         .pickerStyle(.menu)
     }
 
+    private func optionalDriveSection(
+        unit: Int,
+        enabled: Binding<Bool>,
+        modelSelection: Binding<String>,
+        model: C64DriveModel
+    ) -> some View {
+        Section {
+            Toggle("Enable Drive \(unit)", isOn: enabled)
+
+            driveModelPicker(
+                title: "Drive model",
+                selection: modelSelection
+            )
+            .disabled(!enabled.wrappedValue)
+
+            LabeledContent(
+                "Active backend",
+                value: enabled.wrappedValue
+                    ? (trueDriveEmulation ? "True Drive — Hardware" : "Fast Virtual — Traps")
+                    : "Disabled"
+            )
+
+            if enabled.wrappedValue {
+                LabeledContent("Typical media", value: model.mediaSummary)
+            }
+        } header: {
+            Text("Drive \(unit)")
+        } footer: {
+            Text("Drive \(unit) is optional. Its model can be configured independently, while the emulation backend is shared by all enabled drives.")
+        }
+    }
+
     @ViewBuilder
     private func firmwareRow(
         units: [Int],
@@ -4443,7 +4660,7 @@ private struct DiskDriveSettingsView: View {
     ) -> some View {
         let unitLabel = units.count == 1
             ? "Drive \(units[0])"
-            : "Drives \(units.map { String($0) }.joined(separator: " and "))"
+            : "Drives " + units.map(String.init).joined(separator: ", ")
 
         HStack {
             VStack(alignment: .leading, spacing: 3) {
@@ -4479,6 +4696,10 @@ private struct DiskDriveSettingsView: View {
         drive8ModelRawValue == C64DriveModel.defaultValue.rawValue
             && drive9Enabled == C64DriveSettings.defaultDrive9Enabled
             && drive9ModelRawValue == C64DriveModel.defaultValue.rawValue
+            && drive10Enabled == C64DriveSettings.defaultDrive10Enabled
+            && drive10ModelRawValue == C64DriveModel.defaultValue.rawValue
+            && drive11Enabled == C64DriveSettings.defaultDrive11Enabled
+            && drive11ModelRawValue == C64DriveModel.defaultValue.rawValue
             && trueDriveEmulation == C64DriveSettings.defaultTrueDriveEmulation
             && loadWarpModeRawValue == C64DriveSettings.defaultLoadWarpMode.rawValue
             && writeProtection == C64DriveSettings.defaultWriteProtection
@@ -4495,6 +4716,10 @@ private struct DiskDriveSettingsView: View {
         drive8ModelRawValue = C64DriveModel.defaultValue.rawValue
         drive9Enabled = C64DriveSettings.defaultDrive9Enabled
         drive9ModelRawValue = C64DriveModel.defaultValue.rawValue
+        drive10Enabled = C64DriveSettings.defaultDrive10Enabled
+        drive10ModelRawValue = C64DriveModel.defaultValue.rawValue
+        drive11Enabled = C64DriveSettings.defaultDrive11Enabled
+        drive11ModelRawValue = C64DriveModel.defaultValue.rawValue
         trueDriveEmulation = C64DriveSettings.defaultTrueDriveEmulation
         loadWarpModeRawValue = C64DriveSettings.defaultLoadWarpMode.rawValue
         writeProtection = C64DriveSettings.defaultWriteProtection
