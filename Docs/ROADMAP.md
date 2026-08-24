@@ -2,7 +2,7 @@
 
 POKE64 is designed for **iPadOS first**. Landscape remains the primary interface target, with an adaptive portrait layout for the emulator toolbar and status panels. iPhone and macOS adaptations will be considered after the core iPad experience is stable.
 
-This document lists only work that is still pending. Completed Library foundations, G64 support, duplicate handling, disk inspection, Library artwork/screenshots, multi-disk detection, keyboard, Devices, video, audio, Drive 8–11, physical-keyboard host-layout mapping, REU including external `.reu` image import, datasette transport, the MPS-803 virtual printer, the Virtual Hayes modem/BBS foundation, Emulation/Firmware Profiles, C64 Power control and automatic Previous Session restore have been removed.
+This document lists only work that is still pending. Completed Library foundations, G64/raw-GCR inspection and Safe Start handling, duplicate handling, disk inspection, Library artwork/screenshots, multi-disk detection, keyboard, redesigned Control Ports, configurable touch controls and Quick Keys, Paddles, KoalaPad/Apple Pencil support, Devices, video/audio foundations, Metal CRT presets, Drive 8–11, physical-keyboard host-layout mapping, REU including external `.reu` image import, datasette transport, the MPS-803 virtual printer, the Virtual Hayes modem/BBS foundation, Emulation/Firmware Profiles, per-title profile assignment/input overrides, C64 Power control and automatic Previous Session restore have been removed.
 
 ## 1. Core, firmware and diagnostics
 
@@ -15,7 +15,6 @@ This document lists only work that is still pending. Completed Library foundatio
 
 ## 2. Profiles and remaining settings
 
-- Add per-title Emulation Profile assignment and selective overrides without binding mounted media to the hardware profile itself.
 - Add known-ROM identification/status to Firmware Profiles, including recognized Commodore and JiffyDOS replacements where licensing permits identification.
 - Extend logical input/joyport configuration into profiles without binding a profile to a specific physical controller instance.
 - Add advanced options only where they can be applied safely without destabilizing the current core lifecycle.
@@ -28,23 +27,18 @@ This document lists only work that is still pending. Completed Library foundatio
 - Add an optional cover/grid view while retaining the detailed list.
 - Preview BASIC listings where practical.
 - Add manual multi-disk grouping and editing for sets that cannot be inferred reliably from filenames.
-- Associate hardware profiles, joyports, firmware and save states with library entries.
+- Extend Library associations from the completed per-title Emulation Profile/input overrides to future HardwareConfiguration metadata, firmware-specific metadata and per-title save states.
 - Add explicit export/share workflows for created or modified disk images.
 - Add optional iCloud Drive and Google Drive backup/synchronization for the library, imported media and user-supplied firmware/ROM files, supporting recovery after app reinstallation and synchronization across multiple devices.
 
 ## 4. Keyboard, control ports and input
 
-- Redesign the **Control Ports** panel before adding more joyport devices so it remains compact and device-oriented rather than becoming a long list of controls. Keep the frequently used **Swap ports** action at the top and always reachable without scrolling.
-- Generalize each control port around a selected emulated device (Joystick, Paddles, KoalaPad, 1351 mouse and future VICE-supported devices), with a dedicated device-specific virtual control surface instead of crowding every option into the port configuration panel.
-- Add virtual **Paddles** with the real two-controls-per-port topology: two independent analog controls and two fire buttons on one C64 control port, multi-touch operation for simultaneous players, and an iPad-friendly drag gesture rather than requiring literal circular knob motion. Evaluate split mapping to separate physical game controllers where supported by the pinned core.
-- Add a **KoalaPad** control surface presented as a bottom sheet/panel that keeps the C64 display visible. Map touch and Apple Pencil position absolutely to the emulated tablet X/Y coordinates, expose both KoalaPad buttons, and validate latency/scaling with period graphics software.
 - Make the Control Ports state part of `HardwareConfiguration`/Hardware Map so mutually exclusive devices on the same port are represented and validated by the same compatibility system as other expansion hardware.
 - Test additional Commodore 1351 software and refine pointer sensitivity where needed.
 - Investigate Apple Pencil as a Commodore mouse, light pen or graphics pointer in addition to the dedicated KoalaPad mapping.
 
 ## 5. Media and expansion devices
 
-- Add optional drive units 10 and 11.
 - Expand compatibility testing for the explicit Fast Virtual — Traps and True Drive — Hardware backends across standard KERNAL loaders, JiffyDOS, common fastloaders and REU-heavy software such as ReadyOS; keep ReadyOS CRT+D64 with a 16 MB REU as a regression case for fast trap-based preload.
 - Expose independent per-drive activity indicators by connecting to a VICE API that identifies the active unit; the current libretro LED is aggregate.
 - Add safe writable TAP recording, explicit write-back and export before exposing the datasette RECORD control.
@@ -87,14 +81,11 @@ Add historical expansion hardware incrementally, preferring devices already emul
 4. **GeoRAM**
    - Add GeoRAM as a first-class alternative memory expansion, including supported capacity selection and persistent image import/export where available.
    - Keep REU and GeoRAM configuration mutually clear in profiles so software-specific requirements are easy to reproduce.
-5. **KoalaPad / Apple Pencil**
-   - Expose VICE KoalaPad emulation using iPad touch and Apple Pencil as the primary modern input surface.
-   - Map position/buttons deliberately, validate coordinate scaling/latency and test period graphics software.
-6. **SwiftLink / Turbo232**
+5. **SwiftLink / Turbo232**
    - Expose ACIA-based SwiftLink/Turbo232 emulation as an advanced networking device.
    - Bridge the emulated serial device to an iPadOS-safe TCP transport for terminal software and BBS access, reusing the Virtual Hayes networking foundation where practical.
    - Keep connection state, baud configuration and disconnect behavior explicit.
-7. **CMD SuperCPU 64**
+6. **CMD SuperCPU 64**
    - Investigate a dedicated `xscpu64` libretro/direct-VICE backend rather than treating SuperCPU as a normal x64sc peripheral option.
    - Evaluate 65C816 execution, 20 MHz timing, SuperRAM/SIMM configuration, firmware requirements, save-state implications and software compatibility.
    - Validate interaction with other CMD devices, especially RAMLink, only after the standalone SuperCPU path is stable.
@@ -110,9 +101,7 @@ After the ordered items above, evaluate additional historically relevant hardwar
 
 ## 6. Graphics and audio
 
-- Add Metal CRT shaders and presets based on compatible openly licensed shader projects.
-- Add scanlines, shadow mask, curvature, bloom, vignette and phosphor-persistence controls.
-- Add reusable performance/quality presets for iPad hardware classes.
+- Refine the completed Metal CRT pipeline with any remaining display effects that prove useful (for example optional vignette/phosphor persistence) and add performance/quality presets where real-device testing justifies them.
 - Add SID filter controls and finer stereo/mixing controls beyond the completed core-supported second-SID address selection.
 - Add external-display mode for connected monitors/TVs: move the C64 video output to the external screen at full screen while keeping the iPad as the control surface for the keyboard, datasette, Devices and other emulator controls.
 - Add an explicit move/return display action, preserve the running emulation while switching screens, and handle external-display connection/disconnection gracefully.
@@ -127,6 +116,7 @@ After the ordered items above, evaluate additional historically relevant hardwar
 
 ## 8. Networking and BBS
 
+- Add a selectable networking interface so compatible software can use either the existing User Port Virtual Hayes modem or a future SwiftLink/Turbo232 ACIA path, sharing the TCP/Telnet and BBS-directory backend where practical.
 - Validate the Virtual Hayes modem against additional C64 terminal software and BBS implementations, including the CCGMS 2021/RetroCampus display-corruption case.
 - Implement stricter Hayes compatibility where useful, including real `+++` guard times and functional hardware-flow-control command semantics.
 - Investigate RR-Net/Ethernet emulation with an iPadOS-compatible user-space backend rather than relying on raw TAP/pcap access.
@@ -218,14 +208,13 @@ Future/experimental work, intentionally scheduled after the first App Store rele
 ## Development order
 
 ```text
-lifecycle hardening + modem/printer resume validation
-→ Library per-title save states and per-title Emulation Profile overrides
-→ Control Ports redesign + always-visible Swap + virtual Paddles/KoalaPad framework
-→ advanced CRT graphics, SID options and external-display support
+lifecycle/regression hardening while TestFlight feedback continues
+→ Library per-title save states
+→ external-display mode + remaining CRT/SID refinements
 → HardwareConfiguration/conflict resolver + Hardware Map v1
-→ historical expansion phase: CMD FD-2000/4000 → CMD HD → RAMLink → GeoRAM → KoalaPad/Pencil → SwiftLink/Turbo232 → SuperCPU
+→ historical expansion phase: CMD FD-2000/4000 → CMD HD → RAMLink → GeoRAM → SwiftLink/Turbo232 → SuperCPU
 → complete hardware profiles + profile import/export as the expansion model stabilizes
-→ printer validation and broader compatibility testing
+→ printer/networking validation and broader compatibility testing
 → release engineering / App Store preparation and first iPad release
 → post-App-Store platform work and other experimental features
 ```

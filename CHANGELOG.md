@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+> The public source snapshot may trail the private TestFlight beta while changes are stabilized.
+
+## 0.8.3 — TestFlight build 6 — 2026-08-24
+
+Private TestFlight beta highlights:
+
+- Redesigned Input & Controls and Control Ports workflows, including simultaneous joystick + keyboard input, configurable keyboard joystick mappings, Overlay/Docked controls and Quick Keys.
+- Added per-title Emulation Profile assignment and selective input overrides in the Library.
+- Added virtual Paddles and KoalaPad support, including Apple Pencil input and live KoalaPad sensitivity selection.
+- Added Metal CRT rendering controls and reusable presets.
+- Expanded G64/raw-GCR handling with extended-track recognition, a Disk Structure inspector and a conservative Safe Start path for protected G64 media.
+- Added diagnostics/support logging and additional Library/media workflow refinements.
+
+Not every TestFlight implementation commit is necessarily present in the public source snapshot yet.
+
+
 ## 0.8.1 — 2026-08-09
 
 - Kept the Devices toolbar button at a stable compact width when Drives 10/11 are enabled, summarizing mounted disks/tape/cartridge without pushing later toolbar actions off screen; removed the static Technology section from About.

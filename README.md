@@ -6,21 +6,25 @@ POKE64 is an experimental, native **Commodore 64 emulator for iPad**. It uses Sw
 
 POKE64 is an independent open-source project. It is not affiliated with Commodore, VICE, RetroArch, libretro or MEGA65.
 
-## Current features
+> **Current TestFlight beta: 0.8.3 (build 6).** The TestFlight development line includes newer input/peripheral, per-title configuration, CRT and G64 inspection work described below. The public source snapshot may trail the private TestFlight beta while changes are stabilized and prepared for public release.
+
+## Current product features
 
 - Native iPadOS interface with a real C64 Power control, full-screen Library and Settings, and guided first-run firmware setup.
 - VICE `x64sc` emulation for C64/C64C PAL and NTSC systems, with configurable VIC-II video and SID audio, including optional dual-SID addresses supported by the pinned core.
-- C64 keyboard, virtual joystick, physical game controllers and Commodore 1351 mouse support from touch, trackpad or external mouse.
-- Persistent Library for D64, D71, D81, G64, PRG, CRT, TAP and T64 media, including artwork, screenshots, disk inspection and automatic multi-disk sets.
+- C64 keyboard, multi-touch virtual joystick/Fire, physical game controllers and Commodore 1351 mouse support from touch, trackpad or external mouse, with configurable keyboard-to-joystick input, Docked/Overlay touch layouts and Quick Keys.
+- Control Port devices include Joystick, Paddles and KoalaPad; the KoalaPad surface supports touch and Apple Pencil input with live sensitivity control.
+- Persistent Library for D64, D71, D81, G64, PRG, CRT, TAP and T64 media, including artwork, screenshots, disk inspection and automatic multi-disk sets. G64 media can expose raw-GCR/extended-track metadata and a dedicated Disk Structure inspector in the current TestFlight line.
 - Drive 8 and optional Drives 9, 10 and 11 with 1541/1541-II/1571/1581 models, an explicit Fast Virtual (VICE traps) or True Drive backend, optional True Drive load acceleration, plus datasette and cartridge controls; CRT cartridge auto-detection inherits VICE support including Prophet64 images.
 - Commodore REU support from 128 KB to 16 MB, including persistent memory and external `.reu` images.
 - User-managed Commodore and compatible firmware, one-step MEGA65 OpenROMs installation, and shared Firmware Profiles.
-- Emulation Profiles for complete machine configurations, including a permanent editable `Default` profile and optional Power-on Profile behavior.
+- Emulation Profiles for complete machine configurations, including a permanent editable `Default` profile, optional Power-on Profile behavior, per-title Library assignment and selective per-title input overrides in the current TestFlight line.
 - Automatic **Previous Session** restore so the running C64 and its mounted media can survive normal app backgrounding and process termination.
+- Metal CRT rendering with configurable scanlines, mask styles, curvature, bloom and reusable presets in the current TestFlight line.
 - IEC virtual printer with MPS-803 rendering, paper preview and PDF/PNG/RAW output.
 - Virtual Hayes modem over the C64 User Port with raw TCP/Telnet connections, BBS directory, native dialing and traffic monitoring.
 
-Writable TAP recording, Library save states, manual multi-disk grouping, additional printer models and RR-Net/Ethernet emulation remain pending.
+Library save states, writable TAP recording, manual multi-disk grouping, additional printer models, external-display mode and additional network interfaces such as SwiftLink/Turbo232 remain pending.
 
 ## Firmware policy
 
